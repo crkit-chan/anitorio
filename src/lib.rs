@@ -10,6 +10,7 @@ mod models;
 mod progress;
 mod streaming_writer;
 mod util;
+mod wasm_buffer;
 
 #[wasm_bindgen]
 pub fn init() {
@@ -28,7 +29,6 @@ pub fn init() {
 /// A Factorio blueprint string on success.
 #[wasm_bindgen]
 pub async fn run_blueprint(
-    image_data: &[u8], // note: may be empty
     args: JsValue,
     callbacks: JsValue,
     // on_chunk: &js_sys::Function<fn(js_sys::Uint8Array) -> js_sys::Promise>,
@@ -52,6 +52,8 @@ pub async fn run_blueprint(
 
     const SYNC_TIME_MS: f64 = 1000.0;
 
+    let get_data = callbacks.reflect_get::<JsFn<fn(JsValue) -> js::Promise>>("getData")?;
+    let get_data_len = callbacks.reflect_get::<JsFn<fn() -> js::Number>>("getDataLength")?;
     let get_next_frame = callbacks.reflect_get::<JsFn<JsVideoFrameCallback>>("getFrameData")?;
     let on_chunk = callbacks.reflect_get::<JsFn<fn(js::Uint8Array) -> js::Promise>>("onChunk")?;
     let on_frame = callbacks.reflect_get::<JsFn<fn(JsValue) -> js::Undefined>>("onFrame")?;
@@ -62,6 +64,9 @@ pub async fn run_blueprint(
     let on_frame = Rc::new(on_frame);
     let should_show_preview = Rc::new(should_show_preview);
     let yield_to_js = Rc::new(yield_to_js);
+
+    let image_data_len = get_data_len.call_sync(())?.as_f64().unwrap() as usize;
+    let image_data = vec![0u8; image_data_len];
 
     let mut args: BlueprintArgs = from_js_value(args)?;
     let mut frame_data: Option<FrameData> = None;
@@ -81,14 +86,14 @@ pub async fn run_blueprint(
             let next_yield_time = Rc::clone(&next_yield_time);
 
             Box::pin(async move {
-                let show_preview = should_show_preview.call0(&JsValue::NULL)?;
+                let show_preview = should_show_preview.call_sync(())?;
                 let show_preview = show_preview.as_bool() == Some(true);
                 let now = now_ms();
 
                 // yield to js so preview can be updated
                 if show_preview || (now > next_yield_time.get()) {
                     next_yield_time.set(now + SYNC_TIME_MS);
-                    JsFuture::from(yield_to_js.call0(&JsValue::NULL)?).await?;
+                    yield_to_js.call_async(())?.await?;
                 }
                 if !show_preview {
                     return Ok(());
@@ -104,7 +109,7 @@ pub async fn run_blueprint(
                 args_obj.reflect_set("outBuffer", wasm_shared_memory(rgba)?)?;
                 args_obj.reflect_set("dimensions", to_js_value(&img.dimensions())?)?;
 
-                on_frame.call(&JsValue::NULL, (&args_obj.into(),))?;
+                on_frame.call_sync((&args_obj.into(),))?;
 
                 Ok(())
             })
@@ -114,9 +119,12 @@ pub async fn run_blueprint(
             .starts_with("video/")
             .then(|| get_next_frame.clone());
 
+        let mem = wasm_shared_memory(&image_data[..])?;
+        get_data.call_async((&mem.into(),))?.await?;
+
         // Create iterator over frames.
         frame_data = Some(FrameData::new(
-            image_data,
+            &image_data[..],
             &args,
             Some(on_frame),
             js_next_frame,
@@ -126,7 +134,7 @@ pub async fn run_blueprint(
     // Custom writer that invokes a callback whenever chunk size is reached.
     let writer = StreamingWriter::new(1024 * 1024, |chunk| {
         let data = js::Uint8Array::from(chunk.as_slice());
-        (promise_q.borrow_mut().back_mut().unwrap()).push(on_chunk.call(&JsValue::NULL, (&data,))?);
+        (promise_q.borrow_mut().back_mut().unwrap()).push(on_chunk.call_sync((&data,))?);
         Ok(())
     });
 
@@ -194,4 +202,9 @@ pub async fn encode_gif(args: JsValue, callbacks: JsValue) -> Result<(), JsValue
     encode_gif(get_next_frame, on_chunk, &args).await?;
 
     Ok(())
+}
+
+#[wasm_bindgen]
+pub fn wasm_memory() -> JsValue {
+    wasm_bindgen::memory()
 }

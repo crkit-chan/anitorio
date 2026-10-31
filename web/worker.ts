@@ -1,17 +1,11 @@
 import type { InputVideoTrack, VideoSample, VideoSampleSink } from "mediabunny";
-import init, {
-  encode_gif,
-  init as prepare_wasm,
-  run_blueprint,
-  set_comb_pos_data,
-  set_progress_callback,
-  set_signal_data,
-} from "../pkg/anitorio_wasm.js";
+import type { InitOutput } from "../pkg/anitorio_wasm.js";
 import type { WasmSharedMemory } from "./types";
 import { BASE_URL, nullify } from "./utils";
 
 const FILE_PREFIX_MAP = { blueprint: "txt", json: "json", rawCompressed: "zlib" } as const;
 let hasHevcDecoder = false;
+let wasm: InitOutput | null = null;
 
 export async function getVideoData(source: Blob) {
   async function getData() {
@@ -48,9 +42,14 @@ export async function getVideoData(source: Blob) {
 async function main() {
   const wasmReadyPromises = {
     init: (async () => {
-      await init();
+      const { default: init, init: prepare_wasm, set_progress_callback } = await import("../pkg/anitorio_wasm.js");
+      wasm = await init();
       prepare_wasm();
       set_progress_callback((percentage: number, status: string) => postMessage({ progress: { percentage, status } }));
+
+      setInterval(() => {
+        postMessage({ wasmMemoryUsage: { bytes: wasm?.memory.buffer.byteLength ?? 0 } });
+      }, 100);
     })(),
     setCombPosData: null as Promise<void> | null,
     setSignalData: Promise.resolve(),
@@ -90,19 +89,18 @@ async function main() {
     } else if (evt.data.canvas) {
       const { canvas } = evt.data.canvas;
       state.canvas = canvas;
-      state.ctx = state.canvas!.getContext("2d", {
-        colorSpace: "srgb",
-        willReadFrequently: true,
-      })!;
+      state.ctx = state.canvas!.getContext("2d", { colorSpace: "srgb", willReadFrequently: true })!;
       // state.ctx!.imageSmoothingEnabled = false;
     } else if (evt.data.showPreview) {
       const { showPreview } = evt.data.showPreview;
       state.shouldShowPreview = showPreview;
     } else if (evt.data.generate) {
+      const { run_blueprint, set_comb_pos_data } = await import("../pkg/anitorio_wasm.js");
+
       const { imageData }: { imageData: File | Uint8Array<ArrayBuffer> | ImageData } = evt.data.generate;
       const { args: blueprintArgs } = evt.data.generate;
       const { outputFormat, targetFps } = blueprintArgs;
-      const isVideo = blueprintArgs.imageMetadata.mimeType.startsWith("video/");
+      const useJsDecodedVideo = blueprintArgs.imageMetadata.mimeType.startsWith("video/");
 
       let videoDuration: number | null = null;
 
@@ -110,10 +108,10 @@ async function main() {
       let videoSamples: ReturnType<VideoSampleSink["samples"]> | null = null;
       let videoTrack: InputVideoTrack | null = null;
 
-      if (isVideo) {
+      if (useJsDecodedVideo) {
         const { VideoSampleSink } = await import("mediabunny");
 
-        ({ videoTrack } = await getVideoData(new Blob([imageData as File | Uint8Array<ArrayBuffer>])));
+        ({ videoTrack } = await getVideoData(new Blob([imageData as File])));
 
         videoDuration = await videoTrack.computeDuration();
         videoSink = new VideoSampleSink(videoTrack, { hardwareAcceleration: "prefer-hardware" });
@@ -136,9 +134,7 @@ async function main() {
       function prefetchVideoSamples() {
         while (videoSamples && !videoEnded && videoSampleQueue.length < (videoLookahead ?? 1)) {
           const pending = videoSampleTail.then(async () => {
-            if (videoEnded) {
-              return { done: true, value: undefined } as Awaited<VideoSampleNext>;
-            }
+            if (videoEnded) return { done: true, value: undefined } as Awaited<VideoSampleNext>;
 
             const result = await videoSamples!.next();
             if (result.done) {
@@ -151,11 +147,10 @@ async function main() {
             return result;
           });
 
-          // Keep calls to the iterator sequential, even if a request rejects.
           videoSampleTail = pending.then(
             () => {},
             () => {},
-          );
+          ); // Keep calls to the iterator sequential, even if a request rejects.
 
           videoSampleQueue.push(pending);
         }
@@ -183,7 +178,7 @@ async function main() {
       await wasmReadyPromises.setCombPosData;
       await wasmReadyPromises.setSignalData;
 
-      if (isVideo) {
+      if (useJsDecodedVideo) {
         prefetchVideoSamples();
       }
 
@@ -198,12 +193,36 @@ async function main() {
         await writerReady;
 
         const inputData =
-          imageData instanceof File
+          imageData instanceof File && !useJsDecodedVideo
             ? new Uint8Array(await imageData.arrayBuffer())
             : imageData instanceof ImageData
               ? new Uint8Array(imageData.data.buffer, imageData.data.byteOffset, imageData.data.byteLength)
               : new Uint8Array();
-        const blueprintMetadata = await run_blueprint(inputData, blueprintArgs, {
+
+        const blueprintMetadata = await run_blueprint(blueprintArgs, {
+          getDataLength: () => inputData.byteLength,
+          async getData(inBuffer: WasmSharedMemory) {
+            if (useJsDecodedVideo) return;
+            if (imageData instanceof File) {
+              const reader = imageData.stream().getReader();
+
+              let offset = 0;
+
+              try {
+                while (true) {
+                  const { done, value } = await reader.read();
+                  if (done) break;
+
+                  new Uint8Array(inBuffer.memory.buffer, inBuffer.ptr + offset, value.length).set(value);
+                  offset += value.length;
+                }
+
+                if (offset !== imageData.size) throw new Error("Incomplete file read");
+              } finally {
+                reader.releaseLock();
+              }
+            }
+          },
           onChunk(data: Uint8Array) {
             return new Promise<void>((resolve, reject) => {
               try {
@@ -222,10 +241,7 @@ async function main() {
               const [width, height] = dimensions;
 
               if (!canvas || !ctx) return;
-              if (canvas.width !== width || canvas.height !== height) {
-                canvas.width = width;
-                canvas.height = height;
-              }
+              if (canvas.width !== width || canvas.height !== height) Object.assign(canvas, { width, height });
 
               const data = new Uint8ClampedArray(outBuffer.memory.buffer, outBuffer.ptr, outBuffer.len);
               ctx.putImageData(new ImageData(data, width, height), 0, 0);
@@ -234,51 +250,49 @@ async function main() {
             }
           },
           async getFrameData({ inBuffer, dimensions }: { inBuffer: WasmSharedMemory; dimensions: [number, number] }) {
-            const frameInterval = 1 / targetFps;
+            try {
+              const frameInterval = 1 / targetFps;
 
-            // Stop only when the output timeline reaches the video duration.
-            if (nextOutputTime >= videoDuration!) {
-              currVideoSample?.close();
-              currVideoSample = null;
-              return { isFinished: true };
-            }
-
-            // Advance to the source frame covering this output timestamp.
-            while (!currVideoSample || nextOutputTime >= currVideoSample.timestamp + currVideoSample.duration) {
-              currVideoSample?.close();
-              currVideoSample = null;
-
-              const result = await getNextVideoSample();
-              if (result.done) {
-                return { isFinished: true }; // No new source frames. Keep the last frame if it covers this time.
+              // Stop only when the output timeline reaches the video duration.
+              if (nextOutputTime >= videoDuration!) {
+                currVideoSample?.close();
+                currVideoSample = null;
+                return { isFinished: true };
               }
-              currVideoSample = result.value!;
+
+              // Advance to the source frame covering this output timestamp.
+              while (!currVideoSample || nextOutputTime >= currVideoSample.timestamp + currVideoSample.duration) {
+                currVideoSample?.close();
+                currVideoSample = null;
+
+                const result = await getNextVideoSample();
+                if (result.done) return { isFinished: true }; // No new source frames. Keep the last frame if it covers this time.
+
+                currVideoSample = result.value!;
+              }
+
+              const sample = currVideoSample;
+              const [width, height] = dimensions;
+              const { canvas, ctx } = state;
+              if (!canvas || !ctx) throw new Error("Canvas is not initialized");
+              if (canvas.width !== width || canvas.height !== height) Object.assign(canvas, { width, height });
+
+              sample.draw(ctx, 0, 0, width, height);
+
+              const pixels = ctx.getImageData(0, 0, width, height).data;
+              const dest = new Uint8Array(inBuffer.memory.buffer, inBuffer.ptr, inBuffer.len);
+              if (pixels.byteLength > dest.byteLength) throw new Error("Video frame exceeds WASM buffer capacity");
+
+              dest.set(pixels);
+
+              const timestamp = nextOutputTime;
+              nextOutputTime += frameInterval;
+
+              return { isFinished: false, duration: 1 / targetFps, timestamp };
+            } catch (e) {
+              console.error(e);
+              throw e;
             }
-
-            const sample = currVideoSample;
-            const [width, height] = dimensions;
-            const { canvas, ctx } = state;
-            if (!canvas || !ctx) throw new Error("Canvas is not initialized");
-            if (canvas.width !== width || canvas.height !== height) {
-              canvas.width = width;
-              canvas.height = height;
-            }
-
-            sample.draw(ctx, 0, 0, width, height);
-            const pixels = ctx.getImageData(0, 0, width, height).data;
-            const dest = new Uint8Array(inBuffer.memory.buffer, inBuffer.ptr, inBuffer.len);
-            if (pixels.byteLength > dest.byteLength) throw new Error("Video frame exceeds WASM buffer capacity");
-
-            dest.set(pixels);
-
-            const timestamp = nextOutputTime;
-            nextOutputTime += frameInterval;
-
-            return {
-              isFinished: false,
-              duration: 1 / targetFps,
-              timestamp,
-            };
           },
           shouldShowPreview() {
             try {
@@ -288,12 +302,7 @@ async function main() {
               console.error(e);
             }
           },
-          yieldToJs() {
-            return new Promise<void>((resolve: () => void) => {
-              syncQ.push(resolve);
-              syncChannel.port2.postMessage(null);
-            });
-          },
+          yieldToJs: () => new Promise<void>((resolve) => (syncQ.push(resolve), syncChannel.port2.postMessage(null))),
         });
         postMessage({ blueprintMetadata });
         postMessage({ writerArgs: { type: "done" } });
@@ -301,6 +310,7 @@ async function main() {
         postMessage({ error: e?.toString() ?? String(e) });
       }
     } else if (evt.data.signalPresetRaw) {
+      const { set_signal_data } = await import("../pkg/anitorio_wasm.js");
       const preset: Uint8Array = evt.data.signalPresetRaw;
       wasmReadyPromises.setSignalData = set_signal_data(preset);
     } else if (evt.data.type === "writerReady") {
@@ -308,6 +318,7 @@ async function main() {
       writerReadyResolve = null;
     } else if (evt.data.encodeToGif) {
       const { ALL_FORMATS, BlobSource, Input, VideoSampleSink } = await import("mediabunny");
+      const { encode_gif, WasmBuffer, wasm_memory } = await import("../pkg/anitorio_wasm.js");
 
       const { imageData } = evt.data.encodeToGif;
       const videoInput = new Input({ source: new BlobSource(new Blob([imageData])), formats: ALL_FORMATS });
@@ -320,10 +331,7 @@ async function main() {
       const videoSink = new VideoSampleSink(videoTrack);
       const videoSamples = videoSink.samples();
 
-      const args = {
-        dim: [width, height],
-        speed: 10,
-      };
+      const args = { dim: [width, height], speed: 10 };
 
       postMessage({ writerArgs: { type: "start", filename: `image.gif` } });
 
@@ -377,8 +385,9 @@ async function main() {
         },
       });
       postMessage({ writerArgs: { type: "done" } });
+    } else if (evt.data.wasmMemoryUsage) {
     } else {
-      throw new Error("Worker: Unhandled message", evt.data);
+      console.error("Worker: Unhandled message", evt.data);
     }
   });
 }

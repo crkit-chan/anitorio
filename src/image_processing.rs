@@ -2,7 +2,9 @@ use crate::constants::DEFAULT_FRAME_DELAY;
 use crate::image_utils::{AnimationInfo, animation_info, resize_dimensions};
 use crate::models::{ImageRotation::*, *};
 use crate::progress::set_progress;
-use crate::util::{JsReflectGetSet, ResultJsExt, format_duration, now_ms, wasm_shared_memory};
+use crate::util::{
+    JsCall, JsReflectGetSet, ResultJsExt, format_duration, now_ms, wasm_shared_memory,
+};
 use glam::{DVec2, UVec2, uvec2};
 use image::{AnimationDecoder, ImageDecoder, imageops};
 use js_sys::{self as js, Function as JsFn};
@@ -377,8 +379,7 @@ impl<'a> FrameDecoder<'a> {
                 let args_obj = js::Object::new();
                 args_obj.reflect_set("inBuffer", wasm_shared_memory(&self.in_buf[..])?)?;
                 args_obj.reflect_set("dimensions", serde_wasm_bindgen::to_value(&self.dim)?)?;
-                let promise = get_next_frame.call(&JsValue::NULL, (&args_obj.into(),))?;
-                let result = JsFuture::from(promise).await?;
+                let result = get_next_frame.call_async((&args_obj.into(),))?.await?;
                 let info: JsVideoFrameData = serde_wasm_bindgen::from_value(result)?;
 
                 if info.is_finished {
@@ -417,8 +418,7 @@ pub async fn encode_gif(
     // Custom writer that invokes a callback whenever chunk size is reached.
     let mut writer = StreamingWriter::new(1024 * 1024, |chunk| {
         let data = js::Uint8Array::from(&chunk[..]);
-        let promise = on_chunk.call(&JsValue::NULL, (&data,))?;
-        promise_q.borrow_mut().push(promise);
+        promise_q.borrow_mut().push(on_chunk.call_sync((&data,))?);
         Ok(())
     });
     let mut encoder = GifEncoder::new_with_speed(&mut writer, args.speed as i32);
@@ -437,8 +437,7 @@ pub async fn encode_gif(
         let info: JsVideoFrameData = serde_wasm_bindgen::from_value({
             let js_args = js::Object::new();
             js_args.reflect_set("inBuffer", wasm_shared_memory(&in_buf[..])?)?;
-            let promise = get_next_frame.call(&JsValue::NULL, (&js_args.into(),))?;
-            JsFuture::from(promise).await?
+            get_next_frame.call_async((&js_args.into(),))?.await?
         })?;
         if info.is_finished {
             break;

@@ -45,6 +45,7 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
   const [timingSignals, setTimingSignals] = createSignal<TimingSignals | null>(null);
   const [showStreamingWindowWarning, setShowStreamingWindowWarning] = createSignal(false);
   const [downloadUrl, setDownloadUrl] = createSignal<string | null>(null);
+  const [wasmMemoryUsage, setWasmMemoryUsage] = createSignal(0);
 
   let refBackground!: BackgroundApi;
   let refDialogLargeFile!: FactorioDialogDeleteApi;
@@ -75,11 +76,14 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
   } = {} as any;
 
   // Worker message handler
-  worker.onmessage = async ({ data }) => {
+  worker.addEventListener("message", async ({ data }) => {
     if (data.progress) {
       const { percentage, status } = data.progress;
       formRefs.progressBar.style.setProperty("--progress", `${percentage}%`);
       formRefs.progressStatus.textContent = `(${percentage.toFixed(0)}%)  ${status}`;
+    } else if (data.wasmMemoryUsage) {
+      const { bytes } = data.wasmMemoryUsage;
+      setWasmMemoryUsage(bytes);
     } else if (data.shouldShowPreview) {
       const { showPreview } = data.shouldShowPreview;
       setWorkerShouldShowPreview(showPreview);
@@ -97,7 +101,7 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
       setIsGenerating(false);
       formRefs.submitButton.disabled = false;
     }
-  };
+  });
 
   function showToast(...args: Parameters<FactorioToastsApi["showToast"]>) {
     refToasts.showToast(...args);
@@ -417,6 +421,7 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
   createEffect(() => localStorage.setItem(SHOW_ADVANCED_KEY, showAdvanced().toString()));
   createEffect(() => signalPresetRaw() && worker.postMessage({ signalPresetRaw: signalPresetRaw()! }));
   createEffect(() => worker.postMessage({ showPreview: { showPreview: showPreview() } }));
+
   createEffect(() => {
     if (isGenerating()) {
       if (currFile()!.size > 1024 * 1024 * 10) {
@@ -915,10 +920,16 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
             </svg>
             <span class="align-middle">Support</span>
           </a>
+
+          <div class="fixed bottom-0 left-0 text-tan-500 m-1 text-xs opacity-20">
+            Build #{__BUILD_NUMBER__} ({__BUILD_COMMIT__})
+          </div>
+          <Show when={wasmMemoryUsage()} keyed>
+            <div class="z-50000 fixed bottom-0 right-0 text-tan-500 m-1 text-xs opacity-40">
+              WASM memory: {formatFileSize(wasmMemoryUsage())}
+            </div>
+          </Show>
         </footer>
-      </div>
-      <div class="fixed bottom-0 left-0 text-tan-500 m-1 text-xs opacity-20">
-        Build #{__BUILD_NUMBER__} ({__BUILD_COMMIT__})
       </div>
     </>
   );
