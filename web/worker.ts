@@ -40,20 +40,43 @@ export async function getVideoData(source: Blob) {
 }
 
 async function main() {
+  let prevMemoryUsage = 0;
   const wasmReadyPromises = {
     init: (async () => {
+      // @ts-ignore
+      if (!__BUILD_COMMIT__) await import("wasm-tracing-allocator/js/hooks.js");
+
       const { default: init, init: prepare_wasm, set_progress_callback } = await import("../pkg/anitorio_wasm.js");
       wasm = await init();
       prepare_wasm();
       set_progress_callback((percentage: number, status: string) => postMessage({ progress: { percentage, status } }));
 
       setInterval(() => {
+        const bytes = wasm?.memory.buffer.byteLength ?? 0;
+        if (bytes === prevMemoryUsage) return;
+
+        prevMemoryUsage = bytes;
         postMessage({ wasmMemoryUsage: { bytes: wasm?.memory.buffer.byteLength ?? 0 } });
-      }, 100);
+        logWasmAllocationInfo();
+      }, 10);
     })(),
     setCombPosData: null as Promise<void> | null,
-    setSignalData: Promise.resolve(),
   };
+
+  function logWasmAllocationInfo() {
+    if (__BUILD_COMMIT__) return;
+
+    (self as any).WasmTracingAllocator.dumpLiveAllocations({
+      keyLabel: "Allocation function",
+      valueLabel: "Memory (MiB)",
+      // getKey(allocation: { stack: string }) {
+      //   const frame = allocation.stack.split("\n").find((line) => line.includes("anitorio_wasm.wasm."));
+      //   const first = frame?.split("@")[0];
+      //   return first?.replace("anitorio_wasm.wasm.", "").replace(/\[[a-f0-9]{16}\]/g, "") ?? "Unknown";
+      // },
+      getValue: (allocation: { size: number }) => allocation.size / 1024 / 1024,
+    });
+  }
 
   // For preview of the rendered GIF
   let writerReadyResolve: (() => void) | null = null;
@@ -76,9 +99,15 @@ async function main() {
 
   syncChannel.port1.onmessage = () => syncQ.shift()?.();
 
+  if (!__BUILD_COMMIT__) {
+    setInterval(() => logWasmAllocationInfo(), 5000);
+  }
+
   // Immediately add event listeners
   addEventListener("message", async (evt) => {
     await wasmReadyPromises.init;
+
+    const { encode_gif, run_blueprint, set_comb_pos_data, set_signal_data } = await import("../pkg/anitorio_wasm.js");
 
     if (evt.data.type === "chunkWritten") {
       const pending = pendingWrites.get(evt.data.id);
@@ -95,8 +124,6 @@ async function main() {
       const { showPreview } = evt.data.showPreview;
       state.shouldShowPreview = showPreview;
     } else if (evt.data.generate) {
-      const { run_blueprint, set_comb_pos_data } = await import("../pkg/anitorio_wasm.js");
-
       const { imageData }: { imageData: File | Uint8Array<ArrayBuffer> | ImageData } = evt.data.generate;
       const { args: blueprintArgs } = evt.data.generate;
       const { outputFormat, targetFps } = blueprintArgs;
@@ -171,12 +198,11 @@ async function main() {
       if (wasmReadyPromises.setCombPosData === null) {
         wasmReadyPromises.setCombPosData = (async () => {
           const data = await fetch(`${BASE_URL}assets/data/combinator-positions.json`).then((v) => v.arrayBuffer());
-          await set_comb_pos_data(new Uint8Array(data));
+          set_comb_pos_data(new Uint8Array(data));
         })();
       }
 
       await wasmReadyPromises.setCombPosData;
-      await wasmReadyPromises.setSignalData;
 
       if (useJsDecodedVideo) {
         prefetchVideoSamples();
@@ -310,15 +336,12 @@ async function main() {
         postMessage({ error: e?.toString() ?? String(e) });
       }
     } else if (evt.data.signalPresetRaw) {
-      const { set_signal_data } = await import("../pkg/anitorio_wasm.js");
-      const preset: Uint8Array = evt.data.signalPresetRaw;
-      wasmReadyPromises.setSignalData = set_signal_data(preset);
+      set_signal_data(evt.data.signalPresetRaw);
     } else if (evt.data.type === "writerReady") {
       writerReadyResolve?.();
       writerReadyResolve = null;
     } else if (evt.data.encodeToGif) {
       const { ALL_FORMATS, BlobSource, Input, VideoSampleSink } = await import("mediabunny");
-      const { encode_gif, WasmBuffer, wasm_memory } = await import("../pkg/anitorio_wasm.js");
 
       const { imageData } = evt.data.encodeToGif;
       const videoInput = new Input({ source: new BlobSource(new Blob([imageData])), formats: ALL_FORMATS });

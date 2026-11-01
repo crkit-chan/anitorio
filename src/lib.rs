@@ -1,3 +1,5 @@
+use std::io::BufWriter;
+
 use serde_wasm_bindgen::{from_value as from_js_value, to_value as to_js_value};
 use wasm_bindgen::prelude::*;
 
@@ -12,8 +14,14 @@ mod streaming_writer;
 mod util;
 mod wasm_buffer;
 
+#[cfg(feature = "profiling")]
+#[global_allocator]
+static GLOBAL_ALLOCATOR: wasm_tracing_allocator::WasmTracingAllocator<std::alloc::System> =
+    wasm_tracing_allocator::WasmTracingAllocator(std::alloc::System);
+
 #[wasm_bindgen]
 pub fn init() {
+    #[cfg(feature = "profiling")]
     console_error_panic_hook::set_once();
 }
 
@@ -178,13 +186,13 @@ pub async fn run_blueprint(
 /// # Returns
 /// Nothing.
 #[wasm_bindgen]
-pub async fn set_signal_data(data_json: &[u8]) -> Result<(), JsValue> {
+pub fn set_signal_data(data_json: &[u8]) -> Result<(), JsValue> {
     blueprint::data::load_data(data_json);
     Ok(())
 }
 
 #[wasm_bindgen]
-pub async fn set_comb_pos_data(data_json: &[u8]) -> Result<(), JsValue> {
+pub fn set_comb_pos_data(data_json: &[u8]) -> Result<(), JsValue> {
     blueprint::combinator::load_comb_pos_json(data_json)?;
     Ok(())
 }

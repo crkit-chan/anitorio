@@ -248,7 +248,7 @@ impl<'a> BlueprintGenerator<'a> {
     }
 
     /// Generates the next chunk of the blueprint and writes it to the given writer.
-    pub async fn next_chunk(&mut self, writer: &mut impl io::Write) -> Result<bool, JsValue> {
+    pub async fn next_chunk(&mut self, writer: &mut impl io::Write) -> Result<(), JsValue> {
         let old_state = self.state.clone();
         match old_state {
             BlueprintState::Start => {
@@ -295,7 +295,7 @@ impl<'a> BlueprintGenerator<'a> {
                 }
             }
             BlueprintState::Wires => self.make_wires(writer).await?,
-            BlueprintState::Finished => return Ok(false),
+            BlueprintState::Finished => panic!("Already processed all chunks"),
         }
 
         // Properly delimit the JSON stream before the next chunks
@@ -343,7 +343,7 @@ impl<'a> BlueprintGenerator<'a> {
                 _ => {}
             }
         }
-        Ok(true)
+        Ok(())
     }
 
     /// Gets the description to attach to the blueprint.
@@ -393,7 +393,7 @@ impl<'a> BlueprintGenerator<'a> {
             ]);
         }
 
-        let footer = "Generated using GIFtorio.";
+        let footer = "Generated using Anitorio.";
         output.push(format!("\n\n[font=default-small-semibold]{footer}[/font]"));
 
         output.join("")

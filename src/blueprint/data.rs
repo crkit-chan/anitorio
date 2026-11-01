@@ -41,7 +41,7 @@ pub fn load_data(data_json: &[u8]) {
     let mut sig_types: Vec<Arc<str>> = Vec::new(); // Allow "type" field to reference the same strings
     let qualities: Vec<Option<Arc<str>>> = {
         let quals = (data.qualities.iter())
-            .map(|q| Some(Arc::clone(q)))
+            .map(|v| Some(Arc::clone(v)))
             .collect::<Vec<_>>();
         if quals.is_empty() { vec![None] } else { quals }
     };

@@ -14,7 +14,7 @@ import { FormElementValue } from "@/types";
 import { formatDuration, formatFileSize, kebabCaseToSentenceCase, useErrM, useLocalStorageJSON } from "@/utils";
 import { createEffect, createMemo, createSignal, For, onMount, Show } from "solid-js";
 import { createStore } from "solid-js/store";
-import { Portal } from "solid-js/web";
+import ResetAllDataButton from "./components/ResetAllDataButton";
 import { getVideoData } from "./worker";
 
 export interface AppApi {
@@ -49,7 +49,6 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
 
   let refBackground!: BackgroundApi;
   let refDialogLargeFile!: FactorioDialogDeleteApi;
-  let refDialogReset!: FactorioDialogDeleteApi;
   let refFormContainer!: HTMLDivElement;
   let refToasts!: FactorioToastsApi;
   let refVideo!: HTMLVideoElement;
@@ -96,6 +95,23 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
       formRefs.blueprintResult.classList.remove("hidden");
       formRefs.responseText.innerHTML = "Blueprint downloaded!";
       formRefs.submitButton.disabled = false;
+    } else if (data.wasmProfile) {
+      const { profile } = data.wasmProfile;
+      const blob = new Blob([profile]);
+      function downloadBlob(blob: Blob, filename: string) {
+        const url = URL.createObjectURL(blob);
+
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+
+        URL.revokeObjectURL(url);
+      }
+      downloadBlob(blob, "profile.json");
     } else if (data.error) {
       showToast(data.error, { isError: true });
       setIsGenerating(false);
@@ -816,29 +832,7 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
               <hr class="my-2" />
               <h2>Data</h2>
 
-              <button class="button button-red icon-button w-full h-8 self-start" type="button" onClick={() => refDialogReset.show()}>
-                Reset all data
-              </button>
-
-              <Portal>
-                <FactorioDialogDelete
-                  ref={(api) => (refDialogReset = api)}
-                  onConfirm={() => {
-                    indexedDB
-                      .databases()
-                      .then((dbs) => Promise.all(dbs.map(({ name }) => name && indexedDB.deleteDatabase(name))))
-                      .then(() => {
-                        localStorage.clear();
-                        window.location.reload();
-                      });
-                  }}
-                >
-                  <h2>Are you sure you want to delete all data?</h2>
-                  <div class="text-white-500 text-center">
-                    This will remove all signal presets, configuration data, and reset all options back to their default values.
-                  </div>
-                </FactorioDialogDelete>
-              </Portal>
+              <ResetAllDataButton />
             </div>
           </div>
 
@@ -922,7 +916,9 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
           </a>
 
           <div class="fixed bottom-0 left-0 text-tan-500 m-1 text-xs opacity-20">
-            Build #{__BUILD_NUMBER__} ({__BUILD_COMMIT__})
+            <Show when={__BUILD_COMMIT__} fallback="Local build">
+              Build #{__BUILD_NUMBER__} ({__BUILD_COMMIT__})
+            </Show>
           </div>
           <Show when={wasmMemoryUsage()} keyed>
             <div class="z-50000 fixed bottom-0 right-0 text-tan-500 m-1 text-xs opacity-40">

@@ -9,8 +9,8 @@ export default defineConfig({
   base: "/anitorio/",
   build: { target: "esnext" },
   define: {
-    __BUILD_NUMBER__: JSON.stringify(process.env.GITHUB_RUN_NUMBER ?? "local"),
-    __BUILD_COMMIT__: JSON.stringify(process.env.GITHUB_SHA?.slice(0, 7) ?? "unknown"),
+    __BUILD_NUMBER__: JSON.stringify(process.env.GITHUB_RUN_NUMBER ?? ""),
+    __BUILD_COMMIT__: JSON.stringify(process.env.GITHUB_SHA?.slice(0, 7) ?? ""),
   },
   plugins: [
     solidPlugin(),

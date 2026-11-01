@@ -9,8 +9,8 @@
     "build": "npm run wasm:build && vite build",
     "build:opt": "npm run wasm:build:opt && vite build",
     "serve": "vite preview",
-    "wasm:build": "wasm-pack build --target web --release --no-opt",
-    "wasm:build:opt": "wasm-pack build --target web --release",
+    "wasm:build": "wasm-pack build --target web --release --features profiling",
+    "wasm:build:opt": "wasm-pack build --target web --profile release-release",
     "wasm:watch": "nodemon --watch src --watch Cargo.toml --ext rs,toml --exec \"npm run wasm:build && npm run start\""
   },
   "license": "MIT",
@@ -24,7 +24,8 @@
     "tailwindcss": "^4.0.0",
     "vite": "^6.0.0",
     "vite-plugin-solid": "^2.11.14",
-    "vite-plugin-static-copy": "^2.2.0"
+    "vite-plugin-static-copy": "^2.2.0",
+    "wasm-tracing-allocator": "^0.1.1"
   },
   "dependencies": {
     "@hevcjs/mediabunny-plugin": "^0.1.0",
