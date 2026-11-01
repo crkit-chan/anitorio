@@ -335,21 +335,14 @@ struct FrameDecoder<'a> {
     curr_n_us: u64,
     dim: UVec2,
     finished: bool,
-    in_buf: Vec<u8>,
     state: FrameDecoderState<'a>,
 }
 impl<'a> FrameDecoder<'a> {
     fn new(state: FrameDecoderState<'a>, dim: UVec2) -> FrameDecoder<'a> {
-        let target_capacity = dim.element_product() as usize * 4;
-        if target_capacity > 512 * 1024 * 1024 {
-            panic!("Frame is too large! ({target_capacity} bytes, max 512 MiB)");
-        }
-
         FrameDecoder {
             curr_n_us: 0,
             dim,
             finished: false,
-            in_buf: vec![0u8; target_capacity],
             state,
         }
     }
@@ -377,7 +370,8 @@ impl<'a> FrameDecoder<'a> {
             }
             FrameDecoderState::JsFrames(get_next_frame) => {
                 let args_obj = js::Object::new();
-                args_obj.reflect_set("inBuffer", wasm_shared_memory(&self.in_buf[..])?)?;
+                let in_buf = vec![0u8; self.dim.element_product() as usize * 4];
+                args_obj.reflect_set("inBuffer", wasm_shared_memory(&in_buf[..])?)?;
                 args_obj.reflect_set("dimensions", serde_wasm_bindgen::to_value(&self.dim)?)?;
                 let result = get_next_frame.call_async((&args_obj.into(),))?.await?;
                 let info: JsVideoFrameData = serde_wasm_bindgen::from_value(result)?;
@@ -389,7 +383,7 @@ impl<'a> FrameDecoder<'a> {
 
                 let duration = Duration::from_secs_f64(info.duration.unwrap());
                 let duration = image::Delay::from_saturating_duration(duration);
-                let img = image::RgbaImage::from_raw(self.dim.x, self.dim.y, self.in_buf.clone());
+                let img = image::RgbaImage::from_raw(self.dim.x, self.dim.y, in_buf);
                 let img = img.expect("Invalid RGBA frame dimensions");
 
                 Some(FrameWithTime(

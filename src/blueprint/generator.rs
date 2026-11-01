@@ -57,7 +57,7 @@ struct FrameInfo<'a> {
     use_delta_comp: bool,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum BlueprintState {
     Start,
     Entities,
@@ -228,10 +228,10 @@ impl<'a> BlueprintGenerator<'a> {
             // Sort by total length of the type + name + quality (actual smallest JSON)
             SignalSorting::Json => signals.sort_by_key(|s| {
                 s.quality.as_ref().map_or(0, |q| match q.as_ref() {
-                    "normal" => -(",\"quality\":\"normal\"".len() as i64),
+                    "normal" => const { -(r#","quality":"normal""#.len() as i64) },
                     _ => q.to_string().len() as i64,
                 }) + match s.type_.as_ref() {
-                    "item" => -(",\"type\":\"item\"".len() as i64), // type defaults to "item" if not specified
+                    "item" => const { -(r#","type":"item""#.len() as i64) }, // type defaults to "item" if not specified
                     _ => s.type_.len() as i64,
                 } + s.name.len() as i64
             }),
@@ -249,10 +249,10 @@ impl<'a> BlueprintGenerator<'a> {
 
     /// Generates the next chunk of the blueprint and writes it to the given writer.
     pub async fn next_chunk(&mut self, writer: &mut impl io::Write) -> Result<(), JsValue> {
-        let old_state = self.state.clone();
+        let old_state = self.state;
         match old_state {
             BlueprintState::Start => {
-                write_to(writer, b"{\"blueprint\":{")?;
+                write_to(writer, br#"{"blueprint":{"#)?;
 
                 let bp_color = match self.args.grayscale_bits {
                     0 => "#8888ff",
@@ -301,7 +301,7 @@ impl<'a> BlueprintGenerator<'a> {
         // Properly delimit the JSON stream before the next chunks
         if old_state != self.state {
             match self.state {
-                BlueprintState::Entities => write_to(writer, b",\"entities\":[")?,
+                BlueprintState::Entities => write_to(writer, br#","entities":["#)?,
                 BlueprintState::Wires => {
                     // Set description of constant combinator
                     if true
@@ -331,14 +331,14 @@ impl<'a> BlueprintGenerator<'a> {
                         write_json_trimmed_to(writer, &ents)?;
                     }
 
-                    write_to(writer, b"],\"wires\":[")?;
+                    write_to(writer, br#"],"wires":["#)?;
                 }
                 BlueprintState::Finished => {
-                    write_to(writer, b"]")?;
-                    write_to(writer, b",\"description\":\"")?;
+                    write_to(writer, br#"]"#)?;
+                    write_to(writer, br#","description":""#)?;
                     write_json_trimmed_to(writer, &self.get_description())?;
-                    write_to(writer, b"\"")?;
-                    write_to(writer, b"}}")?;
+                    write_to(writer, br#"""#)?;
+                    write_to(writer, br#"}}"#)?;
                 }
                 _ => {}
             }

@@ -1,5 +1,3 @@
-use std::io::BufWriter;
-
 use serde_wasm_bindgen::{from_value as from_js_value, to_value as to_js_value};
 use wasm_bindgen::prelude::*;
 
