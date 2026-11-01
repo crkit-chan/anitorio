@@ -1,3 +1,4 @@
+import CopyButton from "@/components/CopyButton";
 import EventListener from "@/components/EventListener";
 import { FactorioToastsApi } from "@/components/FactorioToasts";
 import FactorioTooltip from "@/components/FactorioTooltip";
@@ -7,7 +8,6 @@ import { formatJson } from "@/jsonUtil";
 import { BASE_URL, nullify, useErrM } from "@/utils";
 import { createResource, createSignal, Match, onMount, Show, Suspense, Switch } from "solid-js";
 import { createStore } from "solid-js/store";
-import CopyButton from "../CopyButton";
 
 export interface SignalFormExtractionApi {
   show(preset?: SignalPreset, args?: { kind: "edit" | "copy"; name?: string }): void;

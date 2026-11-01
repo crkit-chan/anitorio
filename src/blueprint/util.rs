@@ -59,15 +59,10 @@ pub fn color_frame_to_outputs(frame: &image::DynamicImage) -> Result<Vec<i32>, J
     #[cfg(not(target_arch = "wasm32"))] // scalar fallback
     {
         use crate::image_processing::rgb_to_int;
-
-        let rgb = frame.to_rgb8();
-        let mut outputs = Vec::with_capacity((frame.width() * frame.height()) as usize);
-
-        for chunk in rgb.as_raw().as_chunks::<3>().0 {
-            outputs.push(rgb_to_int(chunk[0], chunk[1], chunk[2]) as i32);
-        }
-
-        Ok(outputs)
+        Ok((frame.to_rgb8().as_raw().as_chunks::<3>().0)
+            .iter()
+            .map(|&[r, g, b]| rgb_to_int(r, g, b) as i32)
+            .collect())
     }
 }
 
@@ -84,7 +79,6 @@ pub fn color_frame_to_outputs(frame: &image::DynamicImage) -> Result<Vec<i32>, J
 /// # Returns
 ///
 /// A vector of JSON objects representing output filters.
-#[inline(always)]
 pub fn grayscale_frames_to_outputs(
     frames: &[image::DynamicImage],
     grayscale_bits: u32,
@@ -93,7 +87,7 @@ pub fn grayscale_frames_to_outputs(
         return Err(JsValue::from_str("No frames provided for packing"));
     }
     let num_pixels = (frames[0].width() * frames[0].height()) as usize;
-    let luma_images: Vec<_> = frames.iter().map(|x| x.to_luma8()).collect();
+    let luma_images: Vec<_> = frames.iter().map(|f| f.to_luma8()).collect();
     let mut outputs: Vec<i32> = vec![0i32; num_pixels];
 
     match grayscale_bits {

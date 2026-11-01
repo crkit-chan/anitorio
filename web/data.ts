@@ -1,3 +1,4 @@
+import { BlueprintArgs } from "@/../pkg/anitorio_wasm";
 import FORM_ELEMENTS from "@/formElements.json";
 import _INITIAL_VALUES from "@/initialValues.json";
 import { Ajv, JSONSchemaType } from "ajv";
@@ -73,7 +74,9 @@ const ajv = new Ajv();
 export function setInitialValues(values: object) {
   localStorage.setItem(FORM_DATA_KEY, JSON.stringify(values));
 }
-export function getInitialValues(): typeof _INITIAL_VALUES {
+export function getInitialValues(): typeof _INITIAL_VALUES &
+  Pick<BlueprintArgs, "flippedAxes" | "imageRotation" | "mode" | "outputFormat" | "resamplingFilter"> &
+  (Pick<BlueprintArgs, "signalSorting"> | { signalSorting: "auto" }) {
   const prev = localStorage.getItem(FORM_DATA_KEY);
 
   if (prev) {
@@ -100,7 +103,7 @@ export function getInitialValues(): typeof _INITIAL_VALUES {
   }
 
   setInitialValues(_INITIAL_VALUES);
-  return { ..._INITIAL_VALUES };
+  return { ...(_INITIAL_VALUES as any) };
 }
 
 export const validateSignalData = ajv.compile(SIGNAL_DATA_SCHEMA);

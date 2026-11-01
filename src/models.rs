@@ -1,8 +1,10 @@
 use glam::UVec2;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use tsify::Tsify;
+use wasm_bindgen::prelude::*;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Tsify, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BlueprintArgs {
     pub custom_height: Option<u32>,
@@ -30,7 +32,7 @@ pub struct BlueprintArgs {
     pub timing_signals: TimingSignals,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Tsify, Debug, Serialize, Deserialize)]
 pub struct TimingSignals {
     pub f: Arc<crate::blueprint::models::SignalID>,
     pub p: Arc<crate::blueprint::models::SignalID>,
@@ -38,7 +40,7 @@ pub struct TimingSignals {
     pub t: Arc<crate::blueprint::models::SignalID>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Tsify, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(untagged)]
 pub enum ImageFilter {
@@ -49,7 +51,7 @@ pub enum ImageFilter {
     Unsharpen(f32, i32),
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Tsify, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImageMetadata {
     pub dimensions: Option<(u32, u32)>,
@@ -57,7 +59,7 @@ pub struct ImageMetadata {
     pub mime_type: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Tsify, Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ImageRotation {
     #[serde(rename = "none")]
@@ -67,7 +69,7 @@ pub enum ImageRotation {
     Deg270 = 270,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Tsify, Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum FlippedAxes {
     None = 0,
@@ -76,7 +78,7 @@ pub enum FlippedAxes {
     Both = 3,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Tsify, Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Mode {
     Full,
@@ -96,7 +98,7 @@ pub enum Mode {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Tsify, Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SignalSorting {
     None,
@@ -104,7 +106,7 @@ pub enum SignalSorting {
     Json,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Tsify, Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ResamplingFilter {
     Catrom,
@@ -115,14 +117,14 @@ pub enum ResamplingFilter {
     Triangle,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Tsify, Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SignalCompression {
     Delta,
     Temporal { window: u32 },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Tsify, Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum OutputFormat {
     Blueprint,
@@ -130,7 +132,7 @@ pub enum OutputFormat {
     RawCompressed,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Tsify, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JsVideoFrameData {
     #[serde(default)]
@@ -143,8 +145,14 @@ pub struct JsVideoFrameData {
     pub duration: Option<f64>,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Tsify, Deserialize)]
 pub struct EncodeGifArgs {
     pub dim: UVec2,
     pub speed: u8,
 }
+
+#[wasm_bindgen(typescript_custom_section)]
+const TS_TYPES: &str = r#"
+export type DVec2 = [number, number];
+export type UVec2 = [number, number];
+"#;

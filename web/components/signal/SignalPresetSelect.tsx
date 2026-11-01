@@ -1,11 +1,11 @@
 import FactorioDialogDelete, { FactorioDialogDeleteApi } from "@/components/FactorioDialogDelete";
+import FactorioSelect from "@/components/FactorioSelect";
 import { FactorioToastsApi } from "@/components/FactorioToasts";
 import FactorioTooltip from "@/components/FactorioTooltip";
 import { CURR_SIGNAL_PRESET_KEY, SignalPreset } from "@/data";
 import { addSignalPreset, DEFAULT_SIGNAL_PRESET_KEYS, getSignalPreset, getSignalPresetNames, removeSignalPreset } from "@/db";
 import { createEffect, createMemo, createResource, createSignal, For, onMount, Show } from "solid-js";
 import { Portal } from "solid-js/web";
-import FactorioSelect from "../FactorioSelect";
 import SignalFormExtraction, { SignalFormExtractionApi } from "./SignalFormExtraction";
 
 export interface SignalPresetSelectProps {

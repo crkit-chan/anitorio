@@ -1,7 +1,7 @@
+import type { BlueprintArgs, InitOutput } from "@/../pkg/anitorio_wasm.js";
+import type { WasmSharedMemory } from "@/types";
+import { BASE_URL, nullify } from "@/utils";
 import type { InputVideoTrack, VideoSample, VideoSampleSink } from "mediabunny";
-import type { InitOutput } from "../pkg/anitorio_wasm.js";
-import type { WasmSharedMemory } from "./types";
-import { BASE_URL, nullify } from "./utils";
 
 const FILE_PREFIX_MAP = { blueprint: "txt", json: "json", rawCompressed: "zlib" } as const;
 let hasHevcDecoder = false;
@@ -41,12 +41,13 @@ export async function getVideoData(source: Blob) {
 
 async function main() {
   let prevMemoryUsage = 0;
+
   const wasmReadyPromises = {
     init: (async () => {
       // @ts-ignore
       if (!__BUILD_COMMIT__) await import("wasm-tracing-allocator/js/hooks.js");
 
-      const { default: init, init: prepare_wasm, set_progress_callback } = await import("../pkg/anitorio_wasm.js");
+      const { default: init, init: prepare_wasm, set_progress_callback } = await import("@/../pkg/anitorio_wasm.js");
       wasm = await init();
       prepare_wasm();
       set_progress_callback((percentage: number, status: string) => postMessage({ progress: { percentage, status } }));
@@ -56,9 +57,9 @@ async function main() {
         if (bytes === prevMemoryUsage) return;
 
         prevMemoryUsage = bytes;
-        postMessage({ wasmMemoryUsage: { bytes: wasm?.memory.buffer.byteLength ?? 0 } });
         logWasmAllocationInfo();
-      }, 10);
+        postMessage({ wasmMemoryUsage: { bytes: wasm?.memory.buffer.byteLength ?? 0 } });
+      }, 1);
     })(),
     setCombPosData: null as Promise<void> | null,
   };
@@ -86,6 +87,9 @@ async function main() {
     canvas: nullify<OffscreenCanvas>(),
     ctx: nullify<OffscreenCanvasRenderingContext2D>(),
 
+    sourceCanvas: nullify<OffscreenCanvas>(),
+    sourceCtx: nullify<OffscreenCanvasRenderingContext2D>(),
+
     shouldShowPreview: false,
   };
   const waitForWriterReady = () => new Promise<void>((resolve) => (writerReadyResolve = resolve));
@@ -98,10 +102,6 @@ async function main() {
   const syncQ: (() => void)[] = [];
 
   syncChannel.port1.onmessage = () => syncQ.shift()?.();
-
-  if (!__BUILD_COMMIT__) {
-    setInterval(() => logWasmAllocationInfo(), 5000);
-  }
 
   // Immediately add event listeners
   addEventListener("message", async (evt) => {
@@ -120,12 +120,22 @@ async function main() {
       state.canvas = canvas;
       state.ctx = state.canvas!.getContext("2d", { colorSpace: "srgb", willReadFrequently: true })!;
       // state.ctx!.imageSmoothingEnabled = false;
+    } else if (evt.data.sourceCanvas) {
+      const { canvas } = evt.data.sourceCanvas;
+      state.sourceCanvas = canvas;
+      state.sourceCtx = state.sourceCanvas!.getContext("2d", { colorSpace: "srgb", willReadFrequently: true })!;
+      // state.ctx!.imageSmoothingEnabled = false;
     } else if (evt.data.showPreview) {
       const { showPreview } = evt.data.showPreview;
       state.shouldShowPreview = showPreview;
     } else if (evt.data.generate) {
-      const { imageData }: { imageData: File | Uint8Array<ArrayBuffer> | ImageData } = evt.data.generate;
-      const { args: blueprintArgs } = evt.data.generate;
+      const {
+        args: blueprintArgs,
+        imageData,
+      }: {
+        args: BlueprintArgs;
+        imageData: File | Uint8Array<ArrayBuffer> | ImageData;
+      } = evt.data.generate;
       const { outputFormat, targetFps } = blueprintArgs;
       const useJsDecodedVideo = blueprintArgs.imageMetadata.mimeType.startsWith("video/");
 
@@ -261,16 +271,47 @@ async function main() {
               }
             });
           },
-          onFrame({ outBuffer, dimensions }: { outBuffer: WasmSharedMemory; dimensions: [number, number] }) {
+          async onFrame({ outBuffer, dimensions }: { outBuffer: WasmSharedMemory; dimensions: [number, number] }) {
             try {
-              const { canvas, ctx } = state;
+              const { canvas, ctx, sourceCanvas, sourceCtx } = state;
+              if (!canvas || !ctx || !sourceCanvas || !sourceCtx) return;
+
               const [width, height] = dimensions;
+              if (sourceCanvas.width !== width || sourceCanvas.height !== height) {
+                Object.assign(sourceCanvas, { width, height });
+              }
 
-              if (!canvas || !ctx) return;
-              if (canvas.width !== width || canvas.height !== height) Object.assign(canvas, { width, height });
+              const data = new ImageData(new Uint8ClampedArray(outBuffer.memory.buffer, outBuffer.ptr, outBuffer.len), width, height);
+              sourceCtx.putImageData(data, 0, 0);
 
-              const data = new Uint8ClampedArray(outBuffer.memory.buffer, outBuffer.ptr, outBuffer.len);
-              ctx.putImageData(new ImageData(data, width, height), 0, 0);
+              const rotation = blueprintArgs.imageRotation === "none" ? 0 : 360 - parseInt(blueprintArgs.imageRotation.match(/\d+/)![0]);
+              const swap = rotation === 90 || rotation === 270;
+              const outWidth = swap ? height : width;
+              const outHeight = swap ? width : height;
+
+              if (canvas.width !== outWidth || canvas.height !== outHeight) {
+                canvas.width = outWidth;
+                canvas.height = outHeight;
+              }
+
+              ctx.setTransform(1, 0, 0, 1, 0, 0);
+              ctx.clearRect(0, 0, outWidth, outHeight);
+
+              ctx.translate(outWidth / 2, outHeight / 2);
+
+              if (blueprintArgs.flippedAxes !== "none") {
+                const flipMap: Record<string, [number, number]> = {
+                  both: [-1, -1],
+                  x: [-1, 1],
+                  y: [1, -1],
+                };
+                ctx.scale(...flipMap[blueprintArgs.flippedAxes]);
+              }
+              if (rotation % 360 !== 0) {
+                ctx.rotate((rotation * Math.PI) / 180);
+              }
+
+              ctx.drawImage(sourceCanvas, -width / 2, -height / 2);
             } catch (e) {
               console.error(e);
             }
@@ -301,7 +342,9 @@ async function main() {
               const [width, height] = dimensions;
               const { canvas, ctx } = state;
               if (!canvas || !ctx) throw new Error("Canvas is not initialized");
-              if (canvas.width !== width || canvas.height !== height) Object.assign(canvas, { width, height });
+              if (canvas.width !== width || canvas.height !== height) {
+                Object.assign(canvas, { width, height });
+              }
 
               sample.draw(ctx, 0, 0, width, height);
 

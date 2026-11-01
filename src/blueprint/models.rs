@@ -10,6 +10,8 @@ use serde::{
 };
 use serde_json::value::Value;
 use std::sync::Arc;
+use tsify::Tsify;
+use wasm_bindgen::prelude::*;
 
 pub struct ObjectGeneratorOutput {
     pub entities: Vec<BlueprintEntity>,
@@ -17,7 +19,7 @@ pub struct ObjectGeneratorOutput {
     pub next_ent_n: u32,
 }
 
-#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Tsify, Default, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ArithmeticCombinatorParameterOperation {
     #[default]
     #[serde(rename = "*")]
@@ -53,13 +55,8 @@ pub enum ArithmeticCombinatorParameterOperation {
     #[serde(rename = "XOR")]
     Xor,
 }
-impl ArithmeticCombinatorParameterOperation {
-    pub const fn default() -> Self {
-        Self::Mul
-    }
-}
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Tsify, Clone, Serialize, Deserialize)]
 pub struct ArithmeticCombinatorParameters {
     /// First signal to use in an operation. If not specified, the second argument will be the value of first_constant.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -82,7 +79,7 @@ pub struct ArithmeticCombinatorParameters {
     pub output_signal: Option<Arc<SignalID>>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Tsify, Clone, Serialize, Deserialize)]
 pub struct Blueprint {
     pub blueprint: BlueprintInner,
 }
@@ -92,7 +89,7 @@ impl Blueprint {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Tsify, Clone, Serialize, Deserialize)]
 pub struct BlueprintBook {
     pub icons: Option<Vec<Icon>>,
     pub active_index: u32,
@@ -102,13 +99,13 @@ pub struct BlueprintBook {
     pub version: Option<u64>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Tsify, Clone, Serialize, Deserialize)]
 pub struct BlueprintBookInner {
     pub blueprints: Vec<Blueprint>,
 }
 
 /// The representation of an entity inside of a blueprint.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Tsify, Clone, Serialize, Deserialize)]
 pub struct BlueprintEntity {
     /// The entity's unique identifier in the blueprint.
     pub entity_number: u32,
@@ -199,7 +196,7 @@ impl BlueprintEntity {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Tsify, Clone, Serialize, Deserialize)]
 pub struct BlueprintInner {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -221,7 +218,7 @@ pub struct BlueprintInner {
     pub version: u64,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Tsify, Clone, Serialize, Deserialize)]
 pub struct BlueprintLogisticFilter {
     pub index: LogisticFilterIndex,
 
@@ -246,7 +243,7 @@ pub struct BlueprintLogisticFilter {
     pub count: i32,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Tsify, Clone, Serialize, Deserialize)]
 pub struct Color {
     #[serde(default, skip_serializing_if = "is_default")]
     pub r: f64,
@@ -269,7 +266,7 @@ impl Color {
     }
 
     pub const fn is_default_a(a: &f64) -> bool {
-        *a == Color::default_a()
+        *a == const { Color::default_a() }
     }
 
     pub fn from_hex(hex: &str) -> Option<Color> {
@@ -289,7 +286,7 @@ impl Color {
 ///
 /// While the API accepts both versions for "less/greater than or equal to" and "not equal",
 /// it'll always return "≥", "≤" or "≠" respectively when reading them back.
-#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Tsify, Default, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ComparatorString {
     /// "equal to"
     #[serde(rename = "=")]
@@ -316,13 +313,8 @@ pub enum ComparatorString {
     #[serde(rename = "≠", alias = "!=")]
     Ne,
 }
-impl ComparatorString {
-    const fn default() -> Self {
-        Self::Lt
-    }
-}
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Tsify, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ControlBehavior {
     ArithmeticCombinator {
@@ -371,7 +363,7 @@ impl ControlBehavior {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Tsify, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CircuitNetworkSelection {
     pub red: bool,
     pub green: bool,
@@ -405,7 +397,7 @@ impl CircuitNetworkSelection {
     }
 }
 
-#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Tsify, Default, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompareTypeString {
     #[serde(rename = "and")]
     And,
@@ -420,7 +412,7 @@ impl CompareTypeString {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Tsify, Clone, Serialize, Deserialize)]
 pub struct DeciderCombinatorCondition {
     /// Defaults to blank
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -470,7 +462,7 @@ impl DeciderCombinatorCondition {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Tsify, Clone, Serialize, Deserialize)]
 pub struct DeciderCombinatorOutput {
     /// Specifies a signal to output.
     pub signal: Arc<SignalID>,
@@ -511,10 +503,10 @@ impl DeciderCombinatorOutput {
     }
 
     pub const fn is_default_constant(constant: &i32) -> bool {
-        *constant == DeciderCombinatorOutput::default_constant()
+        *constant == const { DeciderCombinatorOutput::default_constant() }
     }
     pub const fn is_default_copy_count_from_input(copy_count_from_input: &bool) -> bool {
-        *copy_count_from_input == DeciderCombinatorOutput::default_copy_count_from_input()
+        *copy_count_from_input == const { DeciderCombinatorOutput::default_copy_count_from_input() }
     }
 
     pub const fn with_networks(mut self, networks: CircuitNetworkSelection) -> Self {
@@ -523,7 +515,7 @@ impl DeciderCombinatorOutput {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Tsify, Clone, Serialize, Deserialize)]
 pub struct DeciderCombinatorParameters {
     /// List of conditions.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -584,7 +576,7 @@ struct IndexedDeciderCombinatorOutput<'a> {
     constant: i32,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Tsify, Clone, Serialize, Deserialize)]
 pub struct Icon {
     pub signal: Arc<SignalID>,
     pub index: u32,
@@ -592,14 +584,14 @@ pub struct Icon {
 
 pub type LogisticFilterIndex = u16;
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Tsify, Clone, Serialize, Deserialize)]
 pub struct LogisticSection {
     pub index: u8,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub filters: Vec<BlueprintLogisticFilter>,
 }
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Tsify, Clone, Serialize, Deserialize)]
 pub struct LogisticSections {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sections: Vec<LogisticSection>,
@@ -625,7 +617,7 @@ impl NetworkSwapper for DeciderCombinatorOutput {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Tsify, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SignalID {
     /// The type of the signal. If the type is "item", this will be nil when reading.
     #[serde(
@@ -662,10 +654,14 @@ impl SignalID {
         value == &*DEFAULT_SIGNAL_TYPE
     }
     pub fn is_none_or_default_quality(value: &Option<Arc<str>>) -> bool {
-        value
-            .as_deref()
-            .is_none_or(|v| v == DEFAULT_QUALITY.as_ref())
+        (value.as_deref()).is_none_or(|v| v == DEFAULT_QUALITY.as_ref())
     }
 }
 
 pub type Wire = [u32; 4]; // TODO: could use an unpacked (u32, u8, u32, u8)-type data structure for better memory
+
+#[wasm_bindgen(typescript_custom_section)]
+const TS_TYPES: &str = r#"
+export type LogisticFilterIndex = number;
+export type Wire = [number, number, number, number];
+"#;

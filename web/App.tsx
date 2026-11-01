@@ -1,3 +1,4 @@
+import type { BlueprintArgs } from "@/../pkg/anitorio_wasm";
 import getAnimationInfo, { AnimationInfo, getRawImageData, UnsupportedAnimationError } from "@/animationInfo";
 import Background, { BackgroundApi } from "@/components/Background";
 import FactorioDialogDelete, { FactorioDialogDeleteApi } from "@/components/FactorioDialogDelete";
@@ -6,16 +7,16 @@ import FactorioSlider from "@/components/FactorioSlider";
 import FactorioToasts, { FactorioToastsApi } from "@/components/FactorioToasts";
 import FactorioTooltip from "@/components/FactorioTooltip";
 import KeyboardListener from "@/components/KeyboardListener";
+import ResetAllDataButton from "@/components/ResetAllDataButton";
 import SignalPresetSelect from "@/components/signal/SignalPresetSelect";
 import SignalSelectors, { TimingSignals } from "@/components/signal/SignalSelectors";
 import { FORM_ELEMENTS, getInitialValues, LAST_FILE_KEY, setInitialValues, SHOW_ADVANCED_KEY, SignalPreset } from "@/data";
 import { loadFileDB, saveFileDB } from "@/db";
 import { FormElementValue } from "@/types";
 import { formatDuration, formatFileSize, kebabCaseToSentenceCase, useErrM, useLocalStorageJSON } from "@/utils";
+import { getVideoData } from "@/worker";
 import { createEffect, createMemo, createSignal, For, onMount, Show } from "solid-js";
 import { createStore } from "solid-js/store";
-import ResetAllDataButton from "./components/ResetAllDataButton";
-import { getVideoData } from "./worker";
 
 export interface AppApi {
   setDownloadUrl(url: string): void;
@@ -46,14 +47,13 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
   const [showStreamingWindowWarning, setShowStreamingWindowWarning] = createSignal(false);
   const [downloadUrl, setDownloadUrl] = createSignal<string | null>(null);
   const [wasmMemoryUsage, setWasmMemoryUsage] = createSignal(0);
+  const [blueprintDownloadStartTime, setBlueprintDownloadStartTime] = createSignal(performance.now());
 
   let refBackground!: BackgroundApi;
   let refDialogLargeFile!: FactorioDialogDeleteApi;
   let refFormContainer!: HTMLDivElement;
   let refToasts!: FactorioToastsApi;
   let refVideo!: HTMLVideoElement;
-
-  let refCanvas!: HTMLCanvasElement; // Used for preview
 
   function showOpenStreamingWindowWarning() {
     setShowStreamingWindowWarning(true);
@@ -93,7 +93,7 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
 
       formRefs.progressContainer.classList.add("hidden");
       formRefs.blueprintResult.classList.remove("hidden");
-      formRefs.responseText.innerHTML = "Blueprint downloaded!";
+      formRefs.responseText.innerHTML = `Blueprint downloaded! Done in ${formatDuration(performance.now() - blueprintDownloadStartTime())}!`;
       formRefs.submitButton.disabled = false;
     } else if (data.wasmProfile) {
       const { profile } = data.wasmProfile;
@@ -266,6 +266,8 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
   async function handleSubmit(evt: SubmitEvent) {
     evt.preventDefault();
 
+    setBlueprintDownloadStartTime(performance.now());
+
     // Validate ALL inputs (instead of only showing errors for the first invalid input)
     let isValid = true;
     for (const e of [evt.target, ...Object.values(formRefs)]) {
@@ -317,7 +319,7 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
               grayscaleBits: +formData.grayscaleBits,
               imageFilters: [],
               imageMetadata: {
-                dimensions: [animationInfo()!.width, animationInfo()!.height],
+                dimensions: [animationInfo()!.width!, animationInfo()!.height!],
                 duration: currFile()!.type.startsWith("video") ? refVideo.duration : null,
                 mimeType: currFile()!.type,
               },
@@ -332,7 +334,7 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
                   useTimer: formData.staticImageMode === "video",
                 },
               },
-              name: currFile()?.name,
+              name: currFile()!.name,
               outputFormat: `${formData.outputFormat}`,
               powerPoleName: formData.powerPoleName,
               powerPoleQuality: formData.powerPoleQuality,
@@ -349,8 +351,8 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
                     : "compression"
                   : `${formData.signalSorting}`,
               targetFps: +formData.targetFps,
-              timingSignals: timingSignals(),
-            },
+              timingSignals: timingSignals()!,
+            } satisfies BlueprintArgs,
           },
         },
         transfer,
@@ -418,11 +420,6 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
         console.error("Failed to load file:", err);
         showToast(`Failed to load file: ${err}`, { isError: true });
       });
-  });
-
-  onMount(() => {
-    const canvas = refCanvas.transferControlToOffscreen();
-    worker.postMessage({ canvas: { canvas } }, [canvas]);
   });
 
   createEffect(() => {
@@ -544,12 +541,30 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
 
   return (
     <>
+      <canvas
+        class="hidden"
+        ref={(ref) => {
+          onMount(() => {
+            let canvas = ref.transferControlToOffscreen();
+            worker.postMessage({ sourceCanvas: { canvas } }, [canvas]);
+          });
+        }}
+      />
+
       <KeyboardListener keys={["Enter", "e", "E"]} onKeyDown={() => formRefs.submitButton.click()} />
       <Background ref={(api) => (refBackground = api)} />
 
       <div classList={{ hidden: !isGenerating() || !showPreview() }}>
         <div class="fixed inset-0 bg-black w-full h-full" />
-        <canvas ref={refCanvas!} class="fixed inset-0 w-full h-full object-contain [image-rendering:pixelated]" />
+        <canvas
+          ref={(ref) => {
+            onMount(() => {
+              let canvas = ref.transferControlToOffscreen();
+              worker.postMessage({ canvas: { canvas } }, [canvas]);
+            });
+          }}
+          class="fixed inset-0 w-full h-full object-contain [image-rendering:pixelated]"
+        />
 
         <Show
           when={workerShouldShowPreview()}

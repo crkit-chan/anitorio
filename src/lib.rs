@@ -1,4 +1,3 @@
-use serde_wasm_bindgen::{from_value as from_js_value, to_value as to_js_value};
 use wasm_bindgen::prelude::*;
 
 mod blueprint;
@@ -35,7 +34,7 @@ pub fn init() {
 /// A Factorio blueprint string on success.
 #[wasm_bindgen]
 pub async fn run_blueprint(
-    args: JsValue,
+    args: tsify::Ts<models::BlueprintArgs>,
     callbacks: JsValue,
     // on_chunk: &js_sys::Function<fn(js_sys::Uint8Array) -> js_sys::Promise>,
     // on_preview: &js_sys::Function<
@@ -62,7 +61,7 @@ pub async fn run_blueprint(
     let get_data_len = callbacks.reflect_get::<JsFn<fn() -> js::Number>>("getDataLength")?;
     let get_next_frame = callbacks.reflect_get::<JsFn<JsVideoFrameCallback>>("getFrameData")?;
     let on_chunk = callbacks.reflect_get::<JsFn<fn(js::Uint8Array) -> js::Promise>>("onChunk")?;
-    let on_frame = callbacks.reflect_get::<JsFn<fn(JsValue) -> js::Undefined>>("onFrame")?;
+    let on_frame = callbacks.reflect_get::<JsFn<fn(JsValue) -> js::Promise>>("onFrame")?;
     let should_show_preview =
         callbacks.reflect_get::<JsFn<fn() -> js::Boolean>>("shouldShowPreview")?;
     let yield_to_js = callbacks.reflect_get::<JsFn<fn() -> js::Promise>>("yieldToJs")?;
@@ -74,7 +73,7 @@ pub async fn run_blueprint(
     let image_data_len = get_data_len.call_sync(())?.as_f64().unwrap() as usize;
     let image_data = vec![0u8; image_data_len];
 
-    let mut args: BlueprintArgs = from_js_value(args)?;
+    let mut args = args.to_rust().map_js_err("Invalid arguments")?;
     let mut frame_data: Option<FrameData> = None;
     let promises = Rc::new(const { RefCell::new(VecDeque::<Vec<js::Promise>>::new()) });
     let promise_q = Rc::clone(&promises);
@@ -85,8 +84,8 @@ pub async fn run_blueprint(
         args.target_fps = 1;
     }
     if matches!(args.mode, Mode::Full | Mode::Static { .. }) {
-        let on_frame: FrameCallback = Box::new(move |result| {
-            let on_frame = on_frame.clone();
+        let on_frame: FrameCallback = Box::new(move |img| {
+            let on_frame = Rc::clone(&on_frame);
             let should_show_preview = Rc::clone(&should_show_preview);
             let yield_to_js = Rc::clone(&yield_to_js);
             let next_yield_time = Rc::clone(&next_yield_time);
@@ -105,17 +104,18 @@ pub async fn run_blueprint(
                     return Ok(());
                 }
 
-                let img = result?;
                 let rgba = match img.as_rgba8() {
                     Some(rgba) => rgba,
                     _ => &img.to_rgba8(),
                 };
 
-                let args_obj = js::Object::new();
-                args_obj.reflect_set("outBuffer", wasm_shared_memory(rgba)?)?;
-                args_obj.reflect_set("dimensions", to_js_value(&img.dimensions())?)?;
-
-                on_frame.call_sync((&args_obj.into(),))?;
+                let js_args = js::Object::new();
+                js_args.reflect_set("outBuffer", wasm_shared_memory(rgba)?)?;
+                js_args.reflect_set(
+                    "dimensions",
+                    serde_wasm_bindgen::to_value(&img.dimensions())?,
+                )?;
+                on_frame.call_async((&js_args.into(),))?.await?;
 
                 Ok(())
             })

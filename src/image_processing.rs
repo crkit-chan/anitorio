@@ -8,15 +8,14 @@ use crate::util::{
 use glam::{DVec2, UVec2, uvec2};
 use image::{AnimationDecoder, ImageDecoder, imageops};
 use js_sys::{self as js, Function as JsFn};
-use std::{pin::Pin, time::Duration};
+use std::{pin::Pin, sync::Arc, time::Duration};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
 pub type FrameCallback = Box<
     dyn for<'a> Fn(
-            Result<&'a image::DynamicImage, &'a JsValue>,
-        ) -> Pin<Box<dyn Future<Output = Result<(), JsValue>> + 'a>>
-        + 'static,
+        &'a image::DynamicImage,
+    ) -> Pin<Box<dyn Future<Output = Result<(), JsValue>> + 'a>>,
 >;
 
 pub struct FrameData<'a> {
@@ -31,7 +30,7 @@ pub struct FrameData<'a> {
     out_dim_raw: DVec2,
     out_frame_i: usize,
     out_n_frames: u32,
-    prev_frame: Option<FrameWithTime>,
+    prev_img: Option<(Arc<image::DynamicImage>, u64)>,
 }
 
 impl FrameData<'_> {
@@ -101,22 +100,22 @@ impl<'a> FrameData<'a> {
                 on_frame,
                 out_dim_raw: scale_factor * DVec2::from(in_dim),
                 out_frame_i: 0,
-                prev_frame: None,
+                prev_img: None,
             };
             obj.decoder.dim = obj.out_dim_raw();
             obj
         })
     }
 
-    pub async fn next(&mut self) -> Result<Option<image::DynamicImage>, JsValue> {
-        let mut frame: Option<image::Frame> = None;
+    pub async fn next(&mut self) -> Result<Option<Arc<image::DynamicImage>>, JsValue> {
+        let mut img: Option<Arc<image::DynamicImage>> = None;
         let use_js_decode = matches!(self.decoder.state, FrameDecoderState::JsFrames { .. });
 
         if matches!(self.args.mode, Mode::Static { .. }) {
             let Some(FrameWithTime(f, timestamp)) = self.decoder.next_frame().await? else {
                 return Ok(None);
             };
-            frame = Some(f);
+            img = Some(Arc::new(self.convert_frame(f.into_buffer())?));
             self.curr_n_us = timestamp;
         } else if self.out_frame_i == 0 {
             self.fps_timer = now_ms();
@@ -124,35 +123,18 @@ impl<'a> FrameData<'a> {
 
         loop {
             if self.out_t_us() <= self.curr_n_us
-                && let Some(prev) = &self.prev_frame
+                && let Some(prev) = &self.prev_img
             {
-                frame = Some(prev.0.clone());
+                img = Some(Arc::clone(&prev.0)); // Emit duplicate frames if necessary
                 self.out_frame_i += 1;
             }
 
             // Flush any remaining frames
-            if let Some(frame) = frame {
-                let frame = self.convert_frame(frame);
+            if let Some(frame) = img {
                 if !use_js_decode && let Some(callback) = &self.on_frame {
                     callback(frame.as_ref()).await?;
                 }
-                let frame = frame.map(|mut frame| {
-                    use crate::blueprint::models::{FlippedAxes::*, ImageRotation::*};
-                    frame = match self.args.flipped_axes {
-                        X => frame.fliph(),
-                        Y => frame.flipv(),
-                        Both => frame.flipv().fliph(),
-                        _ => frame,
-                    };
-                    frame = match self.args.image_rotation {
-                        Deg90 => frame.rotate90(),
-                        Deg180 => frame.rotate180(),
-                        Deg270 => frame.rotate270(),
-                        _ => frame,
-                    };
-                    frame
-                });
-                return Ok(Some(frame?));
+                return Ok(Some(frame));
             } else if self.out_t_us() >= self.curr_n_us {
                 // If decoder is finished, we're done
                 if self.decoder.is_finished() {
@@ -164,7 +146,9 @@ impl<'a> FrameData<'a> {
                 };
 
                 self.curr_n_us = timestamp + Duration::from(frame.delay()).as_micros() as u64;
-                self.prev_frame = Some(FrameWithTime(frame, self.curr_n_us));
+
+                let img = self.convert_frame(frame.into_buffer())?;
+                self.prev_img = Some((Arc::new(img), self.curr_n_us));
                 self.in_frame_i += 1;
             }
 
@@ -204,13 +188,15 @@ impl<'a> FrameData<'a> {
     }
 
     /// Converts the input frame to the target output using the specified settings.
-    pub fn convert_frame(&self, frame: image::Frame) -> Result<image::DynamicImage, JsValue> {
-        let mut img = image::DynamicImage::ImageRgba8(frame.into_buffer());
+    pub fn convert_frame(&self, buf: image::RgbaImage) -> Result<image::DynamicImage, JsValue> {
+        use crate::blueprint::models::{FlippedAxes::*, ImageRotation::*};
+
+        let mut img = image::DynamicImage::ImageRgba8(buf);
         let out_dim = self.out_dim_raw.round().as_uvec2();
 
         // Apply filters
-        for &f in self.args.image_filters.iter() {
-            img = match f {
+        for f in self.args.image_filters.iter() {
+            img = match *f {
                 ImageFilter::Blur(sigma) => img.blur(sigma),
                 ImageFilter::Brightness(value) => img.brighten(value),
                 ImageFilter::Contrast(c) => img.adjust_contrast(c),
@@ -236,6 +222,18 @@ impl<'a> FrameData<'a> {
                     _ => unreachable!(),
                 },
             ),
+        };
+        img = match self.args.flipped_axes {
+            X => img.fliph(),
+            Y => img.flipv(),
+            Both => img.flipv().fliph(),
+            _ => img,
+        };
+        img = match self.args.image_rotation {
+            Deg90 => img.rotate90(),
+            Deg180 => img.rotate180(),
+            Deg270 => img.rotate270(),
+            _ => img,
         };
 
         Ok(img)

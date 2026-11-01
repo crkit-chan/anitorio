@@ -27,10 +27,16 @@ paste = "1.0"
 serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
 serde-wasm-bindgen = "0.6"
+tsify = "0.5.8"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4.77"
 wasm-tracing-allocator = { version = "0.1.1", optional = true }
 web-sys = { version = "0.3", features = ["console"] }
+
+
+[profile.release]
+strip = false
+debug = true
 
 [profile.release-release]
 inherits = "release"
@@ -40,6 +46,15 @@ codegen-units = 1
 debug = false
 panic = "abort"
 
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = [
+    "-O3",
+    "-g",
+    "--enable-simd",
+    "--enable-bulk-memory",
+    "--enable-nontrapping-float-to-int",
+]
+
 [package.metadata.wasm-pack.profile.custom]
 wasm-opt = [
     "-O3",
@@ -47,6 +62,9 @@ wasm-opt = [
     "--enable-bulk-memory",
     "--enable-nontrapping-float-to-int",
 ]
+
+[package.metadata.wasm-pack.profile.release.wasm-bindgen]
+demangle-name-section = true
 
 
 [features]

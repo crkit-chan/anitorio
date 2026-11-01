@@ -20,7 +20,7 @@ use std::{ops::Not, sync::Arc};
 pub fn generate_lamps(
     signals: &[Arc<SignalID>],
     grid_dim: UVec2,
-    curr_frame: Option<image::DynamicImage>,
+    curr_frame: Option<Arc<image::DynamicImage>>,
     occupied: &mut PowerPoleOccupied,
     base_ent_n: u32,
     start_pos: DVec2,

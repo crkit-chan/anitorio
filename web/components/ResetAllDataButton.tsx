@@ -1,5 +1,5 @@
+import FactorioDialogDelete, { FactorioDialogDeleteApi } from "@/components/FactorioDialogDelete";
 import { Portal } from "solid-js/web";
-import FactorioDialogDelete, { FactorioDialogDeleteApi } from "./FactorioDialogDelete";
 
 export default function ResetAllDataButton() {
   let refDialogReset!: FactorioDialogDeleteApi;

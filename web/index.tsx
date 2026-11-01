@@ -1,9 +1,9 @@
 import App, { AppApi } from "@/App";
+import ResetAllDataButton from "@/components/ResetAllDataButton";
 import "@/index.css";
 import { ErrorBoundary, Show } from "solid-js";
 import { render } from "solid-js/web";
 import streamSaver from "streamsaver"; // If unsupported, this will fall back to a polyfill that buffers in RAM
-import ResetAllDataButton from "./components/ResetAllDataButton";
 
 streamSaver.mitm = `${import.meta.env.BASE_URL}streamsaver/mitm.html`;
 

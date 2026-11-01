@@ -45,13 +45,13 @@ pub struct BlueprintGenerator<'a> {
 
 /// Data only used when generating from an image or a video.
 struct FrameInfo<'a> {
-    curr_frame: image::DynamicImage,
+    curr_frame: Arc<image::DynamicImage>,
     frame_data: FrameData<'a>,
     frames_per_cb: u32,
     group_data_combs: Vec<Vec<BlueprintEntity>>,
     n_buf_frames: u32,
     n_scaled_frames: u32,
-    next_frame: Option<image::DynamicImage>,
+    next_frame: Option<Arc<image::DynamicImage>>,
     patch_states: Vec<GroupPatchState>,
     ticks_per_frame: u32,
     use_delta_comp: bool,
@@ -447,7 +447,7 @@ impl<'a> BlueprintGenerator<'a> {
                 signals,
                 uvec2(grp_width, self.dim.y),
                 matches!(self.args.mode, Mode::Static { combs: false, .. }).then(
-                    || info.as_ref().unwrap().curr_frame.clone(), // Pass image data to lamp generation
+                    || Arc::clone(&info.as_ref().unwrap().curr_frame), // Pass image data to lamp generation
                 ),
                 &mut self.occupied,
                 ent_data.next_ent_n,

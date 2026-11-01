@@ -8,7 +8,7 @@ export function formatDuration(totalMs: number): string {
   const s = totalSeconds % 60;
   const ms = Math.floor(totalMs % 1000);
 
-  return [h, m, s].map((v) => `${v}`.padStart(2, "0")).join(":") + "." + `${ms}`.padStart(3, "0");
+  return (h ? [h, m, s] : [m, s]).map((v) => `${v}`.padStart(2, "0")).join(":") + "." + `${ms}`.padStart(3, "0");
 }
 export function formatFileSize(bytes: number) {
   if (bytes === 0) return "0 Bytes";
