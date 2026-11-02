@@ -48,7 +48,7 @@ struct FrameInfo<'a> {
     curr_frame: Arc<image::DynamicImage>,
     frame_data: FrameData<'a>,
     frames_per_cb: u32,
-    group_data_combs: Vec<Vec<BlueprintEntity>>,
+    group_data_combs: Vec<LazyCombinators>,
     n_buf_frames: u32,
     n_scaled_frames: u32,
     next_frame: Option<Arc<image::DynamicImage>>,
@@ -437,8 +437,8 @@ impl<'a> BlueprintGenerator<'a> {
             let grp_width = (self.max_cols_per_grp).min(self.dim.x - grp_left);
             let (mut cb_in_ent_n, mut cb_out_ent_n) = (0, 0);
             let (
-                ObjectGeneratorOutput {
-                    entities: mut grp_lamps,
+                mut grp_lamps,
+                ObjectGeneratorMetadata {
                     wires: mut grp_lamp_wires,
                     next_ent_n: new_next_ent_n,
                 },
@@ -460,12 +460,12 @@ impl<'a> BlueprintGenerator<'a> {
             if self.should_generate_cbs {
                 let info = info.as_mut().unwrap();
                 let GenerateCombinatorsOutput {
-                    data_cbs:
-                        ObjectGeneratorOutput {
-                            entities: data_combs,
+                    metadata:
+                        ObjectGeneratorMetadata {
                             wires,
                             next_ent_n: new_base_ent_n,
                         },
+                    data_cbs: data_combs,
                     other_ents,
                     in_ent_n,
                     out_ent_n,
@@ -656,10 +656,10 @@ impl<'a> BlueprintGenerator<'a> {
                         .collect::<Box<_>>()
                         && !target_outputs.is_empty()
                     {
-                        let en = &data_combs[state.comb_i];
+                        let en = data_combs.get(state.comb_i).unwrap();
                         let range = uvec2(1, 2) + (ticks_per_grp * state.chunk_i);
                         let cb = mk_cb(range.x, range.y, target_outputs);
-                        output_data.push(en.clone().with_control_behavior(cb));
+                        output_data.push(en.with_control_behavior(cb));
                         state.sig_buf[0] = frame_sigs; // cache absolute output
                         state.comb_i += 1;
                     }
@@ -691,10 +691,10 @@ impl<'a> BlueprintGenerator<'a> {
 
                         if !target_outputs.is_empty() {
                             let target_i = base_chunk_i + cb_i as u32;
-                            let en = &data_combs[state.comb_i];
+                            let en = data_combs.get(state.comb_i).unwrap();
                             let range = (uvec2(0, 1) + target_i) * ticks_per_grp;
                             let cb = mk_cb(range.x, range.y, target_outputs);
-                            output_data.push(en.clone().with_control_behavior(cb));
+                            output_data.push(en.with_control_behavior(cb));
                             state.comb_i += 1;
                         }
                     }
@@ -706,11 +706,11 @@ impl<'a> BlueprintGenerator<'a> {
                             .collect::<Box<_>>()
                         && !target_outputs.is_empty()
                     {
-                        let en = &data_combs[state.comb_i];
+                        let en = data_combs.get(state.comb_i).unwrap();
                         let range = ticks_per_grp
                             * uvec2(base_chunk_i, base_chunk_i + state.sig_buf.len() as u32);
                         let cb = mk_cb(range.x, range.y, target_outputs);
-                        output_data.push(en.clone().with_control_behavior(cb));
+                        output_data.push(en.with_control_behavior(cb));
                         state.comb_i += 1;
                     }
                     state.sig_buf.clear();

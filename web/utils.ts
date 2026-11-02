@@ -13,11 +13,14 @@ export function formatDuration(totalMs: number): string {
 export function formatFileSize(bytes: number) {
   if (bytes === 0) return "0 Bytes";
 
+  const UNIT = 1000;
+  const sign = bytes < 0 ? "-" : "";
+  bytes = Math.abs(bytes);
   const units = ["Bytes", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(1024));
-  const value = bytes / 1024 ** i;
+  const i = Math.floor(Math.log(bytes) / Math.log(UNIT));
+  const value = bytes / UNIT ** i;
 
-  return `${+value.toFixed(2)} ${units[i]}`;
+  return `${sign}${+value.toFixed(2)} ${units[i]}`;
 }
 
 export function useErrM(el: HTMLElement) {

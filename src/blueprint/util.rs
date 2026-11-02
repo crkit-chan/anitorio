@@ -10,8 +10,9 @@ pub fn write_json_trimmed_to<T: ?Sized + serde::Serialize>(
     writer: &mut impl io::Write,
     value: &T,
 ) -> Result<(), JsValue> {
-    let json_bytes = serde_json::to_vec(value).map_js_err("Write error")?;
-    write_to(writer, &json_bytes[1..json_bytes.len() - 1]) // Remove braces
+    let mut trimmed_writer = crate::ioutil::TrimmedWriter::new(writer);
+    serde_json::to_writer(&mut trimmed_writer, value).map_js_err("Write error")?;
+    trimmed_writer.finish().map_js_err("Write error")
 }
 
 pub fn invert_wires(ents: &mut [BlueprintEntity], wires: &mut [Wire]) {

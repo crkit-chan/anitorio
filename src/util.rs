@@ -85,7 +85,7 @@ pub trait JsCall<T: js_sys::JsFunction>: Into<js_sys::Function<T>> + Clone {
         R: wasm_bindgen::convert::FromWasmAbi + 'static,
     {
         args.apply_call(&self.clone().into(), &JsValue::NULL)
-            .map(|v| v.into())
+            .map(wasm_bindgen_futures::JsFuture::from)
     }
 }
 impl<T: js_sys::JsFunction, S: Into<js_sys::Function<T>> + Clone> JsCall<T> for S {}

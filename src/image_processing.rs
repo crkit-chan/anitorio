@@ -189,7 +189,7 @@ impl<'a> FrameData<'a> {
 
     /// Converts the input frame to the target output using the specified settings.
     pub fn convert_frame(&self, buf: image::RgbaImage) -> Result<image::DynamicImage, JsValue> {
-        use crate::blueprint::models::{FlippedAxes::*, ImageRotation::*};
+        use crate::blueprint::models::ImageRotation::*;
 
         let mut img = image::DynamicImage::ImageRgba8(buf);
         let out_dim = self.out_dim_raw.round().as_uvec2();
@@ -223,12 +223,12 @@ impl<'a> FrameData<'a> {
                 },
             ),
         };
-        img = match self.args.flipped_axes {
-            X => img.fliph(),
-            Y => img.flipv(),
-            Both => img.flipv().fliph(),
-            _ => img,
-        };
+        if matches!(self.args.flipped_axes, FlippedAxes::X | FlippedAxes::Both) {
+            imageops::flip_horizontal_in_place(&mut img);
+        }
+        if matches!(self.args.flipped_axes, FlippedAxes::Y | FlippedAxes::Both) {
+            imageops::flip_vertical_in_place(&mut img);
+        }
         img = match self.args.image_rotation {
             Deg90 => img.rotate90(),
             Deg180 => img.rotate180(),
@@ -400,7 +400,7 @@ pub async fn encode_gif(
     on_chunk: JsFn<fn(js::Uint8Array) -> js::Promise>,
     args: &EncodeGifArgs,
 ) -> Result<(), JsValue> {
-    use crate::streaming_writer::StreamingWriter;
+    use crate::ioutil::StreamingWriter;
     use image::codecs::gif::{GifEncoder, Repeat};
     use std::{cell::RefCell, rc::Rc};
 

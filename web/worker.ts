@@ -1,4 +1,4 @@
-import type { BlueprintArgs, InitOutput } from "@/../pkg/anitorio_wasm.js";
+import type { BlueprintArgs, InitOutput } from "@/../pkg/anitorio_wasm";
 import type { WasmSharedMemory } from "@/types";
 import { BASE_URL, nullify } from "@/utils";
 import type { InputVideoTrack, VideoSample, VideoSampleSink } from "mediabunny";
@@ -6,6 +6,7 @@ import type { InputVideoTrack, VideoSample, VideoSampleSink } from "mediabunny";
 const FILE_PREFIX_MAP = { blueprint: "txt", json: "json", rawCompressed: "zlib" } as const;
 let hasHevcDecoder = false;
 let wasm: InitOutput | null = null;
+let WasmTracingAllocator: (typeof import("@/wasm-tracing-allocator/hooks"))["WasmTracingAllocator"] | null = null;
 
 export async function getVideoData(source: Blob) {
   async function getData() {
@@ -44,22 +45,83 @@ async function main() {
 
   const wasmReadyPromises = {
     init: (async () => {
-      // @ts-ignore
-      if (!__BUILD_COMMIT__) await import("wasm-tracing-allocator/js/hooks.js");
+      if (!__BUILD_COMMIT__) {
+        ({ WasmTracingAllocator } = await import("@/wasm-tracing-allocator/hooks"));
 
-      const { default: init, init: prepare_wasm, set_progress_callback } = await import("@/../pkg/anitorio_wasm.js");
-      wasm = await init();
-      prepare_wasm();
-      set_progress_callback((percentage: number, status: string) => postMessage({ progress: { percentage, status } }));
+        if (false) {
+          const u = new URL(import.meta.url);
+          const BASE_PATH = [u.origin, u.pathname.split("/").filter((v) => !!v)[0], "pkg"].join("/");
+
+          function cleanWasmStack(stack?: string): string {
+            if (!stack) return "";
+            return (
+              stack
+                .split("\n")
+                .map((line) => line.trim())
+                .filter(Boolean)
+                // Remove generated runtime frames
+                .filter((line) => !/wasm_bindgen|js_sys::futures|externref shim/.test(line))
+                // Remove WASM module paths and function indexes
+                .map((line) => line.replace(/^.*?\.wasm\./, "").replace(/@.*$/, ""))
+                // Remove Rust crate disambiguator hashes
+                .map((line) => line.replace(/\[[0-9a-f]{16}\]/g, ""))
+                .filter((line) => !/wasm_tracing_allocator::hooks::on_(?:alloc|dealloc|realloc)/.test(line))
+                .filter((line) => !/<js_sys::futures::queue::QueueState>::run_all/.test(line))
+                .filter((line) => !/<js_sys::futures::queue::Queue>::new()/.test(line))
+                .join("\n")
+                .replaceAll("::{closure#0}", "()")
+            );
+          }
+
+          WasmTracingAllocator?.addListener("alloc", ({ size, getStack }) => {
+            // if (size > 100000) {
+            //   const stack = getStack()
+            //     ?.replaceAll(BASE_PATH, "")
+            //     .split("\n")
+            //     .filter((v) => /anitorio_wasm/.test(v) && !/anitorio_wasm.js/.test(v))
+            //     .join("\n");
+            //   console.log(formatFileSize(+size), cleanWasmStack(stack));
+            // }
+            const wasmMemoryUsage = {
+              bytes: wasm?.memory.buffer.byteLength ?? 0,
+              commited: WasmTracingAllocator?.getTotalAllocated(),
+            };
+            postMessage({ wasmMemoryUsage });
+          });
+          WasmTracingAllocator?.addListener("dealloc", ({ size, getStack }) => {
+            // if (size > 100000) {
+            //   const stack = getStack()
+            //     ?.replaceAll(BASE_PATH, "")
+            //     .split("\n")
+            //     .filter((v) => /anitorio_wasm/.test(v) && !/anitorio_wasm.js/.test(v))
+            //     .join("\n");
+            //   console.log(formatFileSize(-size), cleanWasmStack(stack));
+            // }
+            const wasmMemoryUsage = {
+              bytes: wasm?.memory.buffer.byteLength ?? 0,
+              commited: WasmTracingAllocator?.getTotalAllocated(),
+            };
+            postMessage({ wasmMemoryUsage });
+          });
+        }
+      }
 
       setInterval(() => {
         const bytes = wasm?.memory.buffer.byteLength ?? 0;
-        if (bytes === prevMemoryUsage) return;
+        const wasmMemoryUsage = {
+          bytes,
+          commited: WasmTracingAllocator?.getTotalAllocated(),
+        };
+        // if (bytes === prevMemoryUsage) return;
 
         prevMemoryUsage = bytes;
-        logWasmAllocationInfo();
-        postMessage({ wasmMemoryUsage: { bytes: wasm?.memory.buffer.byteLength ?? 0 } });
-      }, 1);
+        postMessage({ wasmMemoryUsage });
+      }, 50);
+
+      const { default: init, init: prepare_wasm, set_progress_callback } = await import("@/../pkg/anitorio_wasm");
+      wasm = await init();
+      prepare_wasm();
+      set_progress_callback((percentage: number, status: string) => postMessage({ progress: { percentage, status } }));
     })(),
     setCombPosData: null as Promise<void> | null,
   };
@@ -67,7 +129,7 @@ async function main() {
   function logWasmAllocationInfo() {
     if (__BUILD_COMMIT__) return;
 
-    (self as any).WasmTracingAllocator.dumpLiveAllocations({
+    WasmTracingAllocator!.dumpLiveAllocations({
       keyLabel: "Allocation function",
       valueLabel: "Memory (MiB)",
       // getKey(allocation: { stack: string }) {
@@ -317,6 +379,11 @@ async function main() {
             }
           },
           async getFrameData({ inBuffer, dimensions }: { inBuffer: WasmSharedMemory; dimensions: [number, number] }) {
+            // if (wasm!.memory.buffer.byteLength > 30_000_000) {
+            //   logWasmAllocationInfo();
+            //   await new Promise((resolve) => setTimeout(resolve, 30000));
+            // }
+
             try {
               const frameInterval = 1 / targetFps;
 

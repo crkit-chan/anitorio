@@ -13,8 +13,7 @@ use std::sync::Arc;
 use tsify::Tsify;
 use wasm_bindgen::prelude::*;
 
-pub struct ObjectGeneratorOutput {
-    pub entities: Vec<BlueprintEntity>,
+pub struct ObjectGeneratorMetadata {
     pub wires: Vec<Wire>,
     pub next_ent_n: u32,
 }

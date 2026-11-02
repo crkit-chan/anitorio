@@ -25,7 +25,11 @@ pub fn generate_lamps(
     base_ent_n: u32,
     start_pos: DVec2,
     args: &BlueprintArgs,
-) -> (ObjectGeneratorOutput, (Option<u32>, Option<u32>)) {
+) -> (
+    Vec<BlueprintEntity>,
+    ObjectGeneratorMetadata,
+    (Option<u32>, Option<u32>),
+) {
     use crate::blueprint::models::ImageRotation::*;
 
     let mut ents = Vec::new();
@@ -117,10 +121,9 @@ pub fn generate_lamps(
             top_left_ent_n = prev_ent_n;
         }
     }
-    let output = ObjectGeneratorOutput {
-        entities: ents,
+    let output = ObjectGeneratorMetadata {
         wires,
         next_ent_n: get_ent_num(grid_dim.y - 1, grid_dim.x - 1) + 1,
     };
-    (output, (top_left_ent_n, top_right_ent_n))
+    (ents, output, (top_left_ent_n, top_right_ent_n))
 }

@@ -4,10 +4,10 @@ mod blueprint;
 mod constants;
 mod image_processing;
 mod image_utils;
+mod ioutil;
 mod macros;
 mod models;
 mod progress;
-mod streaming_writer;
 mod util;
 mod wasm_buffer;
 
@@ -44,6 +44,7 @@ pub async fn run_blueprint(
     use blueprint::{encoder::BlueprintEncoder, generator::BlueprintGenerator};
     use image::GenericImageView;
     use image_processing::{FrameCallback, FrameData, JsVideoFrameCallback};
+    use ioutil::StreamingWriter;
     use js_sys::{self as js, Function as JsFn};
     use models::*;
     use std::{
@@ -51,7 +52,6 @@ pub async fn run_blueprint(
         collections::VecDeque,
         rc::Rc,
     };
-    use streaming_writer::StreamingWriter;
     use util::*;
     use wasm_bindgen_futures::JsFuture;
 
@@ -213,4 +213,14 @@ pub async fn encode_gif(args: JsValue, callbacks: JsValue) -> Result<(), JsValue
 #[wasm_bindgen]
 pub fn wasm_memory() -> JsValue {
     wasm_bindgen::memory()
+}
+
+#[wasm_bindgen]
+pub fn is_optimized() -> bool {
+    #[cfg(feature = "profiling")]
+    {
+        return false;
+    }
+
+    true
 }

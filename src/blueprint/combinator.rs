@@ -2,7 +2,7 @@ use crate::blueprint::models::{ComparatorString as CompStr, *};
 use crate::blueprint::{constants::*, macros::*, power_pole::*};
 use crate::util::{OneOrMany, ResultJsExt};
 use glam::{DVec2, IVec2, dvec2};
-use std::{cell::RefCell, collections::HashMap, io::Read, sync::Arc};
+use std::{cell::RefCell, collections::BTreeMap, io::Read, sync::Arc};
 use wasm_bindgen::*;
 
 thread_local! {
@@ -90,9 +90,10 @@ pub fn load_comb_pos_json(json_bytes: &[u8]) -> Result<(), JsValue> {
 }
 
 pub struct GenerateCombinatorsOutput {
-    pub data_cbs: ObjectGeneratorOutput,
-
+    pub data_cbs: LazyCombinators,
     pub other_ents: Vec<BlueprintEntity>,
+    pub metadata: ObjectGeneratorMetadata,
+
     pub in_ent_n: u32,
     pub out_ent_n: u32,
 }
@@ -124,7 +125,7 @@ pub fn generate_combinators(
     // Positions for combinators, for different widths.
     // TODO: Don't recalculate this for every group
     let mut best_pos_data: Option<CombinatorPositionData> = None;
-    let mut pos_dict: HashMap<String, &BlueprintEntity> = HashMap::new();
+    let mut pos_dict: BTreeMap<String, &BlueprintEntity> = BTreeMap::new();
     let mut base_pos = start_pos;
     let use_compact_layout = max_cols_per_grp < 2;
     let use_delta_comp = args.signal_compression == Some(SignalCompression::Delta);
@@ -148,10 +149,11 @@ pub fn generate_combinators(
             }
         }
     }
+    let mut first_data_cb_ent_n: Option<u32> = None;
     let mut first_connection_ent_n: Option<u32> = None;
     let mut curr_ent_n = base_ent_n;
     let mut other_ents = Vec::new(); // shifters / etc
-    let mut data_cbs = Vec::new(); // data entities
+    // let mut data_cbs = Vec::new(); // data entities
     let mut wires = Vec::new();
 
     let use_const_cbs = matches!(args.mode, Mode::Static { const_cb: true, .. });
@@ -284,6 +286,7 @@ pub fn generate_combinators(
     } else {
         &DEC_CB
     });
+    let mut positions = Vec::<(u32, DVec2)>::new();
 
     // Generates combinators up to down, then left to right.
     for tick_i in 0..ticks_per_group as usize {
@@ -301,9 +304,9 @@ pub fn generate_combinators(
             }
         }
 
-        let mut en = BlueprintEntity::new(curr_ent_n, Arc::clone(&target_name), curr_pos);
         if tick_i == 0 {
-            en = en.with_tag("first data comb");
+            first_data_cb_ent_n = Some(curr_ent_n);
+
             if use_delta_comp {
                 let ent_n = entity_idx_by_tag!(other_ents, "memory comb").expect("No memory comb!");
                 wires.push([curr_ent_n, WIRE_OUT_G, ent_n, WIRE_G]);
@@ -313,11 +316,7 @@ pub fn generate_combinators(
             }
         }
 
-        data_cbs.push(en.with_direction(match use_const_cbs {
-            true => DIR_D,
-            _ if use_compact_layout => DIR_U,
-            _ => DIR_R,
-        }));
+        positions.push((curr_ent_n, curr_pos));
 
         let x_i = grid_pos.x as usize;
         let prefer_horiz = false;
@@ -346,18 +345,54 @@ pub fn generate_combinators(
     wires.push([
         in_ent_n,
         WIRE_R,
-        entity_idx_by_tag!(data_cbs, "first data comb").expect("No first data comb!"),
+        first_data_cb_ent_n.expect("No first data combinator"),
         WIRE_R,
     ]);
 
     Ok(GenerateCombinatorsOutput {
-        data_cbs: ObjectGeneratorOutput {
-            entities: data_cbs,
+        data_cbs: LazyCombinators {
+            positions: positions.into_boxed_slice(),
+            target_name,
+            direction: match use_const_cbs {
+                true => DIR_D,
+                _ if use_compact_layout => DIR_U,
+                _ => DIR_R,
+            },
+        },
+        other_ents,
+        metadata: ObjectGeneratorMetadata {
             wires,
             next_ent_n: curr_ent_n,
         },
-        other_ents,
         in_ent_n,
         out_ent_n,
     })
+}
+
+pub struct LazyCombinators {
+    positions: Box<[(u32, DVec2)]>,
+    target_name: Arc<str>,
+    direction: u32,
+}
+impl LazyCombinators {
+    #[allow(dead_code)]
+    pub fn len(&self) -> usize {
+        self.positions.len()
+    }
+
+    #[allow(dead_code)]
+    pub fn is_empty(&self) -> bool {
+        self.positions.is_empty()
+    }
+
+    pub fn get(&self, index: usize) -> Option<BlueprintEntity> {
+        let (curr_ent_n, pos) = self.positions[index];
+        let mut entity = BlueprintEntity::new(curr_ent_n, Arc::clone(&self.target_name), pos);
+
+        if index == 0 {
+            entity = entity.with_tag("first data comb");
+        }
+
+        Some(entity.with_direction(self.direction))
+    }
 }

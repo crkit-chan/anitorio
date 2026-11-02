@@ -240,11 +240,9 @@ pub fn webp_info(data: &[u8]) -> Result<AnimationInfo, &'static str> {
 }
 
 pub fn animation_info(data: &[u8]) -> Result<AnimationInfo, &'static str> {
-    if data.len() >= 6 && matches!(&data[..6], b"GIF87a" | b"GIF89a") {
-        gif_info(data)
-    } else if data.len() >= 12 && &data[..4] == b"RIFF" && &data[8..12] == b"WEBP" {
-        webp_info(data)
-    } else {
-        Err("Unsupported image format")
+    match data {
+        x if x.len() >= 12 && &x[0..4] == b"RIFF" && &x[8..12] == b"WEBP" => webp_info(x),
+        x if x.len() >= 6 && matches!(&x[0..6], b"GIF87a" | b"GIF89a") => gif_info(x),
+        _ => Err("Unsupported image format"),
     }
 }

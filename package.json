@@ -1,5 +1,5 @@
 {
-  "name": "vite-template-solid",
+  "name": "Anitorio",
   "version": "0.0.0",
   "description": "",
   "type": "module",
@@ -10,7 +10,7 @@
     "build:opt": "npm run wasm:build:opt && vite build",
     "serve": "vite preview",
     "wasm:build": "wasm-pack build --target web --release --features profiling",
-    "wasm:build:opt": "wasm-pack build --target web --profile release-release",
+    "wasm:build:opt": "wasm-pack build --target web --profile release-release --features default",
     "wasm:watch": "nodemon --watch src --watch Cargo.toml --ext rs,toml --exec \"npm run wasm:build && npm run start\""
   },
   "license": "MIT",

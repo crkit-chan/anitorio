@@ -46,7 +46,7 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
   const [timingSignals, setTimingSignals] = createSignal<TimingSignals | null>(null);
   const [showStreamingWindowWarning, setShowStreamingWindowWarning] = createSignal(false);
   const [downloadUrl, setDownloadUrl] = createSignal<string | null>(null);
-  const [wasmMemoryUsage, setWasmMemoryUsage] = createSignal(0);
+  const [wasmMemoryUsage, setWasmMemoryUsage] = createSignal({ bytes: 0, commited: 0 });
   const [blueprintDownloadStartTime, setBlueprintDownloadStartTime] = createSignal(performance.now());
 
   let refBackground!: BackgroundApi;
@@ -81,8 +81,8 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
       formRefs.progressBar.style.setProperty("--progress", `${percentage}%`);
       formRefs.progressStatus.textContent = `(${percentage.toFixed(0)}%)  ${status}`;
     } else if (data.wasmMemoryUsage) {
-      const { bytes } = data.wasmMemoryUsage;
-      setWasmMemoryUsage(bytes);
+      const { bytes, commited } = data.wasmMemoryUsage;
+      setWasmMemoryUsage({ bytes, commited });
     } else if (data.shouldShowPreview) {
       const { showPreview } = data.shouldShowPreview;
       setWorkerShouldShowPreview(showPreview);
@@ -937,7 +937,10 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
           </div>
           <Show when={wasmMemoryUsage()} keyed>
             <div class="z-50000 fixed bottom-0 right-0 text-tan-500 m-1 text-xs opacity-40">
-              WASM memory: {formatFileSize(wasmMemoryUsage())}
+              <Show when={wasmMemoryUsage().bytes}>
+                WASM memory: Reserved: {formatFileSize(wasmMemoryUsage().bytes)}
+                <Show when={wasmMemoryUsage().commited}> | Used: {formatFileSize(wasmMemoryUsage().commited)}</Show>
+              </Show>
             </div>
           </Show>
         </footer>
