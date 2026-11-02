@@ -7,7 +7,7 @@ pub struct TrimmedWriter<'a, W: io::Write> {
 }
 
 impl<'a, W: io::Write> TrimmedWriter<'a, W> {
-    pub fn new(writer: &'a mut W) -> Self {
+    pub const fn new(writer: &'a mut W) -> Self {
         Self {
             last: None,
             is_first: true,

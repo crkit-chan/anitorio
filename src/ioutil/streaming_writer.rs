@@ -16,7 +16,6 @@ impl<F: FnMut(Vec<u8>) -> Result<(), JsValue>> StreamingWriter<F> {
         }
     }
 
-    #[inline(always)]
     fn call_on_chunk(&mut self, chunk: Vec<u8>) -> io::Result<()> {
         (self.on_chunk)(chunk)
             .map_err(|e| io::Error::other(e.as_string().unwrap_or_else(|| format!("{e:?}"))))

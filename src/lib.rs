@@ -152,24 +152,12 @@ pub async fn run_blueprint(
     }
 
     // Custom writer that invokes a callback whenever chunk size is reached.
-    let writer: Box<dyn std::io::Write> = {
-        if args.low_mem_usage || true {
-            let writer = ioutil::CallbackWriter::new(|chunk| {
-                let data = js::Uint8Array::from(chunk.as_slice());
-                let promise = callbacks.on_chunk.call_n((&data,))?;
-                (promise_q.borrow_mut().back_mut().unwrap()).push(promise);
-                Ok(())
-            });
-            Box::new(std::io::BufWriter::with_capacity(1024 * 1024, writer))
-        } else {
-            Box::new(ioutil::StreamingWriter::new(1024 * 1024, |chunk| {
-                let data = js::Uint8Array::from(chunk.as_slice());
-                let promise = callbacks.on_chunk.call_n((&data,))?;
-                (promise_q.borrow_mut().back_mut().unwrap()).push(promise);
-                Ok(())
-            }))
-        }
-    };
+    let writer = ioutil::BufWriter::new(1024 * 1024, !args.low_mem_usage && false, |chunk| {
+        let data = js::Uint8Array::from(chunk.as_slice());
+        let promise = callbacks.on_chunk.call_n((&data,))?;
+        (promise_q.borrow_mut().back_mut().unwrap()).push(promise);
+        Ok(())
+    });
 
     // Yields JSON or compressed blueprint in chunks
     let generator = BlueprintGenerator::new(frame_data, &args).await?;
@@ -193,7 +181,7 @@ pub async fn run_blueprint(
     }
 
     let mut writer = encoder.finish()?;
-    writer.flush().map_js_err("Stream finish err")?;
+    writer.finish().map_js_err("Stream finish err")?;
 
     flush().await?; // Flush tail
 
