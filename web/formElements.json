@@ -289,5 +289,10 @@
       }
     },
     "splash": "Tip: From Factorio v2.0.25 onwards, JSON and blueprint files can be imported directly into the game via drag-and-drop."
+  },
+  "lowMemUsage": {
+    "name": "Low RAM Mode",
+    "type": "checkbox",
+    "tooltip": "If enabled, reduces RAM usage required when generating the blueprint, at a small performance cost. Generated output is identical."
   }
 }

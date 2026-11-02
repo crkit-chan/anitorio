@@ -1,6 +1,6 @@
 use crate::blueprint::data::PROTOTYPE_DATA;
 use crate::blueprint::{constants::*, models::*};
-use crate::models::ImageRotation::*;
+use crate::models::ImageRotate::*;
 use glam::{DVec2, dvec2};
 use std::{collections::BTreeMap, sync::Arc};
 use wasm_bindgen::JsValue;
@@ -87,7 +87,7 @@ impl PowerPoleOccupied {
         }
         impl Eq for OrderedDVec2 {}
 
-        let horiz = args.prefer_horizontal_wires ^ matches!(args.image_rotation, Deg90 | Deg270);
+        let horiz = args.prefer_horizontal_wires ^ matches!(args.image_args.rotate, Deg90 | Deg270);
         let mut pole_map = BTreeMap::<OrderedDVec2, u32>::new();
 
         self.requests

@@ -30,7 +30,7 @@ pub fn generate_lamps(
     ObjectGeneratorMetadata,
     (Option<u32>, Option<u32>),
 ) {
-    use crate::blueprint::models::ImageRotation::*;
+    use crate::blueprint::models::ImageRotate::*;
 
     let mut ents = Vec::new();
     let mut wires = Vec::new();
@@ -39,9 +39,9 @@ pub fn generate_lamps(
 
     // Auto-rotate wires based on image rotation
     let prefer_horizontal_wires =
-        args.prefer_horizontal_wires ^ matches!(args.image_rotation, Deg90 | Deg270);
+        args.prefer_horizontal_wires ^ matches!(args.image_args.rotate, Deg90 | Deg270);
     let base_pos = start_pos + dvec2(0.5, 0.5); // Lamps are centered on the middle of a tile
-    let mode = args.mode;
+    let mode = args.image_args.mode;
     let get_ent_num = |r: u32, c: u32| -> u32 { base_ent_n + r * grid_dim.x + c };
     let mut prev_ents_n: Vec<Option<u32>> = vec![None; grid_dim.x as usize];
     let curr_frame = curr_frame.as_ref().map(|f| f.to_rgba8());
@@ -65,7 +65,7 @@ pub fn generate_lamps(
                 top_right_ent_n = Some(curr_ent_n); // Handle case of only one column
             }
 
-            if matches!(args.mode, Mode::Static { combs: false, .. }) {
+            if matches!(args.image_args.mode, Mode::Static { combs: false, .. }) {
                 let frame = curr_frame.as_ref();
                 let frame = frame.expect("StaticImage without combintors requires a frame");
                 let p = frame.get_pixel(c as u32, r as u32);
@@ -77,13 +77,14 @@ pub fn generate_lamps(
                 });
             } else {
                 let sig = Arc::clone(&signals[index]);
+                let grayscale_bits = args.image_args.grayscale_bits;
                 lamp = lamp.with_control_behavior(ControlBehavior::Lamp {
                     use_colors: true,
-                    color_mode: if args.grayscale_bits > 0 { 1 } else { 2 },
-                    red_signal: (args.grayscale_bits > 0).then(|| Arc::clone(&sig)),
-                    green_signal: (args.grayscale_bits > 0).then(|| Arc::clone(&sig)),
-                    blue_signal: (args.grayscale_bits > 0).then(|| Arc::clone(&sig)),
-                    rgb_signal: (args.grayscale_bits > 0).not().then(|| Arc::clone(&sig)),
+                    color_mode: if grayscale_bits > 0 { 1 } else { 2 },
+                    red_signal: (grayscale_bits > 0).then(|| Arc::clone(&sig)),
+                    green_signal: (grayscale_bits > 0).then(|| Arc::clone(&sig)),
+                    blue_signal: (grayscale_bits > 0).then(|| Arc::clone(&sig)),
+                    rgb_signal: (grayscale_bits > 0).not().then(|| Arc::clone(&sig)),
                 });
             }
 

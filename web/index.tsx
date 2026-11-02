@@ -98,7 +98,7 @@ render(() => {
 }, root!);
 
 // Cleanup on page exit
-window.addEventListener("pagehide", () => {
+window.addEventListener("beforeunload", () => {
   observer.disconnect();
   worker.terminate();
 

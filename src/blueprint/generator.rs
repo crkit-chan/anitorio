@@ -4,7 +4,7 @@ use crate::blueprint::{
 };
 use crate::image_processing::FrameData;
 use crate::progress::set_progress;
-use crate::util::format_duration;
+use crate::util::{ResultJsExt, format_duration};
 use glam::{UVec2, dvec2, uvec2};
 use std::{io, sync::Arc};
 use wasm_bindgen::JsValue;
@@ -25,6 +25,8 @@ pub struct BlueprintGenerator<'a> {
     /// Stores the iterator that generates the next frame, for streaming output.
     /// May be None if only generating the lamp grid.
     frame_info: Option<FrameInfo<'a>>,
+    /// Whether to generate any combinators or not.
+    generate_cbs: bool,
     /// Target dimensions of the image or video.
     dim: UVec2,
     /// Maximum number of lamp columns per group. Groups are always divided split vertically.
@@ -35,8 +37,6 @@ pub struct BlueprintGenerator<'a> {
     /// Keeps track of positions currently occupied by power poles, and used to request powerage for
     /// generated entities.
     occupied: PowerPoleOccupied,
-    /// Whether to generate any combinators or not.
-    should_generate_cbs: bool,
     /// List of unique signals to use for the blueprint.
     signals: Box<[Arc<SignalID>]>,
     signals_str: Arc<[serde_json::Value]>,
@@ -84,7 +84,7 @@ impl<'a> BlueprintGenerator<'a> {
         args: &'a BlueprintArgs,
     ) -> Result<Self, JsValue> {
         let (signals, signals_str) = Self::get_signal_data(args);
-        let gray_bits = args.grayscale_bits;
+        let gray_bits = args.image_args.grayscale_bits;
         let comb_comp = args.signal_compression;
         let time_comp_win = match comb_comp {
             Some(SignalCompression::Temporal { window }) => window,
@@ -97,7 +97,7 @@ impl<'a> BlueprintGenerator<'a> {
             let n_scaled_frames = frame_data.total_frames() * if time_comp_win > 0 { 2 } else { 1 };
             let frames_per_cb = 32u32.checked_div(gray_bits).unwrap_or(1);
             let n_buf_frames = match time_comp_win {
-                w if w > 0 => (w * args.target_fps).div_ceil(1000 * frames_per_cb),
+                w if w > 0 => (w * args.image_args.target_fps).div_ceil(1000 * frames_per_cb),
                 _ => 1,
             };
             dim = frame_data.out_dim();
@@ -110,7 +110,7 @@ impl<'a> BlueprintGenerator<'a> {
                 n_scaled_frames,
                 next_frame: None,
                 patch_states: Vec::new(),
-                ticks_per_frame: 60 / args.target_fps,
+                ticks_per_frame: 60 / args.image_args.target_fps,
                 use_delta_comp: comb_comp.is_some_and(|c| c == SignalCompression::Delta),
             });
         } else {
@@ -118,8 +118,8 @@ impl<'a> BlueprintGenerator<'a> {
             let h = args.custom_height.expect("Must have height or frame data.");
             dim = uvec2(w, h);
         }
-        let use_const_cbs = matches!(args.mode, Mode::Static { const_cb: true, .. });
-        let max_lamp_cols_per_grp = match args.mode {
+        let use_const_cbs = matches!(args.image_args.mode, Mode::Static { const_cb: true, .. });
+        let max_lamp_cols_per_grp = match args.image_args.mode {
             Mode::Static { combs: false, .. } => dim.x,
             // Constant combinators can only hold up to 1000 signals
             _ => ((signals.len() as u32).min(if use_const_cbs { 255_000 } else { u32::MAX })
@@ -157,8 +157,8 @@ impl<'a> BlueprintGenerator<'a> {
             max_cols_per_grp: max_lamp_cols_per_grp,
             n_groups,
             occupied: PowerPoleOccupied::new(dvec2(0.0, -(args.display_margin_y as f64)), args)?,
-            should_generate_cbs: !matches!(
-                args.mode,
+            generate_cbs: !matches!(
+                args.image_args.mode,
                 Mode::Static { combs: false, .. } | Mode::Lamps | Mode::LampGrid
             ),
             signals,
@@ -170,32 +170,32 @@ impl<'a> BlueprintGenerator<'a> {
     /// Calculates the required position for the given entity to counteract the rotation of the image.
     fn transform_entity(args: &BlueprintArgs, en: &mut BlueprintEntity) {
         let mut pos = en.position;
-        pos = match args.flipped_axes {
-            FlippedAxes::X => dvec2(-pos.x, pos.y),
-            FlippedAxes::Y => dvec2(pos.x, -pos.y),
-            FlippedAxes::Both => dvec2(-pos.x, -pos.y),
+        pos = match args.image_args.flip {
+            ImageFlip::X => dvec2(-pos.x, pos.y),
+            ImageFlip::Y => dvec2(pos.x, -pos.y),
+            ImageFlip::Both => dvec2(-pos.x, -pos.y),
             _ => pos,
         };
-        pos = match args.image_rotation {
-            ImageRotation::Deg90 => dvec2(pos.y, -pos.x),
-            ImageRotation::Deg180 => dvec2(-pos.x, -pos.y),
-            ImageRotation::Deg270 => dvec2(-pos.y, pos.x),
+        pos = match args.image_args.rotate {
+            ImageRotate::Deg90 => dvec2(pos.y, -pos.x),
+            ImageRotate::Deg180 => dvec2(-pos.x, -pos.y),
+            ImageRotate::Deg270 => dvec2(-pos.y, pos.x),
             _ => pos,
         };
 
         en.position = pos;
         en.direction = en.direction.map(|v| {
             let mut v = v as i64;
-            v += match args.image_rotation {
-                ImageRotation::Deg90 => 12,
-                ImageRotation::Deg180 => 8,
-                ImageRotation::Deg270 => 4,
+            v += match args.image_args.rotate {
+                ImageRotate::Deg90 => 12,
+                ImageRotate::Deg180 => 8,
+                ImageRotate::Deg270 => 4,
                 _ => 0,
             };
-            v += match args.flipped_axes {
-                FlippedAxes::X if (v + 4) % 8 == 0 => 8,
-                FlippedAxes::Y if v % 8 == 0 => 8,
-                FlippedAxes::Both => 8,
+            v += match args.image_args.flip {
+                ImageFlip::X if (v + 4) % 8 == 0 => 8,
+                ImageFlip::Y if v % 8 == 0 => 8,
+                ImageFlip::Both => 8,
                 _ => 0,
             };
             (v % 16) as u32
@@ -206,7 +206,7 @@ impl<'a> BlueprintGenerator<'a> {
         let mut signals = PROTOTYPE_DATA.with_borrow(|v| {
             let signals = &v.as_ref().expect("No signal data loaded yet!").signals;
             if matches!(
-                args.mode,
+                args.image_args.mode,
                 Mode::LampGrid | Mode::Lamps | Mode::Static { timer: false, .. }
             ) {
                 return signals.clone();
@@ -254,7 +254,7 @@ impl<'a> BlueprintGenerator<'a> {
             BlueprintState::Start => {
                 write_to(writer, br#"{"blueprint":{"#)?;
 
-                let bp_color = match self.args.grayscale_bits {
+                let bp_color = match self.args.image_args.grayscale_bits {
                     0 => "#8888ff",
                     _ => "#888888",
                 };
@@ -271,7 +271,7 @@ impl<'a> BlueprintGenerator<'a> {
                         index: 1,
                     }]),
                     item: BLUEPRINT.to_string(),
-                    label: Some(match self.args.mode {
+                    label: Some(match self.args.image_args.mode {
                         Mode::Full => name.unwrap_or("GIF".to_owned()),
                         Mode::Lamps => format!("{}x{} Lamps", self.dim.x, self.dim.y),
                         Mode::LampGrid => format!("{}x{} Lamp Grid", self.dim.x, self.dim.y),
@@ -288,7 +288,7 @@ impl<'a> BlueprintGenerator<'a> {
             }
             BlueprintState::Entities => self.place_entities(writer).await?,
             BlueprintState::Data => {
-                if self.should_generate_cbs {
+                if self.generate_cbs {
                     self.populate_data(writer).await?;
                 } else {
                     self.state = BlueprintState::Wires;
@@ -355,7 +355,7 @@ impl<'a> BlueprintGenerator<'a> {
         let dim = self.dim;
 
         let mut output: Vec<String> = Vec::new();
-        let name = match self.args.mode {
+        let name = match self.args.image_args.mode {
             Mode::LampGrid => format!("{}x{} Lamp Grid", dim.x, dim.y),
             Mode::Lamps => format!("{}x{} Lamps", dim.x, dim.y),
             _ => name.unwrap_or("Blueprint".to_owned()),
@@ -369,7 +369,7 @@ impl<'a> BlueprintGenerator<'a> {
 
         if let Some(fd) = info.map(|x| &x.frame_data) {
             let duration = format_duration(fd.curr_duration_us().div_ceil(1000));
-            let color_format = match self.args.grayscale_bits {
+            let color_format = match self.args.image_args.grayscale_bits {
                 0 => "Full Color (RGB8)",
                 1 => "Black & White",
                 4 => "4-bit Grayscale (16 colors)",
@@ -377,7 +377,7 @@ impl<'a> BlueprintGenerator<'a> {
                 x => &format!("{x}"),
             };
             let n_frames = fd.curr_total_frames();
-            let fps = self.args.target_fps;
+            let fps = self.args.image_args.target_fps;
 
             output.push(format!("\n[font=var]Color Format[/font]:   {color_format}"));
             if let Some(compression) = self.args.signal_compression {
@@ -405,7 +405,7 @@ impl<'a> BlueprintGenerator<'a> {
         let signals = &mut self.signals;
         let ent_data = &mut self.entity_data;
 
-        if self.should_generate_cbs && !matches!(args.mode, Mode::Static { timer: false, .. }) {
+        if self.generate_cbs && !matches!(args.image_args.mode, Mode::Static { timer: false, .. }) {
             let info = info.as_mut().unwrap();
             let stop = info.frame_data.total_frames() * info.ticks_per_frame;
             let (mut ents, wires) =
@@ -424,7 +424,7 @@ impl<'a> BlueprintGenerator<'a> {
         let n_groups = self.n_groups;
 
         for group_i in 0..n_groups {
-            let is_static = matches!(args.mode, Mode::Static { .. });
+            let is_static = matches!(args.image_args.mode, Mode::Static { .. });
             let thresh = if is_static { 0.60 } else { 0.10 };
             set_progress(
                 0.00,
@@ -446,7 +446,7 @@ impl<'a> BlueprintGenerator<'a> {
             ) = generate_lamps(
                 signals,
                 uvec2(grp_width, self.dim.y),
-                matches!(self.args.mode, Mode::Static { combs: false, .. }).then(
+                matches!(self.args.image_args.mode, Mode::Static { combs: false, .. }).then(
                     || Arc::clone(&info.as_ref().unwrap().curr_frame), // Pass image data to lamp generation
                 ),
                 &mut self.occupied,
@@ -457,7 +457,7 @@ impl<'a> BlueprintGenerator<'a> {
             let (top_left_lamp_ent_n, top_right_lamp_ent_n) = io_ents_n;
             ent_data.next_ent_n = new_next_ent_n;
 
-            if self.should_generate_cbs {
+            if self.generate_cbs {
                 let info = info.as_mut().unwrap();
                 let GenerateCombinatorsOutput {
                     metadata:
@@ -488,17 +488,17 @@ impl<'a> BlueprintGenerator<'a> {
                 (cb_in_ent_n, cb_out_ent_n) = (in_ent_n, out_ent_n);
             }
 
-            if self.should_generate_cbs {
+            if self.generate_cbs {
                 let wires = &mut ent_data.wires;
                 if let Some(top_left_lamp_ent_n) = top_left_lamp_ent_n {
-                    if !matches!(args.mode, Mode::Static { timer: false, .. }) {
+                    if !matches!(args.image_args.mode, Mode::Static { timer: false, .. }) {
                         // Timing wire
                         wires.push([top_left_lamp_ent_n, WIRE_R, cb_in_ent_n, WIRE_R]);
                     }
 
                     // Data wire
-                    if args.grayscale_bits == 0
-                        && matches!(args.mode, Mode::Static { const_cb: true, .. })
+                    if args.image_args.grayscale_bits == 0
+                        && matches!(args.image_args.mode, Mode::Static { const_cb: true, .. })
                     {
                         wires.push([top_left_lamp_ent_n, WIRE_G, cb_out_ent_n, WIRE_G]);
                     } else {
@@ -544,14 +544,14 @@ impl<'a> BlueprintGenerator<'a> {
         let signals = &self.signals;
 
         let frames_per_cb = info.frames_per_cb;
-        let gray_bits = self.args.grayscale_bits;
+        let gray_bits = self.args.image_args.grayscale_bits;
         let max_cols_per_grp = self.max_cols_per_grp;
         let n_buf_frames = info.n_buf_frames;
         let n_groups = self.n_groups;
         let ticks_per_frame = info.ticks_per_frame;
         let use_delta_comp = info.use_delta_comp;
         let ticks_per_grp = ticks_per_frame * frames_per_cb;
-        let mode = self.args.mode;
+        let mode = self.args.image_args.mode;
         let sig_p = self.args.timing_signals.p.clone();
         let mut output_data: Vec<BlueprintEntity> = Vec::new();
 
@@ -599,7 +599,10 @@ impl<'a> BlueprintGenerator<'a> {
             let is_last_frame = info.next_frame.is_none();
 
             for group_i in 0..n_groups {
-                if matches!(self.args.mode, Mode::Static { const_cb: true, .. }) {
+                if matches!(
+                    self.args.image_args.mode,
+                    Mode::Static { const_cb: true, .. }
+                ) {
                     let thresh = 0.60;
                     set_progress(
                         thresh,
@@ -730,13 +733,21 @@ impl<'a> BlueprintGenerator<'a> {
             }
         }
 
+        for en in output_data.iter_mut() {
+            self.occupied.request(en.position); // Request powerage for generated combinators
+            Self::transform_entity(self.args, en);
+        }
         if !output_data.is_empty() {
-            for en in output_data.iter_mut() {
-                self.occupied.request(en.position); // Request powerage for generated combinators
-                Self::transform_entity(self.args, en);
-            }
             write_to(writer, b",")?;
-            write_json_trimmed_to(writer, &output_data)?; // Remove braces
+
+            if self.args.low_mem_usage {
+                let mut buffered = io::BufWriter::with_capacity(512 * 1024, writer);
+                let mut trimmed = crate::ioutil::TrimmedWriter::new(&mut buffered);
+                serde_json::to_writer(&mut trimmed, &output_data).map_js_err("Write error")?;
+                trimmed.finish().map_js_err("Write error")?;
+            } else {
+                write_json_trimmed_to(writer, &output_data)?;
+            }
         }
 
         Ok(())

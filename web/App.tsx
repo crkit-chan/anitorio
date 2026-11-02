@@ -1,4 +1,4 @@
-import type { BlueprintArgs } from "@/../pkg/anitorio_wasm";
+import type { BlueprintArgs, ImageArgs } from "@/../pkg/anitorio_wasm";
 import getAnimationInfo, { AnimationInfo, getRawImageData, UnsupportedAnimationError } from "@/animationInfo";
 import Background, { BackgroundApi } from "@/components/Background";
 import FactorioDialogDelete, { FactorioDialogDeleteApi } from "@/components/FactorioDialogDelete";
@@ -315,32 +315,35 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
               customHeight: +formData.customHeight,
               customWidth: +formData.customWidth,
               displayMarginY: +formData.displayMarginY,
-              flippedAxes: `${formData.flippedAxes}`,
-              grayscaleBits: +formData.grayscaleBits,
-              imageFilters: [],
-              imageMetadata: {
+              imageArgs: {
                 dimensions: [animationInfo()!.width!, animationInfo()!.height!],
                 duration: currFile()!.type.startsWith("video") ? refVideo.duration : null,
+                filters: [],
+                flip: `${formData.flippedAxes}` as ImageArgs["flip"],
+                grayscaleBits: +formData.grayscaleBits,
+                maxSize: +formData.maxSize,
                 mimeType: currFile()!.type,
-              },
-              imageRotation: `${formData.imageRotation}`,
-              includePowerPoles: formData.includePowerPoles,
-              maxGroupSize: +formData.maxGroupSize! || null,
-              maxSize: +formData.maxSize,
-              mode: ((!currFile() || !isStaticImage()) && formData.mode) || {
-                staticImage: {
-                  useConstantCombinators: formData.staticImageMode === "constant",
-                  useCombinators: formData.staticImageMode !== "lamps",
-                  useTimer: formData.staticImageMode === "video",
+                mode: ((!currFile() || !isStaticImage()) && formData.mode) || {
+                  staticImage: {
+                    useConstantCombinators: formData.staticImageMode === "constant",
+                    useCombinators: formData.staticImageMode !== "lamps",
+                    useTimer: formData.staticImageMode === "video",
+                  },
                 },
+                nFrames: animationInfo()?.frames || null,
+                resamplingFilter: `${formData.resamplingFilter}`,
+                rotate: `${formData.imageRotation}` as ImageArgs["rotate"],
+                targetFps: +formData.targetFps,
               },
+              includePowerPoles: formData.includePowerPoles,
+              lowMemUsage: formData.lowMemUsage,
+              maxGroupSize: +formData.maxGroupSize! || null,
               name: currFile()!.name,
               outputFormat: `${formData.outputFormat}`,
               powerPoleName: formData.powerPoleName,
               powerPoleQuality: formData.powerPoleQuality,
               preferGreenWires: !!(formData.wireColor === "green"),
               preferHorizontalWires: !!(formData.connectionDirection === "horizontal"),
-              resamplingFilter: `${formData.resamplingFilter}`,
               signalCompression:
                 (formData.signalCompressionType === "delta" && "delta") ||
                 (formData.signalCompressionType === "temporal" ? { temporal: { window: +formData.temporalCompressionWindow } } : null),
@@ -350,7 +353,6 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
                     ? "json"
                     : "compression"
                   : `${formData.signalSorting}`,
-              targetFps: +formData.targetFps,
               timingSignals: timingSignals()!,
             } satisfies BlueprintArgs,
           },

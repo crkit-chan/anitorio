@@ -1,4 +1,4 @@
-import { BlueprintArgs } from "@/../pkg/anitorio_wasm";
+import { BlueprintArgs, ImageArgs } from "@/../pkg/anitorio_wasm";
 import FORM_ELEMENTS from "@/formElements.json";
 import _INITIAL_VALUES from "@/initialValues.json";
 import { Ajv, JSONSchemaType } from "ajv";
@@ -75,7 +75,8 @@ export function setInitialValues(values: object) {
   localStorage.setItem(FORM_DATA_KEY, JSON.stringify(values));
 }
 export function getInitialValues(): typeof _INITIAL_VALUES &
-  Pick<BlueprintArgs, "flippedAxes" | "imageRotation" | "mode" | "outputFormat" | "resamplingFilter"> &
+  Pick<BlueprintArgs, "outputFormat"> &
+  Pick<ImageArgs, "mode" | "resamplingFilter"> &
   (Pick<BlueprintArgs, "signalSorting"> | { signalSorting: "auto" }) {
   const prev = localStorage.getItem(FORM_DATA_KEY);
 

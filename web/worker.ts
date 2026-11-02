@@ -118,7 +118,7 @@ async function main() {
         postMessage({ wasmMemoryUsage });
       }, 50);
 
-      const { default: init, init: prepare_wasm, set_progress_callback } = await import("@/../pkg/anitorio_wasm");
+      const { default: init, init: prepare_wasm, set_progress_callback } = await import("@/../pkg/anitorio_wasm.js");
       wasm = await init();
       prepare_wasm();
       set_progress_callback((percentage: number, status: string) => postMessage({ progress: { percentage, status } }));
@@ -161,7 +161,7 @@ async function main() {
 
   // Used to allow rust to yield to JS at regular intervals
   const syncChannel = new MessageChannel();
-  const syncQ: (() => void)[] = [];
+  const syncQ: ((...args: readonly any[]) => any)[] = [];
 
   syncChannel.port1.onmessage = () => syncQ.shift()?.();
 
@@ -169,7 +169,7 @@ async function main() {
   addEventListener("message", async (evt) => {
     await wasmReadyPromises.init;
 
-    const { encode_gif, run_blueprint, set_comb_pos_data, set_signal_data } = await import("../pkg/anitorio_wasm.js");
+    const { encode_gif, run_blueprint, set_comb_pos_data, set_signal_data } = await import("@/../pkg/anitorio_wasm");
 
     if (evt.data.type === "chunkWritten") {
       const pending = pendingWrites.get(evt.data.id);
@@ -198,8 +198,8 @@ async function main() {
         args: BlueprintArgs;
         imageData: File | Uint8Array<ArrayBuffer> | ImageData;
       } = evt.data.generate;
-      const { outputFormat, targetFps } = blueprintArgs;
-      const useJsDecodedVideo = blueprintArgs.imageMetadata.mimeType.startsWith("video/");
+      const { imageArgs, outputFormat } = blueprintArgs;
+      const useJsDecodedVideo = imageArgs.mimeType.startsWith("video/");
 
       let videoDuration: number | null = null;
 
@@ -292,37 +292,22 @@ async function main() {
 
         const inputData =
           imageData instanceof File && !useJsDecodedVideo
-            ? new Uint8Array(await imageData.arrayBuffer())
+            ? null
             : imageData instanceof ImageData
               ? new Uint8Array(imageData.data.buffer, imageData.data.byteOffset, imageData.data.byteLength)
-              : new Uint8Array();
-
+              : null;
+        const reader = new FileReaderSync();
         const blueprintMetadata = await run_blueprint(blueprintArgs, {
-          getDataLength: () => inputData.byteLength,
-          async getData(inBuffer: WasmSharedMemory) {
-            if (useJsDecodedVideo) return;
+          get_data_len: () => inputData?.byteLength ?? 0,
+          get_data(from, to) {
+            if (useJsDecodedVideo) throw new Error("No data to pass through when using JS decoding");
             if (imageData instanceof File) {
-              const reader = imageData.stream().getReader();
-
-              let offset = 0;
-
-              try {
-                while (true) {
-                  const { done, value } = await reader.read();
-                  if (done) break;
-
-                  new Uint8Array(inBuffer.memory.buffer, inBuffer.ptr + offset, value.length).set(value);
-                  offset += value.length;
-                }
-
-                if (offset !== imageData.size) throw new Error("Incomplete file read");
-              } finally {
-                reader.releaseLock();
-              }
+              return new Uint8Array(reader.readAsArrayBuffer(imageData.slice(from, to)));
             }
+            throw new Error("Unsupported data type");
           },
-          onChunk(data: Uint8Array) {
-            return new Promise<void>((resolve, reject) => {
+          on_chunk(data) {
+            return new Promise((resolve, reject) => {
               try {
                 const id = nextWriteId++;
                 pendingWrites.set(id, { resolve, reject });
@@ -333,7 +318,7 @@ async function main() {
               }
             });
           },
-          async onFrame({ outBuffer, dimensions }: { outBuffer: WasmSharedMemory; dimensions: [number, number] }) {
+          async on_frame({ outBuffer, dimensions }: { outBuffer: WasmSharedMemory; dimensions: [number, number] }) {
             try {
               const { canvas, ctx, sourceCanvas, sourceCtx } = state;
               if (!canvas || !ctx || !sourceCanvas || !sourceCtx) return;
@@ -346,7 +331,7 @@ async function main() {
               const data = new ImageData(new Uint8ClampedArray(outBuffer.memory.buffer, outBuffer.ptr, outBuffer.len), width, height);
               sourceCtx.putImageData(data, 0, 0);
 
-              const rotation = blueprintArgs.imageRotation === "none" ? 0 : 360 - parseInt(blueprintArgs.imageRotation.match(/\d+/)![0]);
+              const rotation = imageArgs.rotate === "none" ? 0 : 360 - parseInt(imageArgs.rotate.match(/\d+/)![0]);
               const swap = rotation === 90 || rotation === 270;
               const outWidth = swap ? height : width;
               const outHeight = swap ? width : height;
@@ -361,13 +346,13 @@ async function main() {
 
               ctx.translate(outWidth / 2, outHeight / 2);
 
-              if (blueprintArgs.flippedAxes !== "none") {
+              if (imageArgs.flip !== "none") {
                 const flipMap: Record<string, [number, number]> = {
                   both: [-1, -1],
                   x: [-1, 1],
                   y: [1, -1],
                 };
-                ctx.scale(...flipMap[blueprintArgs.flippedAxes]);
+                ctx.scale(...flipMap[imageArgs.flip]);
               }
               if (rotation % 360 !== 0) {
                 ctx.rotate((rotation * Math.PI) / 180);
@@ -376,16 +361,17 @@ async function main() {
               ctx.drawImage(sourceCanvas, -width / 2, -height / 2);
             } catch (e) {
               console.error(e);
+              throw e;
             }
           },
-          async getFrameData({ inBuffer, dimensions }: { inBuffer: WasmSharedMemory; dimensions: [number, number] }) {
+          async get_next_frame({ inBuffer, dimensions }: { inBuffer: WasmSharedMemory; dimensions: [number, number] }) {
             // if (wasm!.memory.buffer.byteLength > 30_000_000) {
             //   logWasmAllocationInfo();
             //   await new Promise((resolve) => setTimeout(resolve, 30000));
             // }
 
             try {
-              const frameInterval = 1 / targetFps;
+              const frameInterval = 1 / imageArgs.targetFps;
 
               // Stop only when the output timeline reaches the video duration.
               if (nextOutputTime >= videoDuration!) {
@@ -424,21 +410,22 @@ async function main() {
               const timestamp = nextOutputTime;
               nextOutputTime += frameInterval;
 
-              return { isFinished: false, duration: 1 / targetFps, timestamp };
+              return { isFinished: false, duration: 1 / imageArgs.targetFps, timestamp };
             } catch (e) {
               console.error(e);
               throw e;
             }
           },
-          shouldShowPreview() {
+          should_preview() {
             try {
               postMessage({ shouldShowPreview: { showPreview: state.shouldShowPreview } });
               return state.shouldShowPreview;
             } catch (e) {
               console.error(e);
+              throw e;
             }
           },
-          yieldToJs: () => new Promise<void>((resolve) => (syncQ.push(resolve), syncChannel.port2.postMessage(null))),
+          js_yield: () => new Promise((resolve) => (syncQ.push(resolve), syncChannel.port2.postMessage(null))),
         });
         postMessage({ blueprintMetadata });
         postMessage({ writerArgs: { type: "done" } });

@@ -71,21 +71,8 @@ pub trait JsReflectGetSet: Into<JsValue> + Clone {
 impl<T: Into<JsValue> + Clone> JsReflectGetSet for T {}
 
 pub trait JsCall<T: js_sys::JsFunction>: Into<js_sys::Function<T>> + Clone {
-    fn call_sync<Args: js_sys::JsArgs<T>>(&self, args: Args) -> Result<T::Ret, JsValue> {
+    fn call_n<Args: js_sys::JsArgs<T>>(&self, args: Args) -> Result<T::Ret, JsValue> {
         args.apply_call(&self.clone().into(), &JsValue::NULL)
-    }
-
-    fn call_async<Args: js_sys::JsArgs<T>, R, E>(
-        &self,
-        args: Args,
-    ) -> Result<wasm_bindgen_futures::JsFuture<R, E>, JsValue>
-    where
-        T: js_sys::JsFunction<Ret = js_sys::Promise<R, E>>,
-        E: wasm_bindgen::convert::FromWasmAbi + 'static,
-        R: wasm_bindgen::convert::FromWasmAbi + 'static,
-    {
-        args.apply_call(&self.clone().into(), &JsValue::NULL)
-            .map(wasm_bindgen_futures::JsFuture::from)
     }
 }
 impl<T: js_sys::JsFunction, S: Into<js_sys::Function<T>> + Clone> JsCall<T> for S {}

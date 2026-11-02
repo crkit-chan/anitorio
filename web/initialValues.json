@@ -8,6 +8,7 @@
   "imageFilters": [],
   "imageRotation": "deg270",
   "includePowerPoles": true,
+  "lowMemUsage": true,
   "maxGroupSize": null,
   "maxSize": 100,
   "mode": "full",

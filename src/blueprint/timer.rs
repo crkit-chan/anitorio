@@ -27,7 +27,7 @@ pub fn generate_timer(
         (&s.f, &s.p, &s.s, &s.t)
     };
 
-    let gray_bits = args.grayscale_bits;
+    let gray_bits = args.image_args.grayscale_bits;
     let mut ents: Vec<BlueprintEntity> = Vec::new();
     let mut wires: Vec<Wire> = Vec::new();
     let mut en =

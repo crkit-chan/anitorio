@@ -17,7 +17,7 @@ struct CombinatorPositionData {
     blueprint: Blueprint,
 }
 
-pub fn load_comb_pos_json(json_bytes: &[u8]) -> Result<(), JsValue> {
+pub fn load_comb_pos_json(data_json_reader: impl std::io::Read) -> Result<(), JsValue> {
     #[derive(serde::Deserialize)]
     struct CombinatorPositionJson {
         compression: Option<SignalCompression>,
@@ -47,7 +47,7 @@ pub fn load_comb_pos_json(json_bytes: &[u8]) -> Result<(), JsValue> {
     }
 
     let parsed: Box<[CombinatorPositionJson]> =
-        serde_json::from_slice(json_bytes).map_js_err("JSON error")?;
+        serde_json::from_reader(data_json_reader).map_js_err("JSON error")?;
 
     let data_iter = parsed.iter().flat_map(|cb| {
         cb.blueprints.to_vec().into_iter().map(move |entry| {
@@ -134,7 +134,7 @@ pub fn generate_combinators(
         for d in data.as_ref().expect("No combinator positions data") {
             if d.dim.x <= max_cols_per_grp as f64
                 && use_delta_comp == matches!(d.compression, Some(SignalCompression::Delta))
-                && d.grayscale_bits.contains(&args.grayscale_bits)
+                && d.grayscale_bits.contains(&args.image_args.grayscale_bits)
                 && d.dim.x > best_pos_data.as_ref().map_or(0.0, |v| v.dim.x)
             {
                 best_pos_data = Some(d.clone());
@@ -156,8 +156,8 @@ pub fn generate_combinators(
     // let mut data_cbs = Vec::new(); // data entities
     let mut wires = Vec::new();
 
-    let use_const_cbs = matches!(args.mode, Mode::Static { const_cb: true, .. });
-    let gray_bits = args.grayscale_bits;
+    let use_const_cbs = matches!(args.image_args.mode, Mode::Static { const_cb: true, .. });
+    let gray_bits = args.image_args.grayscale_bits;
     let height = best_pos_data.as_ref().map_or(0.0, |v| v.dim.y);
     let base_offset = base_pos; // Add a constant offset on dimensions
 

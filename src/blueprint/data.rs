@@ -1,6 +1,7 @@
-use crate::blueprint::models::*;
+use crate::{blueprint::models::*, util::ResultJsExt};
 use serde::{Deserialize, Serialize};
 use std::{cell::RefCell, sync::Arc};
+use wasm_bindgen::JsValue;
 
 thread_local! {
     pub static PROTOTYPE_DATA: RefCell<Option<PrototypeData>> = const { RefCell::new(None) };
@@ -36,8 +37,9 @@ pub struct PrototypeData {
 /// # Returns
 ///
 /// A new vector of signal JSON objects with added quality attributes.
-pub fn load_data(data_json: &[u8]) {
-    let mut data: PrototypeData = serde_json::from_slice(data_json).unwrap();
+pub fn load_data(data_json_reader: impl std::io::Read) -> Result<(), JsValue> {
+    let mut data: PrototypeData =
+        serde_json::from_reader(data_json_reader).map_js_err("Read error")?;
     let mut sig_types: Vec<Arc<str>> = Vec::new(); // Allow "type" field to reference the same strings
     let qualities: Vec<Option<Arc<str>>> = {
         let quals = (data.qualities.iter())
@@ -62,6 +64,7 @@ pub fn load_data(data_json: &[u8]) {
         }
     }
     data.signals = signals.into_boxed_slice();
-
     PROTOTYPE_DATA.replace(Some(data));
+
+    Ok(())
 }

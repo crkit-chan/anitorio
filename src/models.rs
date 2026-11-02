@@ -10,25 +10,18 @@ pub struct BlueprintArgs {
     pub custom_height: Option<u32>,
     pub custom_width: Option<u32>,
     pub display_margin_y: u32,
-    pub flipped_axes: FlippedAxes,
-    pub grayscale_bits: u32,
-    pub image_filters: Vec<ImageFilter>,
-    pub image_metadata: ImageMetadata,
-    pub image_rotation: ImageRotation,
+    pub image_args: ImageArgs,
     pub include_power_poles: bool,
+    pub low_mem_usage: bool,
     pub max_group_size: Option<u32>,
-    pub max_size: u32,
-    pub mode: Mode,
     pub name: Option<String>,
     pub output_format: OutputFormat,
     pub power_pole_name: Option<String>,
     pub power_pole_quality: Option<Arc<str>>,
     pub prefer_green_wires: bool,
     pub prefer_horizontal_wires: bool,
-    pub resampling_filter: ResamplingFilter,
     pub signal_compression: Option<SignalCompression>,
     pub signal_sorting: SignalSorting,
-    pub target_fps: u32,
     pub timing_signals: TimingSignals,
 }
 
@@ -53,15 +46,24 @@ pub enum ImageFilter {
 
 #[derive(Tsify, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ImageMetadata {
-    pub dimensions: Option<(u32, u32)>,
+pub struct ImageArgs {
+    pub dimensions: Option<UVec2>,
     pub duration: Option<f64>,
+    pub flip: ImageFlip,
+    pub grayscale_bits: u32,
+    pub filters: Vec<ImageFilter>,
+    pub max_size: u32,
     pub mime_type: String,
+    pub mode: Mode,
+    pub n_frames: Option<u32>,
+    pub resampling_filter: ResamplingFilter,
+    pub rotate: ImageRotate,
+    pub target_fps: u32,
 }
 
 #[derive(Tsify, Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub enum ImageRotation {
+pub enum ImageRotate {
     #[serde(rename = "none")]
     Deg0 = 0,
     Deg90 = 90,
@@ -71,7 +73,7 @@ pub enum ImageRotation {
 
 #[derive(Tsify, Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub enum FlippedAxes {
+pub enum ImageFlip {
     None = 0,
     X = 1,
     Y = 2,
