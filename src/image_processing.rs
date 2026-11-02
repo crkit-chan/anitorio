@@ -380,7 +380,7 @@ pub async fn encode_gif(
     on_chunk: js_sys::Function<fn(js_sys::Uint8Array) -> js_sys::Promise>,
     args: &EncodeGifArgs,
 ) -> Result<(), JsValue> {
-    use crate::ioutil::StreamingWriter;
+    use crate::ioutil::CallbackWriter;
     use image::codecs::gif::{GifEncoder, Repeat};
     use std::{cell::RefCell, rc::Rc};
 
@@ -388,11 +388,12 @@ pub async fn encode_gif(
     let promise_q = Rc::clone(&promises);
 
     // Custom writer that invokes a callback whenever chunk size is reached.
-    let mut writer = StreamingWriter::new(1024 * 1024, |chunk| {
+    let writer = CallbackWriter::new(|chunk| {
         let data = js_sys::Uint8Array::from(&chunk[..]);
         promise_q.borrow_mut().push(on_chunk.call_n((&data,))?);
         Ok(())
     });
+    let mut writer = std::io::BufWriter::with_capacity(1024 * 1024, writer);
     let mut encoder = GifEncoder::new_with_speed(&mut writer, args.speed as i32);
     (encoder.set_repeat(Repeat::Infinite)).map_js_err("gif encoding error")?;
 

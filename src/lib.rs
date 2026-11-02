@@ -72,7 +72,6 @@ pub async fn run_blueprint(
     use blueprint::{encoder::BlueprintEncoder, generator::BlueprintGenerator};
     use image::GenericImageView;
     use image_processing::{FrameCallback, FrameData};
-    use ioutil::StreamingWriter;
     use js_sys as js;
     use models::*;
     use std::{
@@ -153,12 +152,24 @@ pub async fn run_blueprint(
     }
 
     // Custom writer that invokes a callback whenever chunk size is reached.
-    let writer = StreamingWriter::new(1024 * 1024, |chunk| {
-        let data = js::Uint8Array::from(chunk.as_slice());
-        let promise = callbacks.on_chunk.call_n((&data,))?;
-        (promise_q.borrow_mut().back_mut().unwrap()).push(promise);
-        Ok(())
-    });
+    let writer: Box<dyn std::io::Write> = {
+        if args.low_mem_usage || true {
+            let writer = ioutil::CallbackWriter::new(|chunk| {
+                let data = js::Uint8Array::from(chunk.as_slice());
+                let promise = callbacks.on_chunk.call_n((&data,))?;
+                (promise_q.borrow_mut().back_mut().unwrap()).push(promise);
+                Ok(())
+            });
+            Box::new(std::io::BufWriter::with_capacity(1024 * 1024, writer))
+        } else {
+            Box::new(ioutil::StreamingWriter::new(1024 * 1024, |chunk| {
+                let data = js::Uint8Array::from(chunk.as_slice());
+                let promise = callbacks.on_chunk.call_n((&data,))?;
+                (promise_q.borrow_mut().back_mut().unwrap()).push(promise);
+                Ok(())
+            }))
+        }
+    };
 
     // Yields JSON or compressed blueprint in chunks
     let generator = BlueprintGenerator::new(frame_data, &args).await?;
@@ -181,8 +192,8 @@ pub async fn run_blueprint(
         promises.borrow_mut().push_back(vec![]); // Repopulate
     }
 
-    let mut stream_writer = encoder.finish()?;
-    stream_writer.finish().map_js_err("Stream finish err")?;
+    let mut writer = encoder.finish()?;
+    writer.flush().map_js_err("Stream finish err")?;
 
     flush().await?; // Flush tail
 
@@ -194,8 +205,7 @@ pub async fn run_blueprint(
 ///
 /// # Arguments
 ///
-/// * `signals_csv` - The raw CSV string of signals, as a Uint8Array.
-/// * `qualities_csv` - Raw CSV string of qualities, as a Uint8Array.
+/// * `data_json` - The raw JSON data as a ``Uint8Array``.
 ///
 /// # Returns
 /// Nothing.
