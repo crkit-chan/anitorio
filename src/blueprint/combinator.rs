@@ -1,9 +1,8 @@
-use crate::blueprint::models::{ComparatorString as CompStr, *};
-use crate::blueprint::{constants::*, macros::*, power_pole::*};
-use crate::util::{OneOrMany, ResultJsExt};
+use super::{power_pole::PowerPoleOccupied, prelude::*};
+use crate::prelude::*;
 use glam::{DVec2, IVec2, dvec2};
-use std::{cell::RefCell, collections::BTreeMap, io::Read, sync::Arc};
-use wasm_bindgen::*;
+use std::{cell::RefCell, collections::BTreeMap, sync::Arc};
+use wasm_bindgen::JsValue;
 
 thread_local! {
     static COMB_POS_DATA: RefCell<Option<Box<[CombinatorPositionData]>>> = const { RefCell::new(None) };
@@ -27,20 +26,19 @@ pub fn load_comb_pos_json(data_json_reader: impl std::io::Read) -> Result<(), Js
     }
     #[derive(Clone, serde::Deserialize)]
     struct PositionEntry {
-        #[serde(skip)]
-        #[allow(dead_code)]
-        description: Option<String>, // for comments
         blueprint: String,
     }
 
-    fn get_bounding_box(en: &BlueprintEntity) -> Result<std::ops::Range<DVec2>, JsValue> {
+    fn get_bounding_box(en: &BlueprintEntity) -> Result<core::ops::Range<DVec2>, JsValue> {
         let offset = DVec2::from(match en.name.as_ref() {
-            name if name == &**ARI_CB || name == &**DEC_CB => match en.direction.unwrap_or(0) {
-                DIR_U | DIR_D => (1.0, 2.0),
-                DIR_L | DIR_R => (2.0, 1.0),
-                _ => return Err(JsValue::from_str("Unsupported entity direction")),
-            },
-            name if name == &**CONSTANT_COMB => (1.0, 1.0),
+            name if name == &**constants::ARI_CB || name == &**constants::DEC_CB => {
+                match en.direction.unwrap_or(0) {
+                    constants::DIR_U | constants::DIR_D => (1.0, 2.0),
+                    constants::DIR_L | constants::DIR_R => (2.0, 1.0),
+                    _ => return Err(JsValue::from_str("Unsupported entity direction")),
+                }
+            }
+            name if name == &**constants::CONSTANT_COMB => (1.0, 1.0),
             _ => return Err(JsValue::from_str("Unsupported entity type")),
         });
         Ok((en.position - offset / 2.0)..(en.position + offset / 2.0))
@@ -51,28 +49,17 @@ pub fn load_comb_pos_json(data_json_reader: impl std::io::Read) -> Result<(), Js
 
     let data_iter = parsed.iter().flat_map(|cb| {
         cb.blueprints.to_vec().into_iter().map(move |entry| {
-            use base64::{Engine as _, engine::general_purpose::STANDARD};
-
-            // Decode blueprint string (removing leading "0" prefix)
-            let b64 = STANDARD
-                .decode(&entry.blueprint.as_bytes()[1..])
-                .map_js_err("base64 error")?;
-            let mut zlib = flate2::read::ZlibDecoder::new(&b64[..]);
-            let mut buf = String::new();
-
-            zlib.read_to_string(&mut buf).map_js_err("base64 error")?;
-
-            let mut blueprint = Blueprint::from_json(buf).map_js_err("JSON error")?;
+            let mut blueprint = Blueprint::from_blueprint(entry.blueprint)?;
             let mut bounds = DVec2::INFINITY..DVec2::NEG_INFINITY;
 
-            for en in blueprint.blueprint.entities.iter() {
+            for en in &blueprint.blueprint.entities {
                 let en_bounds = get_bounding_box(en)?;
                 bounds.start = bounds.start.min(en_bounds.start);
                 bounds.end = bounds.end.max(en_bounds.end);
             }
             let offset = -bounds.start;
 
-            for en in blueprint.blueprint.entities.iter_mut() {
+            for en in &mut blueprint.blueprint.entities {
                 en.position += offset;
             }
 
@@ -111,17 +98,17 @@ pub struct GenerateCombinatorsOutput {
 ///
 /// # Returns
 ///
-/// ObjectGeneratorOutput (containing data comb entities), and (other_entities, first connection entity, target output entity).
+/// ``ObjectGeneratorOutput`` (containing data comb entities), and (``other_entities``, first connection entity, target output entity).
 ///
 /// Does not populate combinators with data.
 pub fn generate_combinators(
     ticks_per_group: u32,
-    occupied: &mut PowerPoleOccupied,
+    occupied: &PowerPoleOccupied,
     base_ent_n: u32,
     start_pos: DVec2,
     max_cols_per_grp: u32,
     args: &BlueprintArgs,
-) -> Result<GenerateCombinatorsOutput, JsValue> {
+) -> GenerateCombinatorsOutput {
     // Positions for combinators, for different widths.
     // TODO: Don't recalculate this for every group
     let mut best_pos_data: Option<CombinatorPositionData> = None;
@@ -132,7 +119,7 @@ pub fn generate_combinators(
 
     COMB_POS_DATA.with_borrow(|data| {
         for d in data.as_ref().expect("No combinator positions data") {
-            if d.dim.x <= max_cols_per_grp as f64
+            if d.dim.x <= f64::from(max_cols_per_grp)
                 && use_delta_comp == matches!(d.compression, Some(SignalCompression::Delta))
                 && d.grayscale_bits.contains(&args.image_args.grayscale_bits)
                 && d.dim.x > best_pos_data.as_ref().map_or(0.0, |v| v.dim.x)
@@ -143,7 +130,7 @@ pub fn generate_combinators(
     });
 
     if let Some(d) = best_pos_data.as_ref() {
-        for en in d.blueprint.blueprint.entities.iter() {
+        for en in &d.blueprint.blueprint.entities {
             if let Some(tag) = en.player_description.as_ref() {
                 pos_dict.insert(tag.clone(), en);
             }
@@ -258,7 +245,8 @@ pub fn generate_combinators(
     let out_ent_n = if gray_bits > 0 {
         (curr_ent_n - 1).max(base_ent_n)
     } else {
-        entity_idx_by_tag!(other_ents, "memory comb").unwrap_or((curr_ent_n - 1).max(base_ent_n))
+        entity_idx_by_tag!(other_ents, "memory comb")
+            .unwrap_or_else(|| (curr_ent_n - 1).max(base_ent_n))
     };
     let cb_midpoint = if use_const_cbs {
         const { dvec2(0.5, -0.5) }
@@ -272,7 +260,6 @@ pub fn generate_combinators(
     let mut grid_pos = IVec2::ZERO; // Current grid position (not absolute, multiplied by combinator's bounding box)
     let mut prev_ents_n: Vec<Option<u32>> = vec![None; max_cols_per_grp as usize];
     let mut prev_prev_ents_n: Vec<Option<u32>> = vec![None; max_cols_per_grp as usize];
-    let mut req = |pos: DVec2| -> bool { occupied.test(pos) };
 
     // Calculate the offsets to test for collisions. In Factorio, all collision boxes are rectangular.
     let size = cb_midpoint.abs() * 2.0;
@@ -282,7 +269,7 @@ pub fn generate_combinators(
     let hitbox_offsets = x_offsets.flat_map(|x| y_offsets.iter().map(move |&y| dvec2(x, y)));
     let hitbox_offsets = hitbox_offsets.collect::<Vec<_>>();
     let target_name = Arc::clone(if use_const_cbs {
-        &CONSTANT_COMB
+        &constants::CONSTANT_COMB
     } else {
         &DEC_CB
     });
@@ -294,11 +281,11 @@ pub fn generate_combinators(
             offset = cb_midpoint * DVec2::from(1 + 2 * grid_pos); // Set target midpoint
             curr_pos = base_pos + offset;
 
-            if offset.x + cb_midpoint.x > max_cols_per_grp as f64 {
+            if offset.x + cb_midpoint.x > f64::from(max_cols_per_grp) {
                 grid_pos.x = 0;
                 grid_pos.y += 1;
-            } else if hitbox_offsets.iter().any(|o| !req(curr_pos + o)) {
-                grid_pos.x += 1;
+            } else if (hitbox_offsets.iter()).any(|o| !occupied.test(curr_pos + *o)) {
+                grid_pos.x += 1; // Note we test if powerage is needed, don't necessarily request it
             } else {
                 break;
             }
@@ -349,14 +336,14 @@ pub fn generate_combinators(
         WIRE_R,
     ]);
 
-    Ok(GenerateCombinatorsOutput {
+    GenerateCombinatorsOutput {
         data_cbs: LazyCombinators {
             positions: positions.into_boxed_slice(),
             target_name,
             direction: match use_const_cbs {
-                true => DIR_D,
-                _ if use_compact_layout => DIR_U,
-                _ => DIR_R,
+                true => constants::DIR_D,
+                _ if use_compact_layout => constants::DIR_U,
+                _ => constants::DIR_R,
             },
         },
         other_ents,
@@ -366,7 +353,7 @@ pub fn generate_combinators(
         },
         in_ent_n,
         out_ent_n,
-    })
+    }
 }
 
 pub struct LazyCombinators {
@@ -375,24 +362,13 @@ pub struct LazyCombinators {
     direction: u32,
 }
 impl LazyCombinators {
-    #[allow(dead_code)]
-    pub fn len(&self) -> usize {
-        self.positions.len()
-    }
-
-    #[allow(dead_code)]
-    pub fn is_empty(&self) -> bool {
-        self.positions.is_empty()
-    }
-
+    #[expect(clippy::unnecessary_wraps, reason = "Matches API of Vec<T>::get")]
     pub fn get(&self, index: usize) -> Option<BlueprintEntity> {
         let (curr_ent_n, pos) = self.positions[index];
         let mut entity = BlueprintEntity::new(curr_ent_n, Arc::clone(&self.target_name), pos);
-
         if index == 0 {
             entity = entity.with_tag("first data comb");
         }
-
         Some(entity.with_direction(self.direction))
     }
 }

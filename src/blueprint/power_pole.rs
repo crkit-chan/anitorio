@@ -1,9 +1,8 @@
-use crate::blueprint::data::PROTOTYPE_DATA;
-use crate::blueprint::{constants::*, models::*};
-use crate::models::ImageRotate::*;
+use super::{data::PROTOTYPE_DATA, prelude::*};
+use crate::prelude::*;
+use crate::util::dvec_const_fns::{dvec2_abs, dvec2_div, dvec2_mul, dvec2_round, dvec2_sub};
 use glam::{DVec2, dvec2};
 use std::{collections::BTreeMap, sync::Arc};
-use wasm_bindgen::JsValue;
 
 /// Tracks cells occupied by power poles.
 pub struct PowerPoleOccupied {
@@ -13,31 +12,32 @@ pub struct PowerPoleOccupied {
     requests: Vec<DVec2>,
 }
 impl PowerPoleOccupied {
-    pub fn new(mut start_pos: DVec2, args: &BlueprintArgs) -> Result<Self, JsValue> {
+    pub fn new(mut start_pos: DVec2, args: &BlueprintArgs) -> Self {
         let quality = args.power_pole_quality.clone();
-        let quality = quality.filter(|q| *q != *DEFAULT_QUAL_KEY);
-        let name = args.power_pole_name.clone();
-        let name = name.unwrap_or(DEFAULT_POWER_POLE_NAME.to_owned());
+        let quality = quality.filter(|q| *q != *constants::DEFAULT_QUAL_KEY);
+        let name = args.power_pole_name.as_ref();
+        let name = name.map_or_else(|| constants::DEFAULT_POWER_POLE_NAME, |v| v);
+
         let data = PROTOTYPE_DATA.with_borrow(|data| {
             let data = &data.as_ref().expect("No power pole data loaded yet!");
             let poles = &data.electric_poles;
-            let p = poles.iter().find(|p| *p.name == name);
+            let p = poles.iter().find(|p| *p.name == *name);
             p.unwrap_or_else(|| panic!("No power pole with name '{name}'!"))
                 .clone()
         });
-        let bounding_box = DVec2::new(data.tile_width as f64, data.tile_height as f64);
+        let bounding_box = DVec2::new(f64::from(data.tile_width), f64::from(data.tile_height));
         let dists = &data.supply_area_distances;
         let half_cov = dists.iter().find(|d| quality == Some(d.quality.clone()));
         let cov = 2.0 * half_cov.unwrap_or(&dists[0]).supply_area_distance;
 
         start_pos += bounding_box * dvec2(-0.5, 0.5);
 
-        Ok(Self {
+        Self {
             bounding_box,
             ref_entity: BlueprintEntity::new(0, Arc::from(name), start_pos).with_quality(quality),
-            coverage: cov * (args.include_power_poles as i32 as f64),
+            coverage: cov * f64::from(i32::from(args.include_power_poles)),
             requests: Vec::new(),
-        })
+        }
     }
 
     /// Generates power pole entities and wires for powering the blueprint.
@@ -57,16 +57,7 @@ impl PowerPoleOccupied {
         base_ent_n: u32,
         args: &BlueprintArgs,
     ) -> (Vec<BlueprintEntity>, Vec<Wire>, u32) {
-        let mut poles: Vec<BlueprintEntity> = Vec::new();
-        let mut wires: Vec<Wire> = Vec::new();
-        let mut curr_ent_n = base_ent_n;
-        let cov = self.coverage;
-
-        if cov == 0.0 {
-            return (poles, wires, base_ent_n);
-        }
-
-        use std::cmp::Ordering;
+        use core::cmp::Ordering;
 
         struct OrderedDVec2(DVec2);
         impl Ord for OrderedDVec2 {
@@ -86,6 +77,15 @@ impl PowerPoleOccupied {
             }
         }
         impl Eq for OrderedDVec2 {}
+
+        let mut poles: Vec<BlueprintEntity> = Vec::new();
+        let mut wires: Vec<Wire> = Vec::new();
+        let mut curr_ent_n = base_ent_n;
+        let cov = self.coverage;
+
+        if cov == 0.0 {
+            return (poles, wires, base_ent_n);
+        }
 
         let horiz = args.prefer_horizontal_wires ^ matches!(args.image_args.rotate, Deg90 | Deg270);
         let mut pole_map = BTreeMap::<OrderedDVec2, u32>::new();
@@ -128,18 +128,21 @@ impl PowerPoleOccupied {
     /// # Returns
     ///
     /// A `bool` indicating whether the power pole would NOT occupy the given point.
-    pub fn test(&mut self, point: DVec2) -> bool {
+    pub const fn test(&self, point: DVec2) -> bool {
         self.test_center(point).0
     }
 
-    fn test_center(&mut self, mut point: DVec2) -> (bool, DVec2) {
+    const fn test_center(&self, point: DVec2) -> (bool, DVec2) {
         if self.coverage == 0.0 {
             return (true, DVec2::ZERO);
         }
-        point -= self.ref_entity.position;
+        let point = dvec2_sub(point, self.ref_entity.position);
 
-        let center = (point / self.coverage).round() * self.coverage;
-        let delta = (point - center).abs();
+        let center = dvec2_mul(
+            dvec2_round(dvec2_div(point, DVec2::splat(self.coverage))),
+            DVec2::splat(self.coverage),
+        );
+        let delta = dvec2_abs(dvec2_sub(point, center));
         let did_hit = delta.x >= self.bounding_box.x / 2.0 || delta.y >= self.bounding_box.y / 2.0;
 
         (did_hit, center)

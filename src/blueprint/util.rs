@@ -1,7 +1,7 @@
-use crate::blueprint::{constants::*, models::*};
-use crate::util::ResultJsExt;
+use super::prelude::*;
+use crate::prelude::*;
 use std::io;
-use wasm_bindgen::*;
+use wasm_bindgen::JsValue;
 
 pub fn write_to(writer: &mut impl io::Write, buf: &[u8]) -> Result<(), JsValue> {
     writer.write_all(buf).map_js_err("Write error")
@@ -15,8 +15,7 @@ pub fn write_json_trimmed_to<T: ?Sized + serde::Serialize>(
 }
 
 pub fn invert_wires(ents: &mut [BlueprintEntity], wires: &mut [Wire]) {
-    #[inline(always)]
-    fn get_swap(wire_id: u32) -> u32 {
+    const fn get_swap(wire_id: u32) -> u32 {
         match wire_id {
             1 => 2,
             2 => 1,
@@ -48,21 +47,64 @@ pub fn invert_wires(ents: &mut [BlueprintEntity], wires: &mut [Wire]) {
 ///
 /// # Returns
 ///
-/// A vector of CombinatorOutputs for the frame
-pub fn color_frame_to_outputs(frame: &image::DynamicImage) -> Result<Vec<i32>, JsValue> {
+/// A vector of ``CombinatorOutputs`` for the frame
+#[cfg_attr(target_arch = "wasm32", target_feature(enable = "simd128"))]
+pub fn color_frame_to_outputs(frame: &image::DynamicImage) -> Vec<i32> {
     #[cfg(target_arch = "wasm32")]
     {
+        use core::arch::wasm32::{i8x16_shuffle, i8x16_splat, v128, v128_load, v128_store};
+
         let rgba = frame.to_rgba8();
-        Ok(unsafe { rgba_to_rgb_simd(rgba.as_raw()) })
+        let rgba: &[u8] = rgba.as_raw();
+
+        debug_assert_eq!(rgba.len() % 4, 0);
+
+        let pixel_count = rgba.len() / 4;
+        let zero = i8x16_splat(0);
+        let mut output = Vec::<i32>::with_capacity(pixel_count);
+        let mut i = 0;
+
+        while i + 16 <= rgba.len() {
+            #[expect(
+                clippy::cast_ptr_alignment,
+                reason = "v128_load supports unaligned memory accesses"
+            )]
+            #[expect(
+                clippy::ptr_as_ptr,
+                reason = "Pointer is cast only to pass the byte buffer to v128_load"
+            )]
+            unsafe {
+                let input = v128_load(rgba.as_ptr().add(i) as *const v128); // Load 4 RGBA pixels: [R0 G0 B0 A0 R1 G1 B1 A1 R2 G2 B2 A2 R3 G3 B3 A3]
+                let packed = i8x16_shuffle::<2, 1, 0, 16, 6, 5, 4, 16, 10, 9, 8, 16, 14, 13, 12, 16>(
+                    input, zero, // Indices 0..15 = input. Indices 16..31 = zero
+                ); // Little-endian output needs: [B0 G0 R0 00 B1 G1 R1 00 B2 G2 R2 00 B3 G3 R3 00]
+                v128_store(output.as_mut_ptr().add(i / 4) as *mut v128, packed); // Write the 4 resulting i32s directly.
+            }
+            i += 16;
+        }
+
+        unsafe { output.set_len(pixel_count) };
+
+        // Handle remaining pixels.
+        while i < rgba.len() {
+            let r = rgba[i];
+            let g = rgba[i + 1];
+            let b = rgba[i + 2];
+
+            output[i / 4] = (i32::from(r) << 16) | (i32::from(g) << 8) | i32::from(b);
+            i += 4;
+        }
+
+        output
     }
 
     #[cfg(not(target_arch = "wasm32"))] // scalar fallback
     {
         use crate::image_processing::rgb_to_int;
-        Ok((frame.to_rgb8().as_raw().as_chunks::<3>().0)
+        (frame.to_rgb8().as_raw().as_chunks::<3>().0)
             .iter()
-            .map(|&[r, g, b]| rgb_to_int(r, g, b) as i32)
-            .collect())
+            .map(|&[r, g, b]| rgb_to_int(r, g, b).cast_signed())
+            .collect()
     }
 }
 
@@ -87,7 +129,7 @@ pub fn grayscale_frames_to_outputs(
         return Err(JsValue::from_str("No frames provided for packing"));
     }
     let num_pixels = (frames[0].width() * frames[0].height()) as usize;
-    let luma_images: Vec<_> = frames.iter().map(|f| f.to_luma8()).collect();
+    let luma_images: Vec<_> = frames.iter().map(image::DynamicImage::to_luma8).collect();
     let mut outputs: Vec<i32> = vec![0i32; num_pixels];
 
     match grayscale_bits {
@@ -95,83 +137,30 @@ pub fn grayscale_frames_to_outputs(
             for (i, output) in outputs.iter_mut().enumerate() {
                 let mut packed: u32 = 0;
                 for (j, img) in luma_images.iter().enumerate() {
-                    packed |= ((img.as_raw()[i] >= GRAYSCALE_THRESH) as u32) << j;
+                    packed |= u32::from(img.as_raw()[i] >= constants::GRAYSCALE_THRESH) << j;
                 }
-                *output = packed as i32;
+                *output = packed.cast_signed();
             }
         }
         4 => {
             for (i, output) in outputs.iter_mut().enumerate() {
                 let mut packed: u32 = 0;
                 for (j, img) in luma_images.iter().enumerate() {
-                    packed |= ((img.as_raw()[i] >> 4) as u32) << (j * 4);
+                    packed |= u32::from(img.as_raw()[i] >> 4) << (j * 4);
                 }
-                *output = packed as i32;
+                *output = packed.cast_signed();
             }
         }
         8 => {
             for (i, output) in outputs.iter_mut().enumerate() {
                 let mut packed: u32 = 0;
                 for (j, img) in luma_images.iter().enumerate() {
-                    packed |= (img.as_raw()[i] as u32) << (j * 8);
+                    packed |= u32::from(img.as_raw()[i]) << (j * 8);
                 }
-                *output = packed as i32;
+                *output = packed.cast_signed();
             }
         }
         _ => return Err(JsValue::from_str("Unsupported grayscale bit depth")),
     }
     Ok(outputs)
-}
-#[cfg(target_arch = "wasm32")]
-use core::arch::wasm32::*;
-
-#[cfg(target_arch = "wasm32")]
-#[target_feature(enable = "simd128")]
-pub unsafe fn rgba_to_rgb_simd(rgba: &[u8]) -> Vec<i32> {
-    debug_assert_eq!(rgba.len() % 4, 0);
-
-    let pixel_count = rgba.len() / 4;
-    let zero = i8x16_splat(0);
-    let mut output = Vec::<i32>::with_capacity(pixel_count);
-    let mut i = 0;
-
-    while i + 16 <= rgba.len() {
-        unsafe {
-            // Load 4 RGBA pixels:
-            //
-            // [R0 G0 B0 A0 R1 G1 B1 A1 R2 G2 B2 A2 R3 G3 B3 A3]
-            let input = v128_load(rgba.as_ptr().add(i) as *const v128);
-
-            // Little-endian output needs:
-            //
-            // [B0 G0 R0 00 B1 G1 R1 00 B2 G2 R2 00 B3 G3 R3 00]
-            //
-            // Indices 0..15 = input
-            // Indices 16..31 = zero
-            let packed = i8x16_shuffle::<2, 1, 0, 16, 6, 5, 4, 16, 10, 9, 8, 16, 14, 13, 12, 16>(
-                input, zero,
-            );
-
-            // Write the 4 resulting i32s directly.
-
-            v128_store(output.as_mut_ptr().add(i / 4) as *mut v128, packed);
-        }
-        i += 16;
-    }
-
-    unsafe {
-        output.set_len(pixel_count);
-    }
-
-    // Handle remaining pixels.
-    while i < rgba.len() {
-        let r = rgba[i];
-        let g = rgba[i + 1];
-        let b = rgba[i + 2];
-
-        output[i / 4] = ((r as i32) << 16) | ((g as i32) << 8) | b as i32;
-        i += 4;
-    }
-
-    output
 }

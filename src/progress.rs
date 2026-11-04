@@ -31,5 +31,5 @@ pub fn report_progress<T: Into<f64>>(percentage: T, status: &str) {
 }
 
 pub fn set_progress(start: f64, end: f64, progress: f64, msg: &str) {
-    report_progress(progress * (end - start) + start, msg);
+    report_progress(progress.mul_add(end - start, start), msg);
 }

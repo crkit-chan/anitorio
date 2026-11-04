@@ -14,14 +14,29 @@ crate-type = ["cdylib"]
 
 
 [lints.clippy]
-all = "warn"
-pedantic = "warn"
-nursery = "warn"
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+
+allow_attributes = { level = "warn", priority = -1 }
+allow_attributes_without_reason = { level = "warn", priority = -1 }
+big_endian_bytes = { level = "warn", priority = -1 }
+bool_to_int_with_if = { level = "warn", priority = -1 }
+cast_possible_truncation = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+decimal_literal_representation = { level = "warn", priority = -1 }
+deref_by_slicing = { level = "warn", priority = -1 }
+empty_enum_variants_with_brackets = { level = "warn", priority = -1 }
+empty_structs_with_brackets = { level = "warn", priority = -1 }
+future_not_send = "allow"
+match_wildcard_for_single_variants = "allow"
+too_many_lines = "allow"
 
 
 [dependencies]
 base64 = "0.23"
-console_error_panic_hook = { version = "0.1", optional = true }
+console_error_panic_hook = { version = "0.1" }
 flate2 = { version = "1.0.17", default-features = false, features = [
     "zlib-rs",
 ] }
@@ -33,9 +48,9 @@ image = { version = "0.24", default-features = false, features = [
 js-sys = "0.3.77"
 paste = "1.0"
 serde = { version = "1.0", features = ["derive", "rc"] }
-serde_json = "1.0"
+serde_json = { version = "1.0", features = ["raw_value"] }
 serde-wasm-bindgen = "0.6"
-tsify = { version = "0.5.8", features = ["js"] }
+tsify = { version = "0.5.8" }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4.77"
 wasm-tracing-allocator = { version = "0.1.1", optional = true }
@@ -54,7 +69,6 @@ lto = "fat"
 codegen-units = 1
 strip = true
 debug = false
-panic = "abort"
 
 
 [package.metadata.wasm-pack.profile.release]
@@ -82,4 +96,4 @@ demangle-name-section = true
 
 [features]
 default = []
-profiling = ["dep:console_error_panic_hook", "dep:wasm-tracing-allocator"]
+profiling = ["dep:wasm-tracing-allocator"]

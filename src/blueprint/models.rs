@@ -1,14 +1,13 @@
-#![allow(dead_code)]
+#![allow(dead_code, reason = "Satisfy Factorio Lua API")]
 
-use crate::blueprint::{constants::*, dvec2_xy};
-pub use crate::models::*;
+use crate::blueprint::{constants, dvec2_xy};
+use crate::models::RawJsonString;
 use crate::util::{is_default, is_none_or_default};
 use glam::DVec2;
 use serde::{
     Deserialize, Serialize, Serializer,
     ser::{SerializeSeq, SerializeStruct},
 };
-use serde_json::value::Value;
 use std::sync::Arc;
 use tsify::Tsify;
 use wasm_bindgen::prelude::*;
@@ -57,7 +56,7 @@ pub enum ArithmeticCombinatorParameterOperation {
 
 #[derive(Tsify, Clone, Serialize, Deserialize)]
 pub struct ArithmeticCombinatorParameters {
-    /// First signal to use in an operation. If not specified, the second argument will be the value of first_constant.
+    /// First signal to use in an operation. If not specified, the second argument will be the value of ``first_constant``.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first_signal: Option<Arc<SignalID>>,
 
@@ -65,11 +64,11 @@ pub struct ArithmeticCombinatorParameters {
     #[serde(default, skip_serializing_if = "is_default")]
     pub operation: ArithmeticCombinatorParameterOperation,
 
-    /// Second signal to use in an operation. If not specified, the second argument will be the value of second_constant.
+    /// Second signal to use in an operation. If not specified, the second argument will be the value of ``second_constant``.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub second_signal: Option<Arc<SignalID>>,
 
-    /// Constant to use as the second argument of the operation. Has no effect when second_signal is set. Defaults to 0.
+    /// Constant to use as the second argument of the operation. Has no effect when ``second_signal`` is set. Defaults to 0.
     #[serde(default, skip_serializing_if = "is_default")]
     pub second_constant: i32,
 
@@ -83,12 +82,28 @@ pub struct Blueprint {
     pub blueprint: BlueprintInner,
 }
 impl Blueprint {
-    pub fn from_json(json: String) -> Result<Self, serde_json::Error> {
-        serde_json::from_str::<Self>(&json)
+    pub fn from_blueprint<T: AsRef<[u8]>>(src: T) -> Result<Self, JsValue> {
+        use crate::util::ResultJsExt;
+        use base64::{Engine as _, engine::general_purpose::STANDARD};
+
+        // Remove the leading "0" prefix
+        let b64 = (STANDARD.decode(&src.as_ref()[1..])).map_js_err("base64 error")?;
+        let zlib = flate2::read::ZlibDecoder::new(&*b64);
+        Self::from_json_writer(zlib).map_js_err("Could not parse JSON")
+    }
+    pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
+        serde_json::from_str::<Self>(json)
+    }
+    pub fn from_json_writer(reader: impl std::io::Read + Sized) -> Result<Self, serde_json::Error> {
+        serde_json::from_reader(reader)
     }
 }
 
 #[derive(Tsify, Clone, Serialize, Deserialize)]
+#[expect(
+    clippy::struct_field_names,
+    reason = "Correctness with Factorio Lua API"
+)]
 pub struct BlueprintBook {
     pub icons: Option<Vec<Icon>>,
     pub active_index: u32,
@@ -142,8 +157,8 @@ pub struct BlueprintEntity {
 }
 impl BlueprintEntity {
     /// Create a new entity with default None values for optional fields
-    pub fn new(entity_number: u32, name: Arc<str>, position: DVec2) -> Self {
-        BlueprintEntity {
+    pub const fn new(entity_number: u32, name: Arc<str>, position: DVec2) -> Self {
+        Self {
             entity_number,
             name,
             position,
@@ -265,19 +280,19 @@ impl Color {
     }
 
     pub const fn is_default_a(a: &f64) -> bool {
-        *a == const { Color::default_a() }
+        (*a - const { Self::default_a() }).abs() < 0.0001
     }
 
-    pub fn from_hex(hex: &str) -> Option<Color> {
+    pub fn from_hex(hex: &str) -> Option<Self> {
         let hex = hex.strip_prefix('#').unwrap_or(hex);
         if hex.len() != 6 {
             return None;
         }
-        let r = u8::from_str_radix(&hex[0..2], 16).ok()? as f64 / 255.0;
-        let g = u8::from_str_radix(&hex[2..4], 16).ok()? as f64 / 255.0;
-        let b = u8::from_str_radix(&hex[4..6], 16).ok()? as f64 / 255.0;
+        let r = f64::from(u8::from_str_radix(&hex[0..2], 16).ok()?) / 255.0;
+        let g = f64::from(u8::from_str_radix(&hex[2..4], 16).ok()?) / 255.0;
+        let b = f64::from(u8::from_str_radix(&hex[4..6], 16).ok()?) / 255.0;
 
-        Some(Color { r, g, b, a: 1.0 })
+        Some(Self { r, g, b, a: 1.0 })
     }
 }
 
@@ -342,7 +357,7 @@ pub enum ControlBehavior {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         rgb_signal: Option<Arc<SignalID>>,
 
-        /// Defaults to defines.control_behavior.lamp.color_mapping.
+        /// Defaults to ``defines.control_behavior.lamp.color_mapping``.
         color_mode: i8,
     },
 
@@ -417,12 +432,12 @@ pub struct DeciderCombinatorCondition {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first_signal: Option<Arc<SignalID>>,
 
-    /// Which circuit networks (red/green) to read first_signal from. Defaults to both.
+    /// Which circuit networks (red/green) to read ``first_signal`` from. Defaults to both.
     #[serde(default, skip_serializing_if = "is_default")]
     pub first_signal_networks: CircuitNetworkSelection,
 
-    /// Constant to compare first_signal to. Has no effect when second_signal is set.
-    /// When neither second_signal nor constant are specified, the effect is as though
+    /// Constant to compare ``first_signal`` to. Has no effect when ``second_signal`` is set.
+    /// When neither ``second_signal`` nor constant are specified, the effect is as though
     /// constant were specified with the value 0.
     #[serde(default, skip_serializing_if = "is_default")]
     pub constant: Option<i32>,
@@ -466,7 +481,7 @@ pub struct DeciderCombinatorOutput {
     /// Specifies a signal to output.
     pub signal: Arc<SignalID>,
 
-    /// Defaults to true. When false, will output the value from constant for the given output_signal.
+    /// Defaults to true. When false, will output the value from constant for the given ``output_signal``.
     #[serde(
         default = "DeciderCombinatorOutput::default_copy_count_from_input",
         skip_serializing_if = "DeciderCombinatorOutput::is_default_copy_count_from_input"
@@ -480,7 +495,7 @@ pub struct DeciderCombinatorOutput {
     )]
     pub constant: i32,
 
-    /// Sets which input network to read the value of signal from if copy_count_from_input is true. Defaults to both.
+    /// Sets which input network to read the value of signal from if ``copy_count_from_input`` is true. Defaults to both.
     #[serde(default, skip_serializing_if = "is_default")]
     pub networks: CircuitNetworkSelection,
 }
@@ -501,16 +516,24 @@ impl DeciderCombinatorOutput {
         true
     }
 
+    #[expect(clippy::trivially_copy_pass_by_ref, reason = "Use with serde")]
     pub const fn is_default_constant(constant: &i32) -> bool {
-        *constant == const { DeciderCombinatorOutput::default_constant() }
+        *constant == const { Self::default_constant() }
     }
+
+    #[expect(clippy::trivially_copy_pass_by_ref, reason = "Use with serde")]
     pub const fn is_default_copy_count_from_input(copy_count_from_input: &bool) -> bool {
-        *copy_count_from_input == const { DeciderCombinatorOutput::default_copy_count_from_input() }
+        *copy_count_from_input == const { Self::default_copy_count_from_input() }
     }
 
     pub const fn with_networks(mut self, networks: CircuitNetworkSelection) -> Self {
         self.networks = networks;
         self
+    }
+
+    pub const fn swap_networks(&mut self) {
+        self.networks.red ^= true;
+        self.networks.green ^= true;
     }
 }
 
@@ -524,12 +547,21 @@ pub struct DeciderCombinatorParameters {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub outputs: Vec<DeciderCombinatorOutput>,
 }
+impl DeciderCombinatorParameters {
+    pub fn swap_networks(&mut self) {
+        (self.outputs.iter_mut()).for_each(DeciderCombinatorOutput::swap_networks);
+        for c in &mut self.conditions {
+            c.first_signal_networks.red ^= true;
+            c.first_signal_networks.green ^= true;
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct DeciderCombinatorCustomParameters {
     pub conditions: Vec<DeciderCombinatorCondition>,
     pub indices: Box<[(usize, i32)]>,
-    pub signal_list: Arc<[Value]>,
+    pub signal_list: Arc<[RawJsonString]>,
 }
 impl Serialize for DeciderCombinatorCustomParameters {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -553,7 +585,7 @@ impl Serialize for DeciderCombinatorCustomParameters {
 }
 struct IndexedDeciderCombinatorOutputs<'a> {
     indices: &'a [(usize, i32)],
-    signal_list: &'a [Value],
+    signal_list: &'a [RawJsonString],
 }
 impl Serialize for IndexedDeciderCombinatorOutputs<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -570,7 +602,7 @@ impl Serialize for IndexedDeciderCombinatorOutputs<'_> {
 }
 #[derive(Serialize)]
 struct IndexedDeciderCombinatorOutput<'a> {
-    signal: &'a Value,
+    signal: &'a serde_json::value::RawValue,
     copy_count_from_input: bool,
     constant: i32,
 }
@@ -596,26 +628,6 @@ pub struct LogisticSections {
     pub sections: Vec<LogisticSection>,
 }
 
-pub trait NetworkSwapper {
-    fn swap_networks(&mut self);
-}
-
-impl NetworkSwapper for DeciderCombinatorParameters {
-    fn swap_networks(&mut self) {
-        self.outputs.iter_mut().for_each(|o| o.swap_networks());
-        for c in self.conditions.iter_mut() {
-            c.first_signal_networks.red ^= true;
-            c.first_signal_networks.green ^= true;
-        }
-    }
-}
-impl NetworkSwapper for DeciderCombinatorOutput {
-    fn swap_networks(&mut self) {
-        self.networks.red ^= true;
-        self.networks.green ^= true;
-    }
-}
-
 #[derive(Tsify, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SignalID {
     /// The type of the signal. If the type is "item", this will be nil when reading.
@@ -634,26 +646,30 @@ pub struct SignalID {
     pub name: Arc<str>,
 }
 impl SignalID {
-    pub fn new_virtual(name: Arc<str>) -> Self {
+    pub fn new_virtual(name: &Arc<str>) -> Self {
         Self {
-            type_: Arc::clone(&SIG_TYPE_VIRTUAL),
-            name: Arc::clone(&name),
+            type_: Arc::clone(&constants::SIG_TYPE_VIRTUAL),
+            name: Arc::clone(name),
             quality: None,
         }
     }
 
     pub fn default_signal_type() -> Arc<str> {
-        Arc::clone(&DEFAULT_SIGNAL_TYPE)
+        Arc::clone(&constants::DEFAULT_SIGNAL_TYPE)
     }
+
+    #[expect(clippy::unnecessary_wraps, reason = "Use with serde")]
     pub fn default_quality() -> Option<Arc<str>> {
-        Some(Arc::clone(&DEFAULT_QUALITY))
+        Some(Arc::clone(&constants::DEFAULT_QUALITY))
     }
 
     pub fn is_default_signal_type(value: &Arc<str>) -> bool {
-        value == &*DEFAULT_SIGNAL_TYPE
+        value == &*constants::DEFAULT_SIGNAL_TYPE
     }
+
+    #[expect(clippy::ref_option, reason = "Use with serde")]
     pub fn is_none_or_default_quality(value: &Option<Arc<str>>) -> bool {
-        (value.as_deref()).is_none_or(|v| v == DEFAULT_QUALITY.as_ref())
+        (value.as_deref()).is_none_or(|v| v == constants::DEFAULT_QUALITY.as_ref())
     }
 }
 

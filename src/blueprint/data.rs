@@ -1,4 +1,4 @@
-use crate::{blueprint::models::*, util::ResultJsExt};
+use crate::{blueprint::models::SignalID, util::ResultJsExt};
 use serde::{Deserialize, Serialize};
 use std::{cell::RefCell, sync::Arc};
 use wasm_bindgen::JsValue;
@@ -32,7 +32,7 @@ pub struct PrototypeData {
 ///
 /// # Arguments
 ///
-/// * `data_json` - The raw JSON string of signals, as a Uint8Array.
+/// * `data_json_reader` - The raw JSON string of signals, as a ``Uint8Array``.
 ///
 /// # Returns
 ///
@@ -50,8 +50,9 @@ pub fn load_data(data_json_reader: impl std::io::Read) -> Result<(), JsValue> {
     let mut signals: Vec<Arc<SignalID>> = Vec::with_capacity(data.signals.len() * qualities.len());
 
     for sig in data.signals {
-        for qual in qualities.iter() {
+        for qual in &qualities {
             signals.push(Arc::from(SignalID {
+                #[expect(clippy::option_if_let_else, reason = "Mutability access")]
                 type_: if let Some(type_) = sig_types.iter().rfind(|&x| *x == sig.type_) {
                     Arc::clone(type_)
                 } else {

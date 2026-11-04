@@ -1,15 +1,14 @@
-use crate::blueprint::generator::BlueprintGenerator;
+use super::generator::BlueprintGenerator;
 use crate::constants::FACTORIO_VERSION_PREFIX;
-use crate::models::{BlueprintArgs, OutputFormat};
+use crate::prelude::*;
 use crate::progress::report_progress;
-use crate::util::ResultJsExt;
 use base64::{
     engine::{GeneralPurpose, general_purpose::STANDARD},
     write::EncoderWriter,
 };
 use flate2::{Compression, write::ZlibEncoder};
 use std::io::Write;
-use wasm_bindgen::*;
+use wasm_bindgen::JsValue;
 
 pub struct BlueprintEncoder<'a, W: Write> {
     generator: BlueprintGenerator<'a>,
@@ -20,7 +19,7 @@ enum OutputWriter<'a, W: Write> {
     Json(W),
     RawCompressed(ZlibEncoder<W>),
 }
-impl<'a, W: Write> std::io::Write for OutputWriter<'a, W> {
+impl<W: Write> std::io::Write for OutputWriter<'_, W> {
     fn flush(&mut self) -> std::io::Result<()> {
         match self {
             Self::RawCompressed(w) => w.flush(),
@@ -37,7 +36,7 @@ impl<'a, W: Write> std::io::Write for OutputWriter<'a, W> {
     }
 }
 
-impl<'a, W: Write> OutputWriter<'a, W> {
+impl<W: Write> OutputWriter<'_, W> {
     pub fn finish(self) -> std::io::Result<W> {
         match self {
             Self::Blueprint(zlib) => {
@@ -82,7 +81,7 @@ impl<'a, W: Write> BlueprintEncoder<'a, W> {
             return Ok(None);
         }
         self.generator
-            .next_chunk(&mut self.writer.as_mut().unwrap())
+            .next_chunk(self.writer.as_mut().unwrap())
             .await?;
         Ok(Some(()))
     }

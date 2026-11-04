@@ -292,21 +292,24 @@ async function main() {
 
         const inputData =
           imageData instanceof File && !useJsDecodedVideo
-            ? null
+            ? { byteLength: imageData.size }
             : imageData instanceof ImageData
               ? new Uint8Array(imageData.data.buffer, imageData.data.byteOffset, imageData.data.byteLength)
               : null;
         const reader = new FileReaderSync();
         const blueprintMetadata = await run_blueprint(blueprintArgs, {
-          get_data_len: () => inputData?.byteLength ?? 0,
-          get_data(from, to) {
+          getDataLen: () => inputData?.byteLength ?? 0,
+          getData(from, to) {
+            console.log(from, to);
             if (useJsDecodedVideo) throw new Error("No data to pass through when using JS decoding");
             if (imageData instanceof File) {
-              return new Uint8Array(reader.readAsArrayBuffer(imageData.slice(from, to)));
+              const result = new Uint8Array(reader.readAsArrayBuffer(imageData.slice(from, to)));
+              console.log(result);
+              return result;
             }
             throw new Error("Unsupported data type");
           },
-          on_chunk(data) {
+          onChunk(data) {
             return new Promise((resolve, reject) => {
               try {
                 const id = nextWriteId++;
@@ -318,10 +321,10 @@ async function main() {
               }
             });
           },
-          async on_frame({ outBuffer, dimensions }: { outBuffer: WasmSharedMemory; dimensions: [number, number] }) {
+          async onFrame({ outBuffer, dimensions }: { outBuffer: WasmSharedMemory; dimensions: [number, number] }) {
             try {
               const { canvas, ctx, sourceCanvas, sourceCtx } = state;
-              if (!canvas || !ctx || !sourceCanvas || !sourceCtx) return;
+              if (!canvas || !ctx || !sourceCanvas || !sourceCtx) return null;
 
               const [width, height] = dimensions;
               if (sourceCanvas.width !== width || sourceCanvas.height !== height) {
@@ -363,8 +366,10 @@ async function main() {
               console.error(e);
               throw e;
             }
+
+            return null;
           },
-          async get_next_frame({ inBuffer, dimensions }: { inBuffer: WasmSharedMemory; dimensions: [number, number] }) {
+          async getNextFrame({ inBuffer, dimensions }: { inBuffer: WasmSharedMemory; dimensions: [number, number] }) {
             // if (wasm!.memory.buffer.byteLength > 30_000_000) {
             //   logWasmAllocationInfo();
             //   await new Promise((resolve) => setTimeout(resolve, 30000));
@@ -416,7 +421,7 @@ async function main() {
               throw e;
             }
           },
-          should_preview() {
+          shouldPreview() {
             try {
               postMessage({ shouldShowPreview: { showPreview: state.shouldShowPreview } });
               return state.shouldShowPreview;
@@ -425,7 +430,7 @@ async function main() {
               throw e;
             }
           },
-          js_yield: () => new Promise((resolve) => (syncQ.push(resolve), syncChannel.port2.postMessage(null))),
+          jsYield: () => new Promise((resolve) => (syncQ.push(resolve), syncChannel.port2.postMessage(null))),
         });
         postMessage({ blueprintMetadata });
         postMessage({ writerArgs: { type: "done" } });

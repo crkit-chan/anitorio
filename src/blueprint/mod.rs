@@ -1,5 +1,5 @@
 pub mod combinator;
-mod constants;
+pub mod constants;
 pub mod data;
 mod dvec2_xy;
 pub mod encoder;
@@ -8,5 +8,6 @@ mod lamp;
 mod macros;
 pub mod models;
 mod power_pole;
+mod prelude;
 mod timer;
 mod util;

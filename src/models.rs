@@ -6,6 +6,11 @@ use wasm_bindgen::prelude::*;
 
 #[derive(Tsify, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(
+    clippy::allow_attributes,
+    clippy::struct_excessive_bools,
+    reason = "API may change in the future"
+)]
 pub struct BlueprintArgs {
     pub custom_height: Option<u32>,
     pub custom_width: Option<u32>,
@@ -61,7 +66,7 @@ pub struct ImageArgs {
     pub target_fps: u32,
 }
 
-#[derive(Tsify, Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Tsify, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ImageRotate {
     #[serde(rename = "none")]
@@ -71,7 +76,7 @@ pub enum ImageRotate {
     Deg270 = 270,
 }
 
-#[derive(Tsify, Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Tsify, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ImageFlip {
     None = 0,
@@ -80,7 +85,7 @@ pub enum ImageFlip {
     Both = 3,
 }
 
-#[derive(Tsify, Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Tsify, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Mode {
     Full,
@@ -100,7 +105,7 @@ pub enum Mode {
     },
 }
 
-#[derive(Tsify, Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Tsify, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SignalSorting {
     None,
@@ -108,7 +113,7 @@ pub enum SignalSorting {
     Json,
 }
 
-#[derive(Tsify, Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Tsify, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ResamplingFilter {
     Catrom,
@@ -119,14 +124,14 @@ pub enum ResamplingFilter {
     Triangle,
 }
 
-#[derive(Tsify, Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Tsify, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SignalCompression {
     Delta,
     Temporal { window: u32 },
 }
 
-#[derive(Tsify, Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Tsify, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum OutputFormat {
     Blueprint,
@@ -152,6 +157,8 @@ pub struct EncodeGifArgs {
     pub dim: UVec2,
     pub speed: u8,
 }
+
+pub type RawJsonString = Box<serde_json::value::RawValue>;
 
 #[wasm_bindgen(typescript_custom_section)]
 const TS_TYPES: &str = r#"

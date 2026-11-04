@@ -1,52 +1,55 @@
+#[macro_export]
 macro_rules! arithmetic_conds {
     ($in_sig:ident $op:tt $second:expr => $out_sig:ident) => {
-        ArithmeticCombinatorParameters {
-            first_signal: Some($in_sig.clone()),
+        $crate::blueprint::models::ArithmeticCombinatorParameters {
+            first_signal: Some(std::sync::Arc::clone(&$in_sig)),
             second_signal: None,
-            second_constant: $second as i32,
+            second_constant: $second,
             operation: $crate::blueprint::macros::arithmetic_combinator_op!($op),
-            output_signal: Some($out_sig.clone()),
+            output_signal: Some(std::sync::Arc::clone(&$out_sig)),
         }
     };
 }
 
+#[macro_export]
 macro_rules! arithmetic_combinator_op {
     (*) => {
-        ArithmeticCombinatorParameterOperation::Mul
+        $crate::blueprint::models::ArithmeticCombinatorParameterOperation::Mul
     };
     (/) => {
-        ArithmeticCombinatorParameterOperation::Div
+        $crate::blueprint::models::ArithmeticCombinatorParameterOperation::Div
     };
     (+) => {
-        ArithmeticCombinatorParameterOperation::Add
+        $crate::blueprint::models::ArithmeticCombinatorParameterOperation::Add
     };
     (-) => {
-        ArithmeticCombinatorParameterOperation::Sub
+        $crate::blueprint::models::ArithmeticCombinatorParameterOperation::Sub
     };
     (%) => {
-        ArithmeticCombinatorParameterOperation::Mod
+        $crate::blueprint::models::ArithmeticCombinatorParameterOperation::Mod
     };
     (^) => {
-        ArithmeticCombinatorParameterOperation::Pow
+        $crate::blueprint::models::ArithmeticCombinatorParameterOperation::Pow
     };
     (<<) => {
-        ArithmeticCombinatorParameterOperation::Shl
+        $crate::blueprint::models::ArithmeticCombinatorParameterOperation::Shl
     };
     (>>) => {
-        ArithmeticCombinatorParameterOperation::Shr
+        $crate::blueprint::models::ArithmeticCombinatorParameterOperation::Shr
     };
     (AND) => {
-        ArithmeticCombinatorParameterOperation::And
+        $crate::blueprint::models::ArithmeticCombinatorParameterOperation::And
     };
     (OR) => {
-        ArithmeticCombinatorParameterOperation::Or
+        $crate::blueprint::models::ArithmeticCombinatorParameterOperation::Or
     };
     (XOR) => {
-        ArithmeticCombinatorParameterOperation::Xor
+        $crate::blueprint::models::ArithmeticCombinatorParameterOperation::Xor
     };
 }
 
 /// High-level utility macro for making wire connections.
+#[macro_export]
 macro_rules! mkwires {
     ($wire_type:ident $ents:ident; $src_type:ident $src_name:expr => $dst_type:ident $dst_name:expr) => {
         [
@@ -65,6 +68,8 @@ macro_rules! mkwires {
     (@wire_type C, IN) => { 5 };
     (@wire_type C, OUT) => { 6 };
 }
+
+#[macro_export]
 macro_rules! entity_idx_by_tag {
     ($ents:ident, $tag:expr) => {
         $ents
@@ -74,7 +79,7 @@ macro_rules! entity_idx_by_tag {
     };
 }
 
-pub(crate) use arithmetic_combinator_op;
-pub(crate) use arithmetic_conds;
-pub(crate) use entity_idx_by_tag;
-pub(crate) use mkwires;
+pub use arithmetic_combinator_op;
+pub use arithmetic_conds;
+pub use entity_idx_by_tag;
+pub use mkwires;

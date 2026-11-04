@@ -1,9 +1,5 @@
-use crate::constants::DEFAULT_FRAME_DELAY;
-use crate::models::{ImageRotate::*, *};
-use crate::progress::set_progress;
-use crate::util::{
-    JsCall, JsReflectGetSet, ResultJsExt, format_duration, now_ms, wasm_shared_memory,
-};
+use crate::prelude::*;
+use crate::{constants::DEFAULT_FRAME_DELAY, util::format_duration};
 use glam::{DVec2, UVec2, uvec2};
 use image::{AnimationDecoder, imageops};
 use std::{pin::Pin, sync::Arc, time::Duration};
@@ -34,14 +30,14 @@ impl FrameData<'_> {
     /// Returns the dimensions of the output frames.
     ///
     /// Note: This is truncated from the raw dimensions instead of rounded.
-    pub fn out_dim(&self) -> UVec2 {
+    pub const fn out_dim(&self) -> UVec2 {
         let dim = self.out_dim_raw();
         match self.args.rotate {
             Deg90 | Deg270 => uvec2(dim.y, dim.x),
             _ => dim,
         }
     }
-    fn out_dim_raw(&self) -> UVec2 {
+    const fn out_dim_raw(&self) -> UVec2 {
         let (w, h) = crate::image_util::resize_dimensions(
             self.in_dim.x,
             self.in_dim.y,
@@ -51,13 +47,13 @@ impl FrameData<'_> {
         );
         uvec2(w, h)
     }
-    pub fn curr_duration_us(&self) -> u64 {
+    pub const fn curr_duration_us(&self) -> u64 {
         self.decoder.curr_n_us
     }
-    pub fn curr_total_frames(&self) -> u32 {
+    pub const fn curr_total_frames(&self) -> u32 {
         self.in_frame_i
     }
-    pub fn total_frames(&self) -> u32 {
+    pub const fn total_frames(&self) -> u32 {
         self.out_n_frames
     }
 }
@@ -68,22 +64,22 @@ impl<'a> FrameData<'a> {
         on_frame: Option<FrameCallback>,
         js_next_frame: Option<JsVideoFrameCallback>,
     ) -> Result<Self, JsValue> {
+        const fn expected_output_frames(n_ms: u64, fps: u32) -> u32 {
+            1 + ((n_ms * fps as u64) / 1000) as u32
+        }
+
         let frame_data = get_frames(reader, image_args, js_next_frame)?;
         let in_dim = frame_data.dimensions();
-        let scale_factor = (image_args.max_size as f64 / in_dim.x as f64)
-            .min(image_args.max_size as f64 / in_dim.y as f64)
+        let scale_factor = (f64::from(image_args.max_size) / f64::from(in_dim.x))
+            .min(f64::from(image_args.max_size) / f64::from(in_dim.y))
             .min(1.0);
-
-        fn expected_output_frames(n_ms: u32, fps: u32) -> u32 {
-            ((n_ms as u64 * fps as u64) / 1000) as u32 + 1
-        }
 
         Ok({
             let mut obj = Self {
                 out_n_frames: match image_args.mode {
                     Mode::Static { .. } => 1,
                     _ => expected_output_frames(
-                        (frame_data.info.duration.unwrap() * 1000.0) as u32,
+                        (frame_data.info.duration.unwrap() * 1000.0) as u64,
                         image_args.target_fps.max(1),
                     ),
                 },
@@ -112,7 +108,7 @@ impl<'a> FrameData<'a> {
             let Some(FrameWithTime(f, timestamp)) = self.decoder.next_frame().await? else {
                 return Ok(None);
             };
-            img = Some(Arc::new(self.convert_frame(f.into_buffer())?));
+            img = Some(Arc::new(self.convert_frame(f.into_buffer())));
             self.curr_n_us = timestamp;
         } else if self.out_frame_i == 0 {
             self.fps_timer = now_ms();
@@ -144,7 +140,7 @@ impl<'a> FrameData<'a> {
 
                 self.curr_n_us = timestamp + Duration::from(frame.delay()).as_micros() as u64;
 
-                let img = self.convert_frame(frame.into_buffer())?;
+                let img = self.convert_frame(frame.into_buffer());
                 self.prev_img = Some((Arc::new(img), self.curr_n_us));
                 self.in_frame_i += 1;
             }
@@ -158,10 +154,10 @@ impl<'a> FrameData<'a> {
 
                 if use_js_decode {
                     duration = args.duration.unwrap();
-                    progress = (self.out_frame_i as f64 / args.target_fps as f64) / duration;
+                    progress = (self.out_frame_i as f64 / f64::from(args.target_fps)) / duration;
                 } else {
-                    duration = self.out_n_frames as f64 / args.target_fps as f64;
-                    progress = self.out_frame_i as f64 / self.out_n_frames as f64;
+                    duration = f64::from(self.out_n_frames) / f64::from(args.target_fps);
+                    progress = self.out_frame_i as f64 / f64::from(self.out_n_frames);
                 }
 
                 set_progress(
@@ -182,18 +178,16 @@ impl<'a> FrameData<'a> {
 
     //// Returns the current output time in microseconds.
     fn out_t_us(&self) -> u64 {
-        (self.out_frame_i as u64 * 1000 * 1000) / self.args.target_fps as u64
+        (self.out_frame_i as u64 * 1000 * 1000) / u64::from(self.args.target_fps)
     }
 
     /// Converts the input frame to the target output using the specified settings.
-    pub fn convert_frame(&self, buf: image::RgbaImage) -> Result<image::DynamicImage, JsValue> {
-        use crate::blueprint::models::ImageRotate::*;
-
+    pub fn convert_frame(&self, buf: image::RgbaImage) -> image::DynamicImage {
         let mut img = image::DynamicImage::ImageRgba8(buf);
         let out_dim = self.out_dim_raw.round().as_uvec2();
 
         // Apply filters
-        for f in self.args.filters.iter() {
+        for f in &self.args.filters {
             img = match *f {
                 ImageFilter::Blur(sigma) => img.blur(sigma),
                 ImageFilter::Brightness(value) => img.brighten(value),
@@ -231,10 +225,9 @@ impl<'a> FrameData<'a> {
             Deg90 => img.rotate90(),
             Deg180 => img.rotate180(),
             Deg270 => img.rotate270(),
-            _ => img,
+            Deg0 => img,
         };
-
-        Ok(img)
+        img
     }
 }
 
@@ -243,7 +236,7 @@ pub struct ImageFrameData<'a> {
     info: ImageArgs,
 }
 impl ImageFrameData<'_> {
-    pub fn dimensions(&self) -> UVec2 {
+    pub const fn dimensions(&self) -> UVec2 {
         self.info.dimensions.unwrap()
     }
 }
@@ -284,7 +277,7 @@ pub fn get_frames<'a>(
             let mut data = Vec::new();
             reader.read_to_end(&mut data).map_js_err("Read error")?;
 
-            let frames = image::Frames::new(Box::new(std::iter::once(Ok(image::Frame::new(
+            let frames = image::Frames::new(Box::new(core::iter::once(Ok(image::Frame::new(
                 image::RgbaImage::from_raw(dim.x, dim.y, data)
                     .expect("buffer length must be width * height * 4"),
             ))))); // bruh
@@ -316,7 +309,7 @@ struct FrameDecoder<'a> {
     state: FrameDecoderState<'a>,
 }
 impl<'a> FrameDecoder<'a> {
-    fn new(state: FrameDecoderState<'a>, dim: UVec2) -> FrameDecoder<'a> {
+    const fn new(state: FrameDecoderState<'a>, dim: UVec2) -> Self {
         FrameDecoder {
             curr_n_us: 0,
             dim,
@@ -325,7 +318,7 @@ impl<'a> FrameDecoder<'a> {
         }
     }
 
-    fn is_finished(&self) -> bool {
+    const fn is_finished(&self) -> bool {
         self.finished
     }
 
@@ -335,7 +328,7 @@ impl<'a> FrameDecoder<'a> {
                 let frame = frames.next().transpose().map_js_err("image")?.map(|f| {
                     let delay = f.delay();
                     let output = FrameWithTime(f, self.curr_n_us);
-                    let delay: std::time::Duration = if delay.numer_denom_ms().0 == 0 {
+                    let delay: core::time::Duration = if delay.numer_denom_ms().0 == 0 {
                         DEFAULT_FRAME_DELAY
                     } else {
                         delay.into()
@@ -349,8 +342,9 @@ impl<'a> FrameDecoder<'a> {
             FrameDecoderState::JsFrames(get_next_frame) => {
                 let args_obj = js_sys::Object::new();
                 let in_buf = vec![0u8; self.dim.element_product() as usize * 4];
-                args_obj.reflect_set("inBuffer", wasm_shared_memory(&in_buf[..])?)?;
+                args_obj.reflect_set("inBuffer", wasm_shared_memory(&in_buf)?)?;
                 args_obj.reflect_set("dimensions", serde_wasm_bindgen::to_value(&self.dim)?)?;
+
                 let result = get_next_frame.call_n((&args_obj.into(),))?.await?;
                 let info: JsVideoFrameData = serde_wasm_bindgen::from_value(result)?;
 
@@ -381,25 +375,26 @@ pub async fn encode_gif(
     args: &EncodeGifArgs,
 ) -> Result<(), JsValue> {
     use crate::ioutil::CallbackWriter;
+    use core::cell::RefCell;
     use image::codecs::gif::{GifEncoder, Repeat};
-    use std::{cell::RefCell, rc::Rc};
+    use std::rc::Rc;
 
     let promises = Rc::new(const { RefCell::new(Vec::<js_sys::Promise>::new()) });
     let promise_q = Rc::clone(&promises);
 
     // Custom writer that invokes a callback whenever chunk size is reached.
     let writer = CallbackWriter::new(|chunk| {
-        let data = js_sys::Uint8Array::from(&chunk[..]);
+        let data = js_sys::Uint8Array::from(&*chunk);
         promise_q.borrow_mut().push(on_chunk.call_n((&data,))?);
         Ok(())
     });
     let mut writer = std::io::BufWriter::with_capacity(1024 * 1024, writer);
-    let mut encoder = GifEncoder::new_with_speed(&mut writer, args.speed as i32);
+    let mut encoder = GifEncoder::new_with_speed(&mut writer, i32::from(args.speed));
     (encoder.set_repeat(Repeat::Infinite)).map_js_err("gif encoding error")?;
 
     let in_buf = vec![0u8; args.dim.element_product() as usize * 4];
     let flush = async || -> Result<(), JsValue> {
-        let pending = std::mem::take(&mut *promises.borrow_mut());
+        let pending = core::mem::take(&mut *promises.borrow_mut());
         for promise in pending {
             promise.await?;
         }
@@ -409,7 +404,7 @@ pub async fn encode_gif(
     loop {
         let info: JsVideoFrameData = serde_wasm_bindgen::from_value({
             let js_args = js_sys::Object::new();
-            js_args.reflect_set("inBuffer", wasm_shared_memory(&in_buf[..])?)?;
+            js_args.reflect_set("inBuffer", wasm_shared_memory(&in_buf)?)?;
             get_next_frame.call_n((&js_args.into(),))?.await?
         })?;
         if info.is_finished {
@@ -427,23 +422,4 @@ pub async fn encode_gif(
     }
 
     Ok(())
-}
-
-/// Converts an RGB pixel to a single 24 bit integer (inside a u32, I know...).
-///
-/// Note: This is a fallback implementation for when the SIMD-accelerated version is not available.
-///
-/// # Arguments
-///
-/// * `r` - Red channel (0–255).
-/// * `g` - Green channel (0–255).
-/// * `b` - Blue channel (0–255).
-///
-/// # Returns
-///
-/// An integer representing the RGB value.
-#[inline(always)]
-#[allow(dead_code)]
-pub fn rgb_to_int(r: u8, g: u8, b: u8) -> u32 {
-    ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
 }

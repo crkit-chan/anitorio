@@ -317,7 +317,11 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
               displayMarginY: +formData.displayMarginY,
               imageArgs: {
                 dimensions: [animationInfo()!.width!, animationInfo()!.height!],
-                duration: currFile()!.type.startsWith("video") ? refVideo.duration : null,
+                duration: currFile()!.type.startsWith("video")
+                  ? refVideo.duration
+                  : animationInfo()?.duration
+                    ? animationInfo()!.duration! / 1000
+                    : null,
                 filters: [],
                 flip: `${formData.flippedAxes}` as ImageArgs["flip"],
                 grayscaleBits: +formData.grayscaleBits,

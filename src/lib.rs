@@ -7,9 +7,10 @@ mod image_util;
 mod ioutil;
 mod macros;
 mod models;
+mod prelude;
 mod progress;
+mod ts;
 mod util;
-mod wasm_buffer;
 
 #[cfg(feature = "profiling")]
 #[global_allocator]
@@ -18,19 +19,11 @@ static GLOBAL_ALLOCATOR: wasm_tracing_allocator::WasmTracingAllocator<std::alloc
 
 #[wasm_bindgen]
 pub fn init() {
-    #[cfg(feature = "profiling")]
     console_error_panic_hook::set_once();
 }
 
-#[allow(non_camel_case_types)]
-mod ts {
-    pub type boolean = js_sys::Boolean;
-    pub type number = js_sys::Number;
-
-    pub type TsFn<T> = js_sys::Function<T>;
-}
-
 #[derive(tsify::Tsify, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RunBlueprintCallbacks {
     #[serde(with = "serde_wasm_bindgen::preserve")]
     pub get_data: ts::TsFn<fn(ts::number, ts::number) -> js_sys::Uint8Array>,
@@ -59,38 +52,45 @@ pub struct RunBlueprintCallbacks {
 /// # Parameters
 ///
 /// - `options`: Options dict passed in
-/// - `image_data`: A Uint8Array passed in from JS. May be empty if `mode` (specified in `options``) is not `"full"`.
+/// - `image_data`: A ``Uint8Array`` passed in from JS. May be empty if `mode` (specified in ``options``) is not `"full"`.
 ///
 /// # Returns
 ///
 /// A Factorio blueprint string on success.
+///
+/// # Panics
+///
+/// Throws ``JsValue`` if any error occurs.
+///
+/// # Errors
+///
+/// Returns ``JsValue`` if any error occurs.
 #[wasm_bindgen]
 pub async fn run_blueprint(
-    args: tsify::Ts<models::BlueprintArgs>,
-    callbacks: tsify::Ts<RunBlueprintCallbacks>,
+    args: ts::TsIntoRust<models::BlueprintArgs>,
+    callbacks: ts::TsIntoRust<RunBlueprintCallbacks>,
 ) -> Result<JsValue, JsValue> {
+    use crate::util::{JsCall, JsReflectGetSet, ResultJsExt, now_ms, wasm_shared_memory};
     use blueprint::{encoder::BlueprintEncoder, generator::BlueprintGenerator};
     use image::GenericImageView;
     use image_processing::{FrameCallback, FrameData};
     use js_sys as js;
-    use models::*;
+    use models::Mode;
     use std::{
         cell::{Cell, RefCell},
-        collections::VecDeque,
         rc::Rc,
     };
-    use util::*;
 
     const SYNC_TIME_MS: f64 = 1000.0;
 
-    let callbacks = callbacks.to_rust().map_js_err("Invalid arguments")?;
+    let mut args: models::BlueprintArgs = args.to_rust()?;
+    let callbacks: RunBlueprintCallbacks = callbacks.to_rust()?;
     let on_frame = Rc::new(callbacks.on_frame);
     let should_show_preview = Rc::new(callbacks.should_preview);
     let yield_to_js = Rc::new(callbacks.js_yield);
 
-    let mut args = args.to_rust().map_js_err("Invalid arguments")?;
     let mut frame_data: Option<FrameData> = None;
-    let promises = Rc::new(const { RefCell::new(VecDeque::<Vec<js::Promise<()>>>::new()) });
+    let promises = Rc::new(const { RefCell::new(Vec::<js::Promise<()>>::new()) });
     let promise_q = Rc::clone(&promises);
     let next_yield_time = Rc::new(Cell::new(now_ms() + SYNC_TIME_MS));
 
@@ -119,6 +119,10 @@ pub async fn run_blueprint(
                     return Ok(());
                 }
 
+                #[expect(
+                    clippy::option_if_let_else,
+                    reason = "Cannot return reference to a local value"
+                )]
                 let rgba = match img.as_rgba8() {
                     Some(rgba) => rgba,
                     _ => &img.to_rgba8(),
@@ -152,10 +156,10 @@ pub async fn run_blueprint(
     }
 
     // Custom writer that invokes a callback whenever chunk size is reached.
-    let writer = ioutil::BufWriter::new(1024 * 1024, !args.low_mem_usage && false, |chunk| {
+    let writer = ioutil::BufWriter::new(1024 * 1024, !args.low_mem_usage, |chunk| {
         let data = js::Uint8Array::from(chunk.as_slice());
         let promise = callbacks.on_chunk.call_n((&data,))?;
-        (promise_q.borrow_mut().back_mut().unwrap()).push(promise);
+        promise_q.borrow_mut().push(promise);
         Ok(())
     });
 
@@ -164,20 +168,15 @@ pub async fn run_blueprint(
     let mut encoder = BlueprintEncoder::new(generator, &args, writer)?;
 
     let flush = async || -> Result<(), JsValue> {
-        if let Some(mut q) = { std::mem::take(&mut *promises.borrow_mut()).pop_front() } {
-            for promise in q.drain(..) {
-                promise.await?;
-            }
+        for promise in promises.take() {
+            (promise).await?;
         }
         Ok(())
     };
 
-    promises.borrow_mut().push_back(vec![]);
-
     // `encoder.next()` may generate a series of chunks
     while encoder.next().await?.is_some() {
         flush().await?; // Wait for all those chunks to be sent
-        promises.borrow_mut().push_back(vec![]); // Repopulate
     }
 
     let mut writer = encoder.finish()?;
@@ -197,6 +196,10 @@ pub async fn run_blueprint(
 ///
 /// # Returns
 /// Nothing.
+///
+/// # Errors
+///
+/// ``JsValue`` if any error occurs.
 #[wasm_bindgen]
 pub fn set_signal_data(data_json: js_sys::Uint8Array) -> Result<(), JsValue> {
     let reader = ioutil::Uint8ArrayReader::new(data_json);
@@ -204,6 +207,11 @@ pub fn set_signal_data(data_json: js_sys::Uint8Array) -> Result<(), JsValue> {
     Ok(())
 }
 
+///
+///
+/// # Errors
+///
+/// ``JsValue`` if any error occurs.
 #[wasm_bindgen]
 pub fn set_comb_pos_data(data_json: js_sys::Uint8Array) -> Result<(), JsValue> {
     let reader = ioutil::Uint8ArrayReader::new(data_json);
@@ -220,6 +228,9 @@ pub struct EncodeGifCallbacks {
     pub on_chunk: js_sys::Function<fn(js_sys::Uint8Array) -> js_sys::Promise<()>>,
 }
 
+/// # Errors
+///
+/// ``JsValue`` if any error occurs.
 #[wasm_bindgen]
 pub async fn encode_gif(
     args: JsValue,
@@ -239,22 +250,7 @@ pub async fn encode_gif(
 }
 
 #[wasm_bindgen]
+#[must_use]
 pub fn wasm_memory() -> JsValue {
     wasm_bindgen::memory()
 }
-
-#[wasm_bindgen]
-#[allow(unreachable_code)]
-pub fn is_optimized() -> bool {
-    #[cfg(feature = "profiling")]
-    {
-        return false;
-    }
-
-    true
-}
-
-#[wasm_bindgen(typescript_custom_section)]
-const TS_TYPES: &str = r#"
-export type TsFn<T extends (...args: readonly any[]) => any> = T;
-"#;

@@ -1,5 +1,10 @@
 /// Logs a message to the web console.
-#[allow(unused_macros)]
+#[allow(
+    clippy::allow_attributes,
+    unused_macros,
+    reason = "May not be used anywhere"
+)]
+#[macro_export]
 macro_rules! log {
     ($($arg:tt)*) => {{
         let value = format!($($arg)*);
@@ -9,6 +14,7 @@ macro_rules! log {
 }
 
 /// Creates a constant value that is lazily evaluated once.
+#[macro_export]
 macro_rules! lazy_arc_const {
     (pub $name:ident: $type:ident = $value:expr) => {
         pub static $name: std::sync::LazyLock<std::sync::Arc<$type>> =
@@ -20,6 +26,10 @@ macro_rules! lazy_arc_const {
     };
 }
 
-pub(crate) use lazy_arc_const;
-#[allow(unused_imports)]
-pub(crate) use log;
+pub use lazy_arc_const;
+#[allow(
+    clippy::allow_attributes,
+    unused_imports,
+    reason = "May not be used anywhere"
+)]
+pub use log;

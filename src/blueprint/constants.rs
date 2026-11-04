@@ -18,21 +18,21 @@ pub const DIR_D: u32 = 8;
 pub const DIR_L: u32 = 12;
 
 /// Blueprint version constant.
-pub const BLUEPRINT_VERSION: u64 = 562949955518464;
+pub const BLUEPRINT_VERSION: u64 = 562_949_955_518_464;
 
-/// Threshold used for binary grayscale conversion. (out of 256)
+/// Threshold used for binary grayscale conversion. (out of 256).
 pub const GRAYSCALE_THRESH: u8 = 128;
 
-lazy_arc_const!(pub ARI_CB             : str      = "arithmetic-combinator"                        );
-lazy_arc_const!(pub BLUEPRINT          : str      = "blueprint"                                    );
-lazy_arc_const!(pub CONSTANT_COMB      : str      = "constant-combinator"                          );
-lazy_arc_const!(pub DEC_CB             : str      = "decider-combinator"                           );
-lazy_arc_const!(pub DEFAULT_QUAL_KEY   : str      = "<default>"                                    );
-lazy_arc_const!(pub DEFAULT_SIGNAL_TYPE: str      = "item"                                         );
-lazy_arc_const!(pub DEFAULT_QUALITY    : str      = "normal"                                       );
-lazy_arc_const!(pub LAMP               : str      = "small-lamp"                                   );
-lazy_arc_const!(pub SIG_EACH           : SignalID = SignalID::new_virtual(Arc::from("signal-each")));
-lazy_arc_const!(pub SIG_TYPE_VIRTUAL   : str      = "virtual"                                      );
+lazy_arc_const!(pub ARI_CB             : str      = "arithmetic-combinator"                         );
+lazy_arc_const!(pub BLUEPRINT          : str      = "blueprint"                                     );
+lazy_arc_const!(pub CONSTANT_COMB      : str      = "constant-combinator"                           );
+lazy_arc_const!(pub DEC_CB             : str      = "decider-combinator"                            );
+lazy_arc_const!(pub DEFAULT_QUAL_KEY   : str      = "<default>"                                     );
+lazy_arc_const!(pub DEFAULT_SIGNAL_TYPE: str      = "item"                                          );
+lazy_arc_const!(pub DEFAULT_QUALITY    : str      = "normal"                                        );
+lazy_arc_const!(pub LAMP               : str      = "small-lamp"                                    );
+lazy_arc_const!(pub SIG_EACH           : SignalID = SignalID::new_virtual(&Arc::from("signal-each")));
+lazy_arc_const!(pub SIG_TYPE_VIRTUAL   : str      = "virtual"                                       );
 
 pub const DEFAULT_POWER_POLE_NAME: &str = "substation";
 

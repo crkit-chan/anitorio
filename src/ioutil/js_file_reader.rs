@@ -4,6 +4,13 @@ use crate::util::{JsCall, js_num};
 
 pub type JsFileReaderCallback =
     js_sys::Function<fn(js_sys::Number, js_sys::Number) -> js_sys::Uint8Array>;
+
+const MAX_SAFE_F64_INT: u64 = (1u64 << 53) - 1;
+
+// Note we use a ``u64`` for the position, because the file size can be larger than 2^32-1.
+// Maximum pointer size for JS is 2^53.
+
+/// A JavaScript file reader.
 pub struct JsFileReader {
     callback: JsFileReaderCallback,
     pos: u64,
@@ -32,11 +39,11 @@ impl JsFileReader {
         if start >= end {
             self.cache.clear();
         } else {
+            assert!(start <= MAX_SAFE_F64_INT && end <= MAX_SAFE_F64_INT);
+
             let array = (self.callback)
                 .call_n((&js_num(start as f64), &js_num(end as f64)))
-                .map_err(|e| {
-                    io::Error::new(io::ErrorKind::Other, format!("JS call error: {e:?}"))
-                })?;
+                .map_err(|e| io::Error::other(format!("JS call error: {e:?}")))?;
 
             self.cache.resize(array.length() as usize, 0);
             array.copy_to(&mut self.cache);
@@ -71,11 +78,11 @@ impl io::Read for JsFileReader {
 impl io::Seek for JsFileReader {
     fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
         let new_position = match pos {
-            io::SeekFrom::Start(n) => n as i128,
-            io::SeekFrom::End(n) => self.size as i128 + n as i128,
-            io::SeekFrom::Current(n) => self.pos as i128 + n as i128,
+            io::SeekFrom::Start(n) => i128::from(n),
+            io::SeekFrom::End(n) => i128::from(self.size) + i128::from(n),
+            io::SeekFrom::Current(n) => i128::from(self.pos) + i128::from(n),
         };
-        if new_position < 0 || new_position > u64::MAX as i128 {
+        if new_position < 0 || new_position > i128::from(u64::MAX) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "Invalid seek position",
