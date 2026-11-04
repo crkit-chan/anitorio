@@ -1,4 +1,5 @@
 {
   "rust-analyzer.cargo.target": "wasm32-unknown-unknown",
-  "rust-analyzer.check.command": "clippy"
+  "rust-analyzer.check.command": "clippy",
+  "rust-analyzer.rustfmt.extraArgs": ["+nightly"]
 }

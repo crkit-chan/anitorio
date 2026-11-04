@@ -2,7 +2,6 @@ use super::{power_pole::PowerPoleOccupied, prelude::*};
 use crate::prelude::*;
 use glam::{DVec2, IVec2, dvec2};
 use std::{cell::RefCell, collections::BTreeMap, sync::Arc};
-use wasm_bindgen::JsValue;
 
 thread_local! {
     static COMB_POS_DATA: RefCell<Option<Box<[CombinatorPositionData]>>> = const { RefCell::new(None) };
@@ -16,7 +15,7 @@ struct CombinatorPositionData {
     blueprint: Blueprint,
 }
 
-pub fn load_comb_pos_json(data_json_reader: impl std::io::Read) -> Result<(), JsValue> {
+pub fn load_comb_pos_json(data_json_reader: impl std::io::Read) -> Result<(), JsError> {
     #[derive(serde::Deserialize)]
     struct CombinatorPositionJson {
         compression: Option<SignalCompression>,
@@ -29,23 +28,22 @@ pub fn load_comb_pos_json(data_json_reader: impl std::io::Read) -> Result<(), Js
         blueprint: String,
     }
 
-    fn get_bounding_box(en: &BlueprintEntity) -> Result<core::ops::Range<DVec2>, JsValue> {
+    fn get_bounding_box(en: &BlueprintEntity) -> Result<core::ops::Range<DVec2>, JsError> {
         let offset = DVec2::from(match en.name.as_ref() {
             name if name == &**constants::ARI_CB || name == &**constants::DEC_CB => {
                 match en.direction.unwrap_or(0) {
                     constants::DIR_U | constants::DIR_D => (1.0, 2.0),
                     constants::DIR_L | constants::DIR_R => (2.0, 1.0),
-                    _ => return Err(JsValue::from_str("Unsupported entity direction")),
+                    _ => return Err(JsError::new("Unsupported entity direction")),
                 }
             }
             name if name == &**constants::CONSTANT_COMB => (1.0, 1.0),
-            _ => return Err(JsValue::from_str("Unsupported entity type")),
+            _ => return Err(JsError::new("Unsupported entity type")),
         });
         Ok((en.position - offset / 2.0)..(en.position + offset / 2.0))
     }
 
-    let parsed: Box<[CombinatorPositionJson]> =
-        serde_json::from_reader(data_json_reader).map_js_err("JSON error")?;
+    let parsed: Box<[CombinatorPositionJson]> = serde_json::from_reader(data_json_reader)?;
 
     let data_iter = parsed.iter().flat_map(|cb| {
         cb.blueprints.to_vec().into_iter().map(move |entry| {
@@ -72,7 +70,7 @@ pub fn load_comb_pos_json(data_json_reader: impl std::io::Read) -> Result<(), Js
         })
     });
 
-    COMB_POS_DATA.replace(Some(data_iter.collect::<Result<Box<_>, JsValue>>()?));
+    COMB_POS_DATA.replace(Some(data_iter.collect::<Result<Box<_>, JsError>>()?));
     Ok(())
 }
 
@@ -93,12 +91,14 @@ pub struct GenerateCombinatorsOutput {
 /// * `occupied` - Tracks cells occupied by power poles.
 /// * `base_ent_n` - Starting entity number.
 /// * `start_pos` - Starting X and Y coordinates.
-/// * `max_cols_per_grp` - Maximum columns per group. Used to detect if compact layout should be used.
+/// * `max_cols_per_grp` - Maximum columns per group. Used to detect if compact layout should be
+///   used.
 /// * `args` Blueprint arguments.
 ///
 /// # Returns
 ///
-/// ``ObjectGeneratorOutput`` (containing data comb entities), and (``other_entities``, first connection entity, target output entity).
+/// ``ObjectGeneratorOutput`` (containing data comb entities), and (``other_entities``, first
+/// connection entity, target output entity).
 ///
 /// Does not populate combinators with data.
 pub fn generate_combinators(
@@ -150,7 +150,8 @@ pub fn generate_combinators(
 
     base_pos.y -= height; // Set offset for combinators
 
-    // Finds the position for the combinator with the given tag, based off the blueprint string we decoded earlier
+    // Finds the position for the combinator with the given tag, based off the blueprint string we
+    // decoded earlier
     let get_pos = |tag: &str| -> DVec2 {
         let entry = pos_dict.get(tag).unwrap_or_else(|| panic!("No '{tag}'!"));
         let mut pos = entry.position + base_offset;
@@ -261,7 +262,8 @@ pub fn generate_combinators(
     let mut prev_ents_n: Vec<Option<u32>> = vec![None; max_cols_per_grp as usize];
     let mut prev_prev_ents_n: Vec<Option<u32>> = vec![None; max_cols_per_grp as usize];
 
-    // Calculate the offsets to test for collisions. In Factorio, all collision boxes are rectangular.
+    // Calculate the offsets to test for collisions. In Factorio, all collision boxes are
+    // rectangular.
     let size = cb_midpoint.abs() * 2.0;
     let x_offsets = (0..size.x as usize).map(|v| v as f64 + 0.5 - size.x / 2.0);
     let y_offsets = (0..size.y as usize).map(|v| v as f64 + 0.5 - size.y / 2.0);
@@ -340,10 +342,12 @@ pub fn generate_combinators(
         data_cbs: LazyCombinators {
             positions: positions.into_boxed_slice(),
             target_name,
-            direction: match use_const_cbs {
-                true => constants::DIR_D,
-                _ if use_compact_layout => constants::DIR_U,
-                _ => constants::DIR_R,
+            direction: if use_const_cbs {
+                constants::DIR_D
+            } else if use_compact_layout {
+                constants::DIR_U
+            } else {
+                constants::DIR_R
             },
         },
         other_ents,

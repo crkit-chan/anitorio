@@ -27,7 +27,9 @@ pub struct BlueprintArgs {
     pub prefer_horizontal_wires: bool,
     pub signal_compression: Option<SignalCompression>,
     pub signal_sorting: SignalSorting,
+    pub streaming_download: bool,
     pub timing_signals: TimingSignals,
+    pub use_threads: bool,
 }
 
 #[derive(Tsify, Debug, Serialize, Deserialize)]

@@ -1,14 +1,15 @@
-use crate::prelude::*;
+use crate::util::wasm_shared_memory;
 use crate::{constants::DEFAULT_FRAME_DELAY, util::format_duration};
+use crate::{prelude::*, ts};
 use glam::{DVec2, UVec2, uvec2};
 use image::{AnimationDecoder, imageops};
 use std::{pin::Pin, sync::Arc, time::Duration};
-use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsValue;
 
 pub type FrameCallback = Box<
     dyn for<'a> Fn(
         &'a image::DynamicImage,
-    ) -> Pin<Box<dyn Future<Output = Result<(), JsValue>> + 'a>>,
+    ) -> Pin<Box<dyn Future<Output = Result<(), JsError>> + 'a>>,
 >;
 
 pub struct FrameData<'a> {
@@ -63,7 +64,7 @@ impl<'a> FrameData<'a> {
         image_args: &'a ImageArgs,
         on_frame: Option<FrameCallback>,
         js_next_frame: Option<JsVideoFrameCallback>,
-    ) -> Result<Self, JsValue> {
+    ) -> Result<Self, JsError> {
         const fn expected_output_frames(n_ms: u64, fps: u32) -> u32 {
             1 + ((n_ms * fps as u64) / 1000) as u32
         }
@@ -100,7 +101,7 @@ impl<'a> FrameData<'a> {
         })
     }
 
-    pub async fn next(&mut self) -> Result<Option<Arc<image::DynamicImage>>, JsValue> {
+    pub async fn next(&mut self) -> Result<Option<Arc<image::DynamicImage>>, JsError> {
         let mut img: Option<Arc<image::DynamicImage>> = None;
         let use_js_decode = matches!(self.decoder.state, FrameDecoderState::JsFrames { .. });
 
@@ -257,15 +258,15 @@ pub fn get_frames<'a>(
     mut reader: impl std::io::Read + 'a,
     image_args: &'a ImageArgs,
     js_next_frame: Option<JsVideoFrameCallback>,
-) -> Result<ImageFrameData<'a>, JsValue> {
+) -> Result<ImageFrameData<'a>, JsError> {
     let mut info: ImageArgs = image_args.clone();
     let state = match image_args.mime_type.as_str() {
         "image/gif" => {
-            let decoder = image::codecs::gif::GifDecoder::new(reader).map_js_err("decode err")?;
+            let decoder = image::codecs::gif::GifDecoder::new(reader)?;
             FrameDecoderState::NativeFrames(decoder.into_frames())
         }
         "image/webp" => {
-            let decoder = image::codecs::webp::WebPDecoder::new(reader).map_js_err("decode err")?;
+            let decoder = image::codecs::webp::WebPDecoder::new(reader)?;
             FrameDecoderState::NativeFrames(decoder.into_frames())
         }
         t if t.starts_with("image/") => {
@@ -275,7 +276,7 @@ pub fn get_frames<'a>(
 
             let dim = image_args.dimensions.expect("No image size");
             let mut data = Vec::new();
-            reader.read_to_end(&mut data).map_js_err("Read error")?;
+            reader.read_to_end(&mut data)?;
 
             let frames = image::Frames::new(Box::new(core::iter::once(Ok(image::Frame::new(
                 image::RgbaImage::from_raw(dim.x, dim.y, data)
@@ -288,7 +289,7 @@ pub fn get_frames<'a>(
             let get_frame = js_next_frame.expect("JS next frame must be provided for videos");
             FrameDecoderState::JsFrames(get_frame)
         }
-        t => return Err(JsValue::from_str(&format!("Unsupported image type: {t}"))),
+        t => return Err(JsError::new(&format!("Unsupported image type: {t}"))),
     };
 
     let decoder = FrameDecoder::new(state, info.dimensions.unwrap());
@@ -322,10 +323,10 @@ impl<'a> FrameDecoder<'a> {
         self.finished
     }
 
-    async fn next_frame(&mut self) -> Result<Option<FrameWithTime>, JsValue> {
+    async fn next_frame(&mut self) -> Result<Option<FrameWithTime>, JsError> {
         Ok(match &mut self.state {
             FrameDecoderState::NativeFrames(frames) => {
-                let frame = frames.next().transpose().map_js_err("image")?.map(|f| {
+                let frame = frames.next().transpose()?.map(|f| {
                     let delay = f.delay();
                     let output = FrameWithTime(f, self.curr_n_us);
                     let delay: core::time::Duration = if delay.numer_denom_ms().0 == 0 {
@@ -367,33 +368,33 @@ impl<'a> FrameDecoder<'a> {
     }
 }
 
-pub type JsVideoFrameCallback = js_sys::Function<fn(JsValue) -> js_sys::Promise>;
+pub type JsVideoFrameCallback = js_sys::Function<fn(JsValue) -> ts::TsFut<JsValue>>;
 
 pub async fn encode_gif(
     get_next_frame: JsVideoFrameCallback,
-    on_chunk: js_sys::Function<fn(js_sys::Uint8Array) -> js_sys::Promise>,
+    on_chunk: js_sys::Function<fn(js_sys::Uint8Array) -> ts::TsFut>,
     args: &EncodeGifArgs,
-) -> Result<(), JsValue> {
+) -> Result<(), JsError> {
     use crate::ioutil::CallbackWriter;
     use core::cell::RefCell;
     use image::codecs::gif::{GifEncoder, Repeat};
     use std::rc::Rc;
 
-    let promises = Rc::new(const { RefCell::new(Vec::<js_sys::Promise>::new()) });
+    let promises = Rc::new(const { RefCell::new(Vec::<ts::TsFut>::new()) });
     let promise_q = Rc::clone(&promises);
 
     // Custom writer that invokes a callback whenever chunk size is reached.
     let writer = CallbackWriter::new(|chunk| {
-        let data = js_sys::Uint8Array::from(&*chunk);
-        promise_q.borrow_mut().push(on_chunk.call_n((&data,))?);
+        let js_promise = on_chunk.call_n((&(&*chunk).into(),));
+        promise_q.borrow_mut().push(js_promise?);
         Ok(())
     });
     let mut writer = std::io::BufWriter::with_capacity(1024 * 1024, writer);
     let mut encoder = GifEncoder::new_with_speed(&mut writer, i32::from(args.speed));
-    (encoder.set_repeat(Repeat::Infinite)).map_js_err("gif encoding error")?;
+    (encoder.set_repeat(Repeat::Infinite))?;
 
     let in_buf = vec![0u8; args.dim.element_product() as usize * 4];
-    let flush = async || -> Result<(), JsValue> {
+    let flush = async || -> Result<(), JsError> {
         let pending = core::mem::take(&mut *promises.borrow_mut());
         for promise in pending {
             promise.await?;
@@ -416,7 +417,7 @@ pub async fn encode_gif(
         let img = image::RgbaImage::from_raw(args.dim.x, args.dim.y, in_buf.clone());
         let img = img.expect("Invalid RGBA frame dimensions");
         let f = image::Frame::from_parts(img, 0, 0, duration);
-        encoder.encode_frame(f).map_js_err("Encode error")?;
+        encoder.encode_frame(f)?;
 
         flush().await?;
     }

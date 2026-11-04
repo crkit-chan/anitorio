@@ -1,9 +1,5 @@
 use wasm_bindgen::prelude::*;
 
-pub fn js_num<N: Into<f64>>(num: N) -> js_sys::Number {
-    js_sys::Number::from(num.into())
-}
-
 pub fn format_duration<T: Into<u128>>(ms: T) -> String {
     let ms = ms.into();
 
@@ -35,12 +31,12 @@ pub fn now_ms() -> f64 {
     js_sys::Date::now()
 }
 
-pub fn wasm_shared_memory(data: &[u8]) -> Result<js_sys::Object, JsValue> {
+pub fn wasm_shared_memory(data: &[u8]) -> Result<js_sys::Object, JsError> {
     let obj = js_sys::Object::new();
 
-    js_sys::Reflect::set(&obj, &"memory".into(), &wasm_bindgen::memory())?;
-    js_sys::Reflect::set(&obj, &"ptr".into(), &js_num(data.as_ptr() as u32))?;
-    js_sys::Reflect::set(&obj, &"len".into(), &js_num(data.len() as u32))?;
+    obj.reflect_set("memory", wasm_bindgen::memory())?;
+    obj.reflect_set("ptr", js_sys::Number::from(data.as_ptr() as u32))?;
+    obj.reflect_set("len", js_sys::Number::from(data.len() as u32))?;
 
     Ok(obj)
 }
@@ -62,28 +58,32 @@ impl<T: Clone> OneOrMany<T> {
 }
 
 pub trait JsReflectGetSet: Into<JsValue> + Clone {
-    fn reflect_get<T: JsCast>(&self, k: impl Into<JsValue>) -> Result<T, JsValue> {
-        js_sys::Reflect::get(&self.clone().into(), &k.into())?.dyn_into()
+    fn reflect_get<T: JsCast>(&self, k: impl Into<JsValue>) -> Result<T, JsError> {
+        let result = js_sys::Reflect::get(&self.clone().into(), &k.into())
+            .map_js_err("Error whilst getting key on Object");
+        (result?.dyn_into()).map_js_err("Error whilst getting key on Object")
     }
-    fn reflect_set(&self, k: impl Into<JsValue>, v: impl Into<JsValue>) -> Result<bool, JsValue> {
+    fn reflect_set(&self, k: impl Into<JsValue>, v: impl Into<JsValue>) -> Result<bool, JsError> {
         js_sys::Reflect::set(&self.clone().into(), &k.into(), &v.into())
+            .map_js_err("Error whilst setting key on Object")
     }
 }
 impl<T: Into<JsValue> + Clone> JsReflectGetSet for T {}
 
 pub trait JsCall<T: js_sys::JsFunction>: Into<js_sys::Function<T>> + Clone {
-    fn call_n<Args: js_sys::JsArgs<T>>(&self, args: Args) -> Result<T::Ret, JsValue> {
+    fn call_n<Args: js_sys::JsArgs<T>>(&self, args: Args) -> Result<T::Ret, JsError> {
         args.apply_call(&self.clone().into(), &JsValue::NULL)
+            .map_js_err("Call error")
     }
 }
 impl<T: js_sys::JsFunction, S: Into<js_sys::Function<T>> + Clone> JsCall<T> for S {}
 
 pub trait ResultJsExt<T, E> {
-    fn map_js_err(self, prefix: &str) -> Result<T, JsValue>;
+    fn map_js_err(self, prefix: &str) -> Result<T, JsError>;
 }
-impl<T, E: std::fmt::Display> ResultJsExt<T, E> for Result<T, E> {
-    fn map_js_err(self, prefix: &str) -> Result<T, JsValue> {
-        self.map_err(|e| JsValue::from_str(&format!("{prefix}: {e}")))
+impl<T, E: std::fmt::Debug> ResultJsExt<T, E> for Result<T, E> {
+    fn map_js_err(self, prefix: &str) -> Result<T, JsError> {
+        self.map_err(|e| JsError::new(&format!("{prefix}: {e:?}")))
     }
 }
 

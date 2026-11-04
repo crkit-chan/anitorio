@@ -1,6 +1,6 @@
 #![allow(dead_code, reason = "Satisfy Factorio Lua API")]
 
-use crate::blueprint::{constants, dvec2_xy};
+use super::{constants, dvec2_xy};
 use crate::models::RawJsonString;
 use crate::util::{is_default, is_none_or_default};
 use glam::DVec2;
@@ -56,7 +56,8 @@ pub enum ArithmeticCombinatorParameterOperation {
 
 #[derive(Tsify, Clone, Serialize, Deserialize)]
 pub struct ArithmeticCombinatorParameters {
-    /// First signal to use in an operation. If not specified, the second argument will be the value of ``first_constant``.
+    /// First signal to use in an operation. If not specified, the second argument will be the
+    /// value of ``first_constant``.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first_signal: Option<Arc<SignalID>>,
 
@@ -64,11 +65,13 @@ pub struct ArithmeticCombinatorParameters {
     #[serde(default, skip_serializing_if = "is_default")]
     pub operation: ArithmeticCombinatorParameterOperation,
 
-    /// Second signal to use in an operation. If not specified, the second argument will be the value of ``second_constant``.
+    /// Second signal to use in an operation. If not specified, the second argument will be the
+    /// value of ``second_constant``.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub second_signal: Option<Arc<SignalID>>,
 
-    /// Constant to use as the second argument of the operation. Has no effect when ``second_signal`` is set. Defaults to 0.
+    /// Constant to use as the second argument of the operation. Has no effect when
+    /// ``second_signal`` is set. Defaults to 0.
     #[serde(default, skip_serializing_if = "is_default")]
     pub second_constant: i32,
 
@@ -82,7 +85,7 @@ pub struct Blueprint {
     pub blueprint: BlueprintInner,
 }
 impl Blueprint {
-    pub fn from_blueprint<T: AsRef<[u8]>>(src: T) -> Result<Self, JsValue> {
+    pub fn from_blueprint<T: AsRef<[u8]>>(src: T) -> Result<Self, JsError> {
         use crate::util::ResultJsExt;
         use base64::{Engine as _, engine::general_purpose::STANDARD};
 
@@ -481,7 +484,8 @@ pub struct DeciderCombinatorOutput {
     /// Specifies a signal to output.
     pub signal: Arc<SignalID>,
 
-    /// Defaults to true. When false, will output the value from constant for the given ``output_signal``.
+    /// Defaults to true. When false, will output the value from constant for the given
+    /// ``output_signal``.
     #[serde(
         default = "DeciderCombinatorOutput::default_copy_count_from_input",
         skip_serializing_if = "DeciderCombinatorOutput::is_default_copy_count_from_input"
@@ -495,7 +499,8 @@ pub struct DeciderCombinatorOutput {
     )]
     pub constant: i32,
 
-    /// Sets which input network to read the value of signal from if ``copy_count_from_input`` is true. Defaults to both.
+    /// Sets which input network to read the value of signal from if ``copy_count_from_input`` is
+    /// true. Defaults to both.
     #[serde(default, skip_serializing_if = "is_default")]
     pub networks: CircuitNetworkSelection,
 }

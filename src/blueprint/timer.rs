@@ -1,7 +1,6 @@
 use super::prelude::*;
 use crate::prelude::*;
 use std::sync::Arc;
-use wasm_bindgen::JsValue;
 
 /// Generates timer entities and wires for the blueprint's timing mechanism.
 ///
@@ -11,7 +10,8 @@ use wasm_bindgen::JsValue;
 ///
 /// * `stop` - Maximum tick value before reset.
 /// * `ticks_per_frame` - Ticks per frame (derived from FPS).
-/// * `frames_per_combinator` - Number of frames processed per combinator (derived from compression).
+/// * `frames_per_combinator` - Number of frames processed per combinator (derived from
+///   compression).
 /// * `args` - Uses ``BlueprintArgs.grayscale_bits`` (affects extra combinators).
 ///
 /// # Returns
@@ -22,7 +22,7 @@ pub fn generate_timer(
     ticks_per_frame: u32,
     frames_per_comb: u32,
     args: &BlueprintArgs,
-) -> Result<(Vec<BlueprintEntity>, Vec<Wire>), JsValue> {
+) -> Result<(Vec<BlueprintEntity>, Vec<Wire>), JsError> {
     let (sig_f, sig_p, sig_s, sig_t) = {
         let s = &args.timing_signals;
         (&s.f, &s.p, &s.s, &s.t)

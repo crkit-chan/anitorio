@@ -89,7 +89,9 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
     } else if (data.blueprintMetadata) {
       const { blueprintMetadata } = data;
 
-      showToast("Blueprint downloaded!");
+      if (formData.streamingDownload) {
+        showToast("Blueprint downloaded!");
+      }
 
       formRefs.progressContainer.classList.add("hidden");
       formRefs.blueprintResult.classList.remove("hidden");
@@ -281,6 +283,24 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
       return;
     }
 
+    if (!formData.streamingDownload) {
+      async function requestPersistentStorage(): Promise<boolean> {
+        const alreadyPersistent = await navigator.storage.persisted();
+        if (alreadyPersistent) return true;
+
+        const accepted = confirm(
+          "Anitorio would like permission to buffer the streamed blueprint using browser storage. " +
+            "Without persistent storage, you can still use the 'Streaming Download' option to " +
+            "stream directly to your file system (instead of using browser storage). Allow persistent storage?",
+        );
+        if (!accepted) return false;
+
+        return await navigator.storage.persist();
+      }
+
+      if (!(await requestPersistentStorage())) return;
+    }
+
     setIsGenerating(true);
     formRefs.submitButton.disabled = true;
 
@@ -306,63 +326,55 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
         : [currFile()!, []]
       : [new Uint8Array(), []];
 
-    try {
-      worker.postMessage(
-        {
-          generate: {
-            imageData: data,
-            args: {
-              customHeight: +formData.customHeight,
-              customWidth: +formData.customWidth,
-              displayMarginY: +formData.displayMarginY,
-              imageArgs: {
-                dimensions: [animationInfo()!.width!, animationInfo()!.height!],
-                duration: currFile()!.type.startsWith("video")
-                  ? refVideo.duration
-                  : animationInfo()?.duration
-                    ? animationInfo()!.duration! / 1000
-                    : null,
-                filters: [],
-                flip: `${formData.flippedAxes}` as ImageArgs["flip"],
-                grayscaleBits: +formData.grayscaleBits,
-                maxSize: +formData.maxSize,
-                mimeType: currFile()!.type,
-                mode: ((!currFile() || !isStaticImage()) && formData.mode) || {
-                  staticImage: {
-                    useConstantCombinators: formData.staticImageMode === "constant",
-                    useCombinators: formData.staticImageMode !== "lamps",
-                    useTimer: formData.staticImageMode === "video",
-                  },
-                },
-                nFrames: animationInfo()?.frames || null,
-                resamplingFilter: `${formData.resamplingFilter}`,
-                rotate: `${formData.imageRotation}` as ImageArgs["rotate"],
-                targetFps: +formData.targetFps,
-              },
-              includePowerPoles: formData.includePowerPoles,
-              lowMemUsage: formData.lowMemUsage,
-              maxGroupSize: +formData.maxGroupSize! || null,
-              name: currFile()!.name,
-              outputFormat: `${formData.outputFormat}`,
-              powerPoleName: formData.powerPoleName,
-              powerPoleQuality: formData.powerPoleQuality,
-              preferGreenWires: !!(formData.wireColor === "green"),
-              preferHorizontalWires: !!(formData.connectionDirection === "horizontal"),
-              signalCompression:
-                (formData.signalCompressionType === "delta" && "delta") ||
-                (formData.signalCompressionType === "temporal" ? { temporal: { window: +formData.temporalCompressionWindow } } : null),
-              signalSorting:
-                formData.signalSorting === "auto"
-                  ? formData.outputFormat === "json"
-                    ? "json"
-                    : "compression"
-                  : `${formData.signalSorting}`,
-              timingSignals: timingSignals()!,
-            } satisfies BlueprintArgs,
+    const args = {
+      customHeight: +formData.customHeight,
+      customWidth: +formData.customWidth,
+      displayMarginY: +formData.displayMarginY,
+      imageArgs: {
+        dimensions: [animationInfo()!.width!, animationInfo()!.height!],
+        duration: currFile()!.type.startsWith("video")
+          ? refVideo.duration
+          : animationInfo()?.duration
+            ? animationInfo()!.duration! / 1000
+            : undefined,
+        filters: [],
+        flip: `${formData.flippedAxes}` as ImageArgs["flip"],
+        grayscaleBits: +formData.grayscaleBits,
+        maxSize: +formData.maxSize,
+        mimeType: currFile()!.type,
+        mode: ((!currFile() || !isStaticImage()) && formData.mode) || {
+          staticImage: {
+            useConstantCombinators: formData.staticImageMode === "constant",
+            useCombinators: formData.staticImageMode !== "lamps",
+            useTimer: formData.staticImageMode === "video",
           },
         },
-        transfer,
-      );
+        nFrames: animationInfo()?.frames,
+        resamplingFilter: `${formData.resamplingFilter}`,
+        rotate: `${formData.imageRotation}` as ImageArgs["rotate"],
+        targetFps: +formData.targetFps,
+      },
+      includePowerPoles: formData.includePowerPoles,
+      lowMemUsage: formData.lowMemUsage,
+      maxGroupSize: +formData.maxGroupSize! || undefined,
+      name: currFile()!.name,
+      outputFormat: `${formData.outputFormat}`,
+      powerPoleName: formData.powerPoleName,
+      powerPoleQuality: formData.powerPoleQuality ?? undefined,
+      preferGreenWires: !!(formData.wireColor === "green"),
+      preferHorizontalWires: !!(formData.connectionDirection === "horizontal"),
+      signalCompression:
+        (formData.signalCompressionType === "delta" && "delta") ||
+        (formData.signalCompressionType === "temporal" ? { temporal: { window: +formData.temporalCompressionWindow } } : undefined),
+      streamingDownload: formData.streamingDownload,
+      signalSorting:
+        formData.signalSorting === "auto" ? (formData.outputFormat === "json" ? "json" : "compression") : `${formData.signalSorting}`,
+      timingSignals: timingSignals()!,
+      useThreads: !!formData.useThreads,
+    } satisfies BlueprintArgs;
+
+    try {
+      worker.postMessage({ generate: { imageData: data, args: args } }, transfer);
     } catch (err: any) {
       console.error("Failed to process file:", err);
       showToast(`Failed to process file: ${err}`, { isError: true });

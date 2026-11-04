@@ -1,15 +1,14 @@
 use super::prelude::*;
 use crate::prelude::*;
 use std::io;
-use wasm_bindgen::JsValue;
 
-pub fn write_to(writer: &mut impl io::Write, buf: &[u8]) -> Result<(), JsValue> {
+pub fn write_to(writer: &mut impl io::Write, buf: &[u8]) -> Result<(), JsError> {
     writer.write_all(buf).map_js_err("Write error")
 }
 pub fn write_json_trimmed_to<T: ?Sized + serde::Serialize>(
     writer: &mut impl io::Write,
     value: &T,
-) -> Result<(), JsValue> {
+) -> Result<(), JsError> {
     let json_bytes = serde_json::to_vec(value).map_js_err("Write error")?;
     write_to(writer, &json_bytes[1..json_bytes.len() - 1]) // Remove braces
 }
@@ -124,9 +123,9 @@ pub fn color_frame_to_outputs(frame: &image::DynamicImage) -> Vec<i32> {
 pub fn grayscale_frames_to_outputs(
     frames: &[image::DynamicImage],
     grayscale_bits: u32,
-) -> Result<Vec<i32>, JsValue> {
+) -> Result<Vec<i32>, JsError> {
     if frames.is_empty() {
-        return Err(JsValue::from_str("No frames provided for packing"));
+        return Err(JsError::new("No frames provided for packing"));
     }
     let num_pixels = (frames[0].width() * frames[0].height()) as usize;
     let luma_images: Vec<_> = frames.iter().map(image::DynamicImage::to_luma8).collect();
@@ -160,7 +159,7 @@ pub fn grayscale_frames_to_outputs(
                 *output = packed.cast_signed();
             }
         }
-        _ => return Err(JsValue::from_str("Unsupported grayscale bit depth")),
+        _ => return Err(JsError::new("Unsupported grayscale bit depth")),
     }
     Ok(outputs)
 }

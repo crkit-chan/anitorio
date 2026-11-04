@@ -1,9 +1,7 @@
+use crate::{ts, util::JsCall};
 use std::io;
 
-use crate::util::{JsCall, js_num};
-
-pub type JsFileReaderCallback =
-    js_sys::Function<fn(js_sys::Number, js_sys::Number) -> js_sys::Uint8Array>;
+pub type JsFileReaderCallback = ts::TsFn<fn(ts::TsNum, ts::TsNum) -> js_sys::Uint8Array>;
 
 const MAX_SAFE_F64_INT: u64 = (1u64 << 53) - 1;
 
@@ -42,7 +40,7 @@ impl JsFileReader {
             assert!(start <= MAX_SAFE_F64_INT && end <= MAX_SAFE_F64_INT);
 
             let array = (self.callback)
-                .call_n((&js_num(start as f64), &js_num(end as f64)))
+                .call_n((&(start as f64).into(), &(end as f64).into()))
                 .map_err(|e| io::Error::other(format!("JS call error: {e:?}")))?;
 
             self.cache.resize(array.length() as usize, 0);

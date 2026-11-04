@@ -294,5 +294,23 @@
     "name": "Low RAM Mode",
     "type": "checkbox",
     "tooltip": "If enabled, reduces RAM usage required when generating the blueprint, at a small performance cost. Generated output is identical."
+  },
+  "streamingDownload": {
+    "name": "Streaming Download",
+    "type": "checkbox",
+    "tooltip": "If enabled, immediately downloads the generated blueprint to disk. If disabled, buffers the stream to browser storage, before downloading the full file at once.",
+    "splash": "Disabling this may improve performance, but may result in downloading truncated files if the download is stopped."
+  },
+  "dryRun": {
+    "name": "Dry Run",
+    "type": "checkbox",
+    "tooltip": "If enabled, the blueprint file will not be downloaded.",
+    "splash": "Useful for testing purposes"
+  },
+  "useThreads": {
+    "name": "Use Threads",
+    "type": "checkbox",
+    "tooltip": "If enabled, use a separate thread for running blueprint compression.",
+    "splash": "This feature is experimental and may not always work in all environments."
   }
 }

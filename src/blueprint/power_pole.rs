@@ -1,4 +1,4 @@
-use super::{data::PROTOTYPE_DATA, prelude::*};
+use super::prelude::*;
 use crate::prelude::*;
 use crate::util::dvec_const_fns::{dvec2_abs, dvec2_div, dvec2_mul, dvec2_round, dvec2_sub};
 use glam::{DVec2, dvec2};
@@ -16,9 +16,9 @@ impl PowerPoleOccupied {
         let quality = args.power_pole_quality.clone();
         let quality = quality.filter(|q| *q != *constants::DEFAULT_QUAL_KEY);
         let name = args.power_pole_name.as_ref();
-        let name = name.map_or_else(|| constants::DEFAULT_POWER_POLE_NAME, |v| v);
+        let name = name.map_or_else(|| constants::DEFAULT_POWER_POLE_NAME, |v| v.as_str());
 
-        let data = PROTOTYPE_DATA.with_borrow(|data| {
+        let data = crate::blueprint::data::PROTOTYPE_DATA.with_borrow(|data| {
             let data = &data.as_ref().expect("No power pole data loaded yet!");
             let poles = &data.electric_poles;
             let p = poles.iter().find(|p| *p.name == *name);
@@ -51,7 +51,8 @@ impl PowerPoleOccupied {
     ///
     /// # Returns
     ///
-    /// A tuple with power pole entities, their wires, occupied grid cells, and the next entity number.
+    /// A tuple with power pole entities, their wires, occupied grid cells, and the next entity
+    /// number.
     pub fn generate_power_poles(
         &mut self,
         base_ent_n: u32,
@@ -123,7 +124,8 @@ impl PowerPoleOccupied {
         (poles, wires, curr_ent_n)
     }
 
-    /// Tests if it is possible to place an entity at the given point, without overlapping with a power pole.
+    /// Tests if it is possible to place an entity at the given point, without overlapping with a
+    /// power pole.
     ///
     /// # Returns
     ///

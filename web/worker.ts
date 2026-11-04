@@ -42,6 +42,7 @@ export async function getVideoData(source: Blob) {
 
 async function main() {
   let prevMemoryUsage = 0;
+  let rayonAvailable = false;
 
   const wasmReadyPromises = {
     init: (async () => {
@@ -112,14 +113,22 @@ async function main() {
           bytes,
           commited: WasmTracingAllocator?.getTotalAllocated(),
         };
-        // if (bytes === prevMemoryUsage) return;
+        if (!WasmTracingAllocator && bytes === prevMemoryUsage) return;
 
         prevMemoryUsage = bytes;
         postMessage({ wasmMemoryUsage });
       }, 50);
 
-      const { default: init, init: prepare_wasm, set_progress_callback } = await import("@/../pkg/anitorio_wasm.js");
+      const { default: init, init: prepare_wasm, init_rayon, set_progress_callback } = await import("@/../pkg/anitorio_wasm.js");
       wasm = await init();
+
+      try {
+        await init_rayon();
+        rayonAvailable = true;
+      } catch (error) {
+        console.warn("Rayon unavailable:", error);
+      }
+
       prepare_wasm();
       set_progress_callback((percentage: number, status: string) => postMessage({ progress: { percentage, status } }));
     })(),
@@ -281,12 +290,16 @@ async function main() {
       }
 
       try {
-        waitForWriterReady();
+        if (blueprintArgs.streamingDownload) {
+          waitForWriterReady();
+        }
 
         const prefix = FILE_PREFIX_MAP[outputFormat as keyof typeof FILE_PREFIX_MAP];
         if (!prefix) throw new Error(`Unknown output format: ${outputFormat}`);
 
-        postMessage({ writerArgs: { type: "start", filename: `blueprint.${prefix}` } });
+        const filename = `blueprint.${prefix}`;
+
+        postMessage({ writerArgs: { type: "start", filename, streamingDownload: blueprintArgs.streamingDownload } });
 
         await writerReady;
 
@@ -300,13 +313,8 @@ async function main() {
         const blueprintMetadata = await run_blueprint(blueprintArgs, {
           getDataLen: () => inputData?.byteLength ?? 0,
           getData(from, to) {
-            console.log(from, to);
             if (useJsDecodedVideo) throw new Error("No data to pass through when using JS decoding");
-            if (imageData instanceof File) {
-              const result = new Uint8Array(reader.readAsArrayBuffer(imageData.slice(from, to)));
-              console.log(result);
-              return result;
-            }
+            if (imageData instanceof File) return new Uint8Array(reader.readAsArrayBuffer(imageData.slice(from, to)));
             throw new Error("Unsupported data type");
           },
           onChunk(data) {
@@ -318,21 +326,20 @@ async function main() {
               } catch (e) {
                 console.error(e);
                 reject(e);
+                throw e;
               }
             });
           },
-          async onFrame({ outBuffer, dimensions }: { outBuffer: WasmSharedMemory; dimensions: [number, number] }) {
+          async onFrame({ frame, dimensions }) {
             try {
               const { canvas, ctx, sourceCanvas, sourceCtx } = state;
-              if (!canvas || !ctx || !sourceCanvas || !sourceCtx) return null;
+              if (!canvas || !ctx || !sourceCanvas || !sourceCtx) return;
 
               const [width, height] = dimensions;
               if (sourceCanvas.width !== width || sourceCanvas.height !== height) {
                 Object.assign(sourceCanvas, { width, height });
               }
-
-              const data = new ImageData(new Uint8ClampedArray(outBuffer.memory.buffer, outBuffer.ptr, outBuffer.len), width, height);
-              sourceCtx.putImageData(data, 0, 0);
+              sourceCtx.putImageData(new ImageData(frame, width, height), 0, 0);
 
               const rotation = imageArgs.rotate === "none" ? 0 : 360 - parseInt(imageArgs.rotate.match(/\d+/)![0]);
               const swap = rotation === 90 || rotation === 270;
@@ -350,11 +357,7 @@ async function main() {
               ctx.translate(outWidth / 2, outHeight / 2);
 
               if (imageArgs.flip !== "none") {
-                const flipMap: Record<string, [number, number]> = {
-                  both: [-1, -1],
-                  x: [-1, 1],
-                  y: [1, -1],
-                };
+                const flipMap: Record<string, [number, number]> = { both: [-1, -1], x: [-1, 1], y: [1, -1] };
                 ctx.scale(...flipMap[imageArgs.flip]);
               }
               if (rotation % 360 !== 0) {
@@ -366,15 +369,8 @@ async function main() {
               console.error(e);
               throw e;
             }
-
-            return null;
           },
           async getNextFrame({ inBuffer, dimensions }: { inBuffer: WasmSharedMemory; dimensions: [number, number] }) {
-            // if (wasm!.memory.buffer.byteLength > 30_000_000) {
-            //   logWasmAllocationInfo();
-            //   await new Promise((resolve) => setTimeout(resolve, 30000));
-            // }
-
             try {
               const frameInterval = 1 / imageArgs.targetFps;
 
@@ -432,6 +428,7 @@ async function main() {
           },
           jsYield: () => new Promise((resolve) => (syncQ.push(resolve), syncChannel.port2.postMessage(null))),
         });
+
         postMessage({ blueprintMetadata });
         postMessage({ writerArgs: { type: "done" } });
       } catch (e) {
@@ -461,7 +458,7 @@ async function main() {
       postMessage({ writerArgs: { type: "start", filename: `image.gif` } });
 
       await encode_gif(args, {
-        async getFrameData({ inBuffer }: { inBuffer: WasmSharedMemory }) {
+        async get_next_frame({ inBuffer }: { inBuffer: WasmSharedMemory }) {
           try {
             const nextSample = await videoSamples!.next();
             if (nextSample.done) return { isFinished: true };

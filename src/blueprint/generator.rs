@@ -9,17 +9,14 @@ use super::{
         write_to,
     },
 };
-use crate::models::{
-    BlueprintArgs, ImageFlip, ImageRotate, Mode, SignalCompression, SignalSorting,
-};
-use crate::progress::set_progress;
-use crate::util::{ResultJsExt, format_duration};
+use crate::prelude::*;
+use crate::util::format_duration;
 use crate::{image_processing::FrameData, models::RawJsonString};
 use glam::{UVec2, dvec2, uvec2};
 use std::{io, sync::Arc};
-use wasm_bindgen::JsValue;
 
-/// How many entities to encode in one go. Encoding more entities at once is faster, but uses more memory.
+/// How many entities to encode in one go. Encoding more entities at once is faster, but uses more
+/// memory.
 const ENCODE_CHUNK_SIZE: usize = 100;
 
 /// Number of wires to encode per chunk. Since wires generate much less data,
@@ -49,12 +46,12 @@ pub struct BlueprintGenerator<'a> {
     /// Maximum number of lamp columns per group. Groups are always divided split vertically.
     max_cols_per_grp: u32,
 
-    /// Total number of groups to generate. Each group is a vertical split of the lamps, with no data
-    /// connections. Timing wires still connect each group.
+    /// Total number of groups to generate. Each group is a vertical split of the lamps, with no
+    /// data connections. Timing wires still connect each group.
     n_groups: u32,
 
-    /// Keeps track of positions currently occupied by power poles, and used to request powerage for
-    /// generated entities.
+    /// Keeps track of positions currently occupied by power poles, and used to request powerage
+    /// for generated entities.
     occupied: PowerPoleOccupied,
 
     /// List of unique signals to use for the blueprint.
@@ -104,7 +101,7 @@ impl<'a> BlueprintGenerator<'a> {
     pub async fn new(
         data: Option<FrameData<'a>>,
         args: &'a BlueprintArgs,
-    ) -> Result<Self, JsValue> {
+    ) -> Result<Self, JsError> {
         let (signals, signals_json) = Self::get_signal_data(args)?;
         let gray_bits = args.image_args.grayscale_bits;
         let comb_comp = args.signal_compression;
@@ -149,9 +146,7 @@ impl<'a> BlueprintGenerator<'a> {
                 .min(args.max_group_size.unwrap_or(dim.x)),
         };
         if max_lamp_cols_per_grp < 1 {
-            return Err(JsValue::from_str(
-                "Not enough signals for even one lamp column!",
-            ));
+            return Err(JsError::new("Not enough signals for even one lamp column!"));
         }
         let n_groups = dim.x.div_ceil(max_lamp_cols_per_grp);
 
@@ -189,7 +184,8 @@ impl<'a> BlueprintGenerator<'a> {
         })
     }
 
-    /// Calculates the required position for the given entity to counteract the rotation of the image.
+    /// Calculates the required position for the given entity to counteract the rotation of the
+    /// image.
     fn transform_entity(args: &BlueprintArgs, en: &mut BlueprintEntity) {
         let mut pos = en.position;
         pos = match args.image_args.flip {
@@ -224,7 +220,7 @@ impl<'a> BlueprintGenerator<'a> {
         });
     }
 
-    fn get_signal_data(args: &BlueprintArgs) -> Result<SignalDataResult, JsValue> {
+    fn get_signal_data(args: &BlueprintArgs) -> Result<SignalDataResult, JsError> {
         let mut signals = crate::blueprint::data::PROTOTYPE_DATA.with_borrow(|v| {
             let signals = &v.as_ref().expect("No signal data loaded yet!").signals;
             if matches!(
@@ -261,8 +257,7 @@ impl<'a> BlueprintGenerator<'a> {
         }
         let signals_str = (signals.iter())
             .map(|s| serde_json::value::RawValue::from_string(serde_json::to_string(s).unwrap()))
-            .collect::<Result<Arc<_>, _>>()
-            .map_js_err("Could not convert to JSON")?;
+            .collect::<Result<Arc<_>, _>>()?;
         Ok((signals, signals_str))
     }
 
@@ -271,7 +266,7 @@ impl<'a> BlueprintGenerator<'a> {
     }
 
     /// Generates the next chunk of the blueprint and writes it to the given writer.
-    pub async fn next_chunk(&mut self, writer: &mut impl io::Write) -> Result<(), JsValue> {
+    pub async fn next_chunk(&mut self, writer: &mut impl io::Write) -> Result<(), JsError> {
         let old_state = self.state;
         match old_state {
             BlueprintState::Start => {
@@ -350,7 +345,8 @@ impl<'a> BlueprintGenerator<'a> {
                         Self::transform_entity(self.args, en);
                     }
 
-                    // Write remaining entities. Data combinators were NOT included in self.entity_data.ents
+                    // Write remaining entities. Data combinators were NOT included in
+                    // self.entity_data.ents
                     for ents in self.entity_data.ents.chunks(ENCODE_CHUNK_SIZE) {
                         write_to(writer, b",")?;
                         write_json_trimmed_to(writer, &ents)?;
@@ -373,7 +369,8 @@ impl<'a> BlueprintGenerator<'a> {
 
     /// Gets the description to attach to the blueprint.
     fn get_description(&self) -> String {
-        // Note: we use the `var` font for bold text as the word "var" is short and takes up less space.
+        // Note: we use the `var` font for bold text as the word "var" is short and takes up less
+        // space.
 
         let name = self.args.name.clone();
         let info = self.frame_info.as_ref();
@@ -424,7 +421,7 @@ impl<'a> BlueprintGenerator<'a> {
         output.join("")
     }
 
-    fn place_entities(&mut self, writer: &mut impl io::Write) -> Result<(), JsValue> {
+    fn place_entities(&mut self, writer: &mut impl io::Write) -> Result<(), JsError> {
         let args = self.args;
         let info = &mut self.frame_info;
         let signals = &mut self.signals;
@@ -561,7 +558,7 @@ impl<'a> BlueprintGenerator<'a> {
         Ok(())
     }
 
-    async fn populate_data(&mut self, writer: &mut impl io::Write) -> Result<(), JsValue> {
+    async fn populate_data(&mut self, writer: &mut impl io::Write) -> Result<(), JsError> {
         let info = self.frame_info.as_mut().unwrap();
 
         let group_data_combs = &mut info.group_data_combs;
@@ -666,7 +663,7 @@ impl<'a> BlueprintGenerator<'a> {
                 }
 
                 if frame_sigs.len() != target_outputs_len {
-                    return Err(JsValue::from_str(&format!(
+                    return Err(JsError::new(&format!(
                         "Outputs length ({}) does not match frame size ({target_outputs_len}).",
                         frame_sigs.len(),
                     )));
@@ -684,14 +681,13 @@ impl<'a> BlueprintGenerator<'a> {
 
                 if use_delta_comp {
                     let prev_outputs = &state.sig_buf[0];
-                    if let target_outputs = (frame_sigs.iter().enumerate())
+                    let target_outputs = (frame_sigs.iter().enumerate())
                         .filter_map(|(i, &v)| {
                             let v = v.wrapping_sub(prev_outputs[i]);
                             (v != 0).then_some((i, v))
                         })
-                        .collect::<Box<_>>()
-                        && !target_outputs.is_empty()
-                    {
+                        .collect::<Box<_>>();
+                    if !target_outputs.is_empty() {
                         let en = data_combs.get(state.comb_i).unwrap();
                         let range = uvec2(1, 2) + (ticks_per_grp * state.chunk_i);
                         let cb = mk_cb(range.x, range.y, target_outputs);
@@ -776,8 +772,8 @@ impl<'a> BlueprintGenerator<'a> {
             if self.args.low_mem_usage {
                 let mut buffered = io::BufWriter::with_capacity(512 * 1024, writer);
                 let mut trimmed = crate::ioutil::TrimmedWriter::new(&mut buffered);
-                serde_json::to_writer(&mut trimmed, &output_data).map_js_err("Write error")?;
-                trimmed.finish().map_js_err("Write error")?;
+                serde_json::to_writer(&mut trimmed, &output_data)?;
+                trimmed.finish()?;
             } else {
                 write_json_trimmed_to(writer, &output_data)?;
             }
@@ -786,7 +782,7 @@ impl<'a> BlueprintGenerator<'a> {
         Ok(())
     }
 
-    fn make_wires(&mut self, writer: &mut impl io::Write) -> Result<(), JsValue> {
+    fn make_wires(&mut self, writer: &mut impl io::Write) -> Result<(), JsError> {
         let all_ents = &mut self.entity_data.ents;
         let all_wires = &mut self.entity_data.wires;
         let n_wires = all_wires.len();

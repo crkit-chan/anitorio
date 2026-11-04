@@ -3,6 +3,7 @@
   "customHeight": 100,
   "customWidth": 100,
   "displayMarginY": 2,
+  "dryRun": false,
   "flippedAxes": "none",
   "grayscaleBits": 0,
   "imageFilters": [],
@@ -19,7 +20,9 @@
   "signalCompressionType": "delta",
   "signalSorting": "auto",
   "staticImageMode": "constant",
+  "streamingDownload": true,
   "targetFps": 60,
   "temporalCompressionWindow": 300,
+  "useThreads": false,
   "wireColor": "green"
 }

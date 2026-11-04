@@ -131,20 +131,28 @@ git clone https://github.com/crkit-chan/anitorio.git
 cd anitorio
 ```
 
-2. Build the WebAssembly module:
+2. Install the nightly rustup toolchain
+
+```
+rustup toolchain install nightly
+rustup component add rust-src --toolchain nightly
+rustup target add wasm32-unknown-unknown --toolchain nightly
+```
+
+3. Build the WebAssembly module:
 
 ```bash
 wasm-pack build --target web --release
 ```
 
-3. Run it with NPM:
+4. Run it with NPM:
 
 ```bash
 npm install
 npm start
 ```
 
-4. Open your browser and navigate to `http://localhost:3000`
+5. Open your browser and navigate to `http://localhost:3000`
 
 ## Usage
 
