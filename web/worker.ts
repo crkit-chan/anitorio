@@ -125,8 +125,10 @@ async function main() {
       try {
         await init_rayon();
         rayonAvailable = true;
+        postMessage({ rayonAvailable: { available: true } });
       } catch (error) {
         console.warn("Rayon unavailable:", error);
+        postMessage({ rayonAvailable: { available: false } });
       }
 
       prepare_wasm();
@@ -507,7 +509,7 @@ async function main() {
         },
       });
       postMessage({ writerArgs: { type: "done" } });
-    } else if (evt.data.wasmMemoryUsage) {
+    } else if (evt.data.wasmMemoryUsage || evt.data.rayonAvailable) {
     } else {
       console.error("Worker: Unhandled message", evt.data);
     }
