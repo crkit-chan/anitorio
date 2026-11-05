@@ -43,7 +43,7 @@ let coepCredentialless = false;
             const url = new URL(r.url);
 
             // StreamSaver's MITM iframe must not receive COOP.
-            const isStreamSaverMitm = url.pathname.endsWith("/anitorio/streamsaver/mitm.html");
+            const isStreamSaverMitm = url.pathname.includes("streamsaver");
             const newHeaders = new Headers(response.headers);
 
             newHeaders.set("Cross-Origin-Embedder-Policy", coepCredentialless ? "credentialless" : "require-corp");
