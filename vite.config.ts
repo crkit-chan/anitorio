@@ -1,18 +1,7 @@
-import fs from "node:fs";
 import path from "node:path";
-import { defineConfig, type Plugin } from "vite";
+import { defineConfig } from "vite";
 import solidPlugin from "vite-plugin-solid";
 import { viteStaticCopy } from "vite-plugin-static-copy";
-
-function coiServiceWorker(): Plugin {
-  return {
-    name: "coi-serviceworker-copy",
-    generateBundle() {
-      const source = path.resolve(process.cwd(), "node_modules/coi-serviceworker/coi-serviceworker.js");
-      this.emitFile({ type: "asset", fileName: "coi-serviceworker.js", source: fs.readFileSync(source) });
-    },
-  };
-}
 
 export default defineConfig({
   appType: "mpa",
@@ -24,7 +13,6 @@ export default defineConfig({
     __BUILD_COMMIT__: JSON.stringify(process.env.GITHUB_SHA?.slice(0, 7) ?? ""),
   },
   plugins: [
-    coiServiceWorker(),
     solidPlugin(),
     viteStaticCopy({ targets: [{ src: "robots.txt", dest: "." }] }),
     viteStaticCopy({
@@ -36,19 +24,6 @@ export default defineConfig({
     }),
   ],
   resolve: { alias: { "@": path.resolve(__dirname, "web") } },
-  server: {
-    host: "0.0.0.0",
-    port: 3000,
-    headers: {
-      "Cross-Origin-Opener-Policy": "same-origin",
-      "Cross-Origin-Embedder-Policy": "require-corp",
-    },
-  },
+  server: { host: "0.0.0.0", port: 3000 },
   worker: { format: "es" },
-  preview: {
-    headers: {
-      "Cross-Origin-Opener-Policy": "same-origin",
-      "Cross-Origin-Embedder-Policy": "require-corp",
-    },
-  },
 });

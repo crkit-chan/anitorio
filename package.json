@@ -8,7 +8,7 @@
     "dev": "vite --debug",
     "build": "npm run build:wasm && npm run build:vite",
     "build:opt": "npm run build:wasm:opt && npm run build:vite",
-    "build:vite": "vite build",
+    "build:vite": "vite build --config vite.sw.config.ts && vite build",
     "build:wasm": "wasm-pack build --target web --release --features profiling",
     "build:wasm:opt": "wasm-pack build --target web --profile release-release --features default",
     "serve": "vite preview"
