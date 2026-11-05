@@ -1,4 +1,5 @@
-use crate::blueprint::{constants::*, models::*, power_pole::*};
+use super::{power_pole::PowerPoleOccupied, prelude::*};
+use crate::prelude::*;
 use glam::{DVec2, UVec2, dvec2};
 use std::{ops::Not, sync::Arc};
 
@@ -20,14 +21,16 @@ use std::{ops::Not, sync::Arc};
 pub fn generate_lamps(
     signals: &[Arc<SignalID>],
     grid_dim: UVec2,
-    curr_frame: Option<Arc<image::DynamicImage>>,
+    curr_frame: Option<&Arc<image::DynamicImage>>,
     occupied: &mut PowerPoleOccupied,
     base_ent_n: u32,
     start_pos: DVec2,
     args: &BlueprintArgs,
-) -> (ObjectGeneratorOutput, (Option<u32>, Option<u32>)) {
-    use crate::blueprint::models::ImageRotation::*;
-
+) -> (
+    Vec<BlueprintEntity>,
+    ObjectGeneratorMetadata,
+    (Option<u32>, Option<u32>),
+) {
     let mut ents = Vec::new();
     let mut wires = Vec::new();
     let mut top_left_ent_n: Option<u32> = None;
@@ -35,11 +38,11 @@ pub fn generate_lamps(
 
     // Auto-rotate wires based on image rotation
     let prefer_horizontal_wires =
-        args.prefer_horizontal_wires ^ matches!(args.image_rotation, Deg90 | Deg270);
+        args.prefer_horizontal_wires ^ matches!(args.image_args.rotate, Deg90 | Deg270);
     let base_pos = start_pos + dvec2(0.5, 0.5); // Lamps are centered on the middle of a tile
-    let mode = args.mode;
+    let mode = args.image_args.mode;
     let get_ent_num = |r: u32, c: u32| -> u32 { base_ent_n + r * grid_dim.x + c };
-    let mut prev_ents_n: Vec<Option<u32>> = vec![None; grid_dim.x as usize];
+    let mut prev_ent_ns: Vec<Option<u32>> = vec![None; grid_dim.x as usize];
     let curr_frame = curr_frame.as_ref().map(|f| f.to_rgba8());
 
     for r in 0..grid_dim.y as usize {
@@ -49,42 +52,43 @@ pub fn generate_lamps(
 
         for c in (0..grid_dim.x as usize).rev() {
             let pos = base_pos + dvec2(c as f64, r as f64);
-            if !occupied.test(pos) {
+            if !occupied.request(pos) {
                 continue;
             }
             let curr_ent_n = get_ent_num(r as u32, c as u32);
-            let mut lamp =
-                BlueprintEntity::new(curr_ent_n, Arc::clone(&LAMP), pos).with_always_on(true);
+            let mut lamp = BlueprintEntity::new(curr_ent_n, Arc::clone(&constants::LAMP), pos)
+                .with_always_on(true);
             let index = r * grid_dim.x as usize + c;
 
             if top_right_ent_n.is_none() {
                 top_right_ent_n = Some(curr_ent_n); // Handle case of only one column
             }
 
-            if matches!(args.mode, Mode::Static { combs: false, .. }) {
+            if matches!(args.image_args.mode, Mode::Static { combs: false, .. }) {
                 let frame = curr_frame.as_ref();
                 let frame = frame.expect("StaticImage without combintors requires a frame");
                 let p = frame.get_pixel(c as u32, r as u32);
                 lamp = lamp.with_color(Color {
-                    r: p[0] as f64 / 255.0,
-                    g: p[1] as f64 / 255.0,
-                    b: p[2] as f64 / 255.0,
-                    a: p[3] as f64 / 255.0,
+                    r: f64::from(p[0]) / 255.0,
+                    g: f64::from(p[1]) / 255.0,
+                    b: f64::from(p[2]) / 255.0,
+                    a: f64::from(p[3]) / 255.0,
                 });
             } else {
                 let sig = Arc::clone(&signals[index]);
+                let grayscale_bits = args.image_args.grayscale_bits;
                 lamp = lamp.with_control_behavior(ControlBehavior::Lamp {
                     use_colors: true,
-                    color_mode: if args.grayscale_bits > 0 { 1 } else { 2 },
-                    red_signal: (args.grayscale_bits > 0).then(|| Arc::clone(&sig)),
-                    green_signal: (args.grayscale_bits > 0).then(|| Arc::clone(&sig)),
-                    blue_signal: (args.grayscale_bits > 0).then(|| Arc::clone(&sig)),
-                    rgb_signal: (args.grayscale_bits > 0).not().then(|| Arc::clone(&sig)),
+                    color_mode: if grayscale_bits > 0 { 1 } else { 2 },
+                    red_signal: (grayscale_bits > 0).then(|| Arc::clone(&sig)),
+                    green_signal: (grayscale_bits > 0).then(|| Arc::clone(&sig)),
+                    blue_signal: (grayscale_bits > 0).then(|| Arc::clone(&sig)),
+                    rgb_signal: (grayscale_bits > 0).not().then(|| Arc::clone(&sig)),
                 });
             }
 
             if !matches!(mode, Mode::Static { combs: false, .. }) {
-                let is_top = prev_ents_n[c].is_none();
+                let is_top = prev_ent_ns[c].is_none();
 
                 // prev_ents_n tracks the entity numbers for the rows above
                 // if it's none then we never connected the top row
@@ -100,7 +104,7 @@ pub fn generate_lamps(
                     wires.push([curr_ent_n, WIRE_G, prev, WIRE_G]); // horizontal data wire
                 }
                 if (!did_connect_row || !prefer_horizontal_wires)
-                    && let Some(prev) = prev_ents_n[c]
+                    && let Some(prev) = prev_ent_ns[c]
                 {
                     wires.push([curr_ent_n, WIRE_G, prev, WIRE_G]); // vertical data wire
                     did_connect_row = true;
@@ -110,17 +114,16 @@ pub fn generate_lamps(
 
             ents.push(lamp);
             prev_ent_n = Some(curr_ent_n);
-            prev_ents_n[c] = prev_ent_n;
+            prev_ent_ns[c] = prev_ent_n;
         }
 
         if top_left_ent_n.is_none() {
             top_left_ent_n = prev_ent_n;
         }
     }
-    let output = ObjectGeneratorOutput {
-        entities: ents,
+    let output = ObjectGeneratorMetadata {
         wires,
         next_ent_n: get_ent_num(grid_dim.y - 1, grid_dim.x - 1) + 1,
     };
-    (output, (top_left_ent_n, top_right_ent_n))
+    (ents, output, (top_left_ent_n, top_right_ent_n))
 }

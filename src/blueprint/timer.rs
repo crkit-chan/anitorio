@@ -1,5 +1,5 @@
-use crate::blueprint::models::{ComparatorString as CompStr, *};
-use crate::blueprint::{constants::*, macros::*};
+use super::prelude::*;
+use crate::prelude::*;
 use std::sync::Arc;
 
 /// Generates timer entities and wires for the blueprint's timing mechanism.
@@ -10,8 +10,9 @@ use std::sync::Arc;
 ///
 /// * `stop` - Maximum tick value before reset.
 /// * `ticks_per_frame` - Ticks per frame (derived from FPS).
-/// * `frames_per_combinator` - Number of frames processed per combinator (derived from compression).
-/// * `args` - Uses BlueprintArgs.grayscale_bits (affects extra combinators).
+/// * `frames_per_combinator` - Number of frames processed per combinator (derived from
+///   compression).
+/// * `args` - Uses ``BlueprintArgs.grayscale_bits`` (affects extra combinators).
 ///
 /// # Returns
 ///
@@ -21,13 +22,13 @@ pub fn generate_timer(
     ticks_per_frame: u32,
     frames_per_comb: u32,
     args: &BlueprintArgs,
-) -> (Vec<BlueprintEntity>, Vec<Wire>) {
+) -> Result<(Vec<BlueprintEntity>, Vec<Wire>), JsError> {
     let (sig_f, sig_p, sig_s, sig_t) = {
         let s = &args.timing_signals;
         (&s.f, &s.p, &s.s, &s.t)
     };
 
-    let gray_bits = args.grayscale_bits;
+    let gray_bits = args.image_args.grayscale_bits;
     let mut ents: Vec<BlueprintEntity> = Vec::new();
     let mut wires: Vec<Wire> = Vec::new();
     let mut en =
@@ -40,7 +41,7 @@ pub fn generate_timer(
                 type_: Arc::clone(&sig_t.type_),
                 name: Arc::clone(&sig_t.name),
                 quality: sig_t.quality.clone(),
-                comparator: Some(CompStr::Eq),
+                comparator: Some(ComparatorString::Eq),
                 count: 1,
             }],
         }],
@@ -49,7 +50,11 @@ pub fn generate_timer(
     ents.push(en.with_tag("incrementer"));
 
     let mut en = BlueprintEntity::new(2, Arc::clone(&DEC_CB), TIMER2_POS).with_direction(DIR_R);
-    let condition = DeciderCombinatorCondition::new(Arc::clone(sig_t), stop as i32, CompStr::Lt);
+    let condition = DeciderCombinatorCondition::new(
+        Arc::clone(sig_t),
+        i32::try_from(stop).map_js_err("Overflow when converting stop time to i32")?,
+        ComparatorString::Lt,
+    );
     let decider_conditions = DeciderCombinatorParameters {
         conditions: vec![condition],
         outputs: vec![DeciderCombinatorOutput::new(Arc::clone(sig_t), None)],
@@ -67,15 +72,16 @@ pub fn generate_timer(
 
     if gray_bits > 0 {
         let en = BlueprintEntity::new(4, Arc::clone(&ARI_CB), TIMER4_POS).with_direction(DIR_L);
-        let conds = arithmetic_conds!(sig_t % (ticks_per_frame * frames_per_comb) => sig_s);
+        let conds =
+            arithmetic_conds!(sig_t % (ticks_per_frame * frames_per_comb).cast_signed() => sig_s);
         ents.push(en.with_control_behavior(ControlBehavior::arithmetic(conds)));
 
         let en = BlueprintEntity::new(5, Arc::clone(&ARI_CB), TIMER5_POS).with_direction(DIR_U);
-        let conds = arithmetic_conds!(sig_s / ticks_per_frame => sig_f);
+        let conds = arithmetic_conds!(sig_s / ticks_per_frame.cast_signed() => sig_f);
         ents.push(en.with_control_behavior(ControlBehavior::arithmetic(conds)));
 
         let mut en = BlueprintEntity::new(6, Arc::clone(&ARI_CB), TIMER6_POS).with_direction(DIR_R);
-        let conds = arithmetic_conds!(SIG_EACH * gray_bits => SIG_EACH);
+        let conds = arithmetic_conds!(SIG_EACH * gray_bits.cast_signed() => SIG_EACH);
         en = en.with_description("Calculates the bit shift for current frame.");
         ents.push(en.with_control_behavior(ControlBehavior::arithmetic(conds)));
 
@@ -85,5 +91,5 @@ pub fn generate_timer(
         wires.push([6, WIRE_OUT_R, 3, WIRE_OUT_R]);
     }
 
-    (ents, wires)
+    Ok((ents, wires))
 }

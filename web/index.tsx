@@ -1,5 +1,6 @@
 import App, { AppApi } from "@/App";
 import ResetAllDataButton from "@/components/ResetAllDataButton";
+import { ChunkWriter, DefaultFileDBChunkStore } from "@/db";
 import "@/index.css";
 import { ErrorBoundary, Show } from "solid-js";
 import { render } from "solid-js/web";
@@ -13,9 +14,13 @@ const STREAMSAVER_MITM = new URL(streamSaver.mitm, location.href);
 const SCOPE = new URL("./", STREAMSAVER_MITM.href);
 const ORIGIN = location.origin.replace(/(^\w+:|^)\/\//, "");
 
+let chunkWriter: ChunkWriter | null = null;
+let dbStore: DefaultFileDBChunkStore | null = null;
+let deleteAllChunksPromise = Promise.resolve();
 let downloadFrame!: HTMLIFrameElement;
 let downloadUrl: string | null = null;
-let writer: WritableStreamDefaultWriter<Uint8Array<ArrayBufferLike>> | null = null;
+let lastFlushPromise = Promise.resolve();
+let streamWriter: WritableStreamDefaultWriter<Uint8Array<ArrayBufferLike>> | null = null;
 
 const worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
 
@@ -33,30 +38,63 @@ worker.addEventListener("message", async (evt) => {
   if (!writerArgs) return;
 
   if (writerArgs.type === "start") {
-    const { filename } = writerArgs;
+    const { filename, streamingDownload } = writerArgs;
     const pathname = `${Math.random().toString(36).slice(2)}-${Date.now().toString(36).slice(2)}/${filename}`;
 
     downloadUrl = new URL(`${SCOPE.href}${ORIGIN}/${pathname}`).toString();
     refApp.setDownloadUrl(downloadUrl);
-    writer = streamSaver.createWriteStream(filename, { pathname }).getWriter();
+    streamWriter = streamSaver.createWriteStream(filename, { pathname }).getWriter();
+
+    if (!streamingDownload) {
+      dbStore = new DefaultFileDBChunkStore("default");
+      deleteAllChunksPromise = dbStore!.deleteAllChunks();
+      chunkWriter = new ChunkWriter(async (blob) => {
+        await deleteAllChunksPromise; // Ensure we finished waiting for the chunks from last generation to be removed
+        await lastFlushPromise;
+        lastFlushPromise = dbStore!.writeChunk(blob);
+      });
+    }
 
     worker.postMessage({ type: "writerReady" });
   } else if (writerArgs.chunk) {
     const { id, data } = writerArgs.chunk;
     try {
-      await writer!.write(data); // Safe to await now
+      await (chunkWriter ?? streamWriter)!.write(data);
       worker.postMessage({ type: "chunkWritten", id });
     } catch (e) {
       console.error(e);
       worker.postMessage({ type: "chunkWritten", id, error: e?.toString() ?? String(e) });
     }
   } else if (writerArgs.type === "done") {
-    await writer!.close();
-    writer = null;
+    const { dryRun } = writerArgs;
+    try {
+      if (chunkWriter) {
+        await chunkWriter.flush();
+        await lastFlushPromise;
+        for await (const chunk of dbStore!.readAllChunks()) {
+          try {
+            !dryRun && (await streamWriter!.write(chunk)); // Safe to await now
+          } catch (e) {
+            console.error(e);
+            throw e;
+          }
+        }
+      }
+    } finally {
+      try {
+        await streamWriter!.close();
+      } finally {
+        chunkWriter = null;
+        dbStore = null;
+        deleteAllChunksPromise = Promise.resolve();
+        lastFlushPromise = Promise.resolve();
+        streamWriter = null;
+      }
+    }
   }
 });
 
-window.addEventListener("beforeunload", () => writer?.abort());
+window.addEventListener("beforeunload", () => streamWriter?.abort());
 
 function openDownloadWindow() {
   refApp.showOpenStreamingWindowWarning();
@@ -98,12 +136,12 @@ render(() => {
 }, root!);
 
 // Cleanup on page exit
-window.addEventListener("pagehide", () => {
+window.addEventListener("beforeunload", () => {
   observer.disconnect();
   worker.terminate();
 
-  const activeWriter = writer;
-  writer = null;
+  const activeWriter = streamWriter;
+  streamWriter = null;
   downloadUrl = null;
 
   void activeWriter?.abort().catch((error) => console.warn("Failed to abort download during page exit:", error));

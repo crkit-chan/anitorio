@@ -1,4 +1,4 @@
-import type { BlueprintArgs, InitOutput } from "@/../pkg/anitorio_wasm.js";
+import type { BlueprintArgs, InitOutput } from "@/../pkg/anitorio_wasm";
 import type { WasmSharedMemory } from "@/types";
 import { BASE_URL, nullify } from "@/utils";
 import type { InputVideoTrack, VideoSample, VideoSampleSink } from "mediabunny";
@@ -6,6 +6,7 @@ import type { InputVideoTrack, VideoSample, VideoSampleSink } from "mediabunny";
 const FILE_PREFIX_MAP = { blueprint: "txt", json: "json", rawCompressed: "zlib" } as const;
 let hasHevcDecoder = false;
 let wasm: InitOutput | null = null;
+let WasmTracingAllocator: (typeof import("@/wasm-tracing-allocator/hooks"))["WasmTracingAllocator"] | null = null;
 
 export async function getVideoData(source: Blob) {
   async function getData() {
@@ -41,25 +42,97 @@ export async function getVideoData(source: Blob) {
 
 async function main() {
   let prevMemoryUsage = 0;
+  let rayonAvailable = false;
 
   const wasmReadyPromises = {
     init: (async () => {
-      // @ts-ignore
-      if (!__BUILD_COMMIT__) await import("wasm-tracing-allocator/js/hooks.js");
+      if (!__BUILD_COMMIT__) {
+        ({ WasmTracingAllocator } = await import("@/wasm-tracing-allocator/hooks"));
 
-      const { default: init, init: prepare_wasm, set_progress_callback } = await import("@/../pkg/anitorio_wasm.js");
-      wasm = await init();
-      prepare_wasm();
-      set_progress_callback((percentage: number, status: string) => postMessage({ progress: { percentage, status } }));
+        if (false) {
+          const u = new URL(import.meta.url);
+          const BASE_PATH = [u.origin, u.pathname.split("/").filter((v) => !!v)[0], "pkg"].join("/");
+
+          function cleanWasmStack(stack?: string): string {
+            if (!stack) return "";
+            return (
+              stack
+                .split("\n")
+                .map((line) => line.trim())
+                .filter(Boolean)
+                // Remove generated runtime frames
+                .filter((line) => !/wasm_bindgen|js_sys::futures|externref shim/.test(line))
+                // Remove WASM module paths and function indexes
+                .map((line) => line.replace(/^.*?\.wasm\./, "").replace(/@.*$/, ""))
+                // Remove Rust crate disambiguator hashes
+                .map((line) => line.replace(/\[[0-9a-f]{16}\]/g, ""))
+                .filter((line) => !/wasm_tracing_allocator::hooks::on_(?:alloc|dealloc|realloc)/.test(line))
+                .filter((line) => !/<js_sys::futures::queue::QueueState>::run_all/.test(line))
+                .filter((line) => !/<js_sys::futures::queue::Queue>::new()/.test(line))
+                .join("\n")
+                .replaceAll("::{closure#0}", "()")
+            );
+          }
+
+          WasmTracingAllocator?.addListener("alloc", ({ size, getStack }) => {
+            // if (size > 100000) {
+            //   const stack = getStack()
+            //     ?.replaceAll(BASE_PATH, "")
+            //     .split("\n")
+            //     .filter((v) => /anitorio_wasm/.test(v) && !/anitorio_wasm.js/.test(v))
+            //     .join("\n");
+            //   console.log(formatFileSize(+size), cleanWasmStack(stack));
+            // }
+            const wasmMemoryUsage = {
+              bytes: wasm?.memory.buffer.byteLength ?? 0,
+              commited: WasmTracingAllocator?.getTotalAllocated(),
+            };
+            postMessage({ wasmMemoryUsage });
+          });
+          WasmTracingAllocator?.addListener("dealloc", ({ size, getStack }) => {
+            // if (size > 100000) {
+            //   const stack = getStack()
+            //     ?.replaceAll(BASE_PATH, "")
+            //     .split("\n")
+            //     .filter((v) => /anitorio_wasm/.test(v) && !/anitorio_wasm.js/.test(v))
+            //     .join("\n");
+            //   console.log(formatFileSize(-size), cleanWasmStack(stack));
+            // }
+            const wasmMemoryUsage = {
+              bytes: wasm?.memory.buffer.byteLength ?? 0,
+              commited: WasmTracingAllocator?.getTotalAllocated(),
+            };
+            postMessage({ wasmMemoryUsage });
+          });
+        }
+      }
 
       setInterval(() => {
         const bytes = wasm?.memory.buffer.byteLength ?? 0;
-        if (bytes === prevMemoryUsage) return;
+        const wasmMemoryUsage = {
+          bytes,
+          commited: WasmTracingAllocator?.getTotalAllocated(),
+        };
+        if (!WasmTracingAllocator && bytes === prevMemoryUsage) return;
 
         prevMemoryUsage = bytes;
-        logWasmAllocationInfo();
-        postMessage({ wasmMemoryUsage: { bytes: wasm?.memory.buffer.byteLength ?? 0 } });
-      }, 1);
+        postMessage({ wasmMemoryUsage });
+      }, 50);
+
+      const { default: init, init: prepare_wasm, init_rayon, set_progress_callback } = await import("@/../pkg/anitorio_wasm.js");
+      wasm = await init();
+
+      try {
+        await init_rayon();
+        rayonAvailable = true;
+        postMessage({ rayonAvailable: { available: true } });
+      } catch (error) {
+        console.warn("Rayon unavailable:", error);
+        postMessage({ rayonAvailable: { available: false } });
+      }
+
+      prepare_wasm();
+      set_progress_callback((percentage: number, status: string) => postMessage({ progress: { percentage, status } }));
     })(),
     setCombPosData: null as Promise<void> | null,
   };
@@ -67,7 +140,7 @@ async function main() {
   function logWasmAllocationInfo() {
     if (__BUILD_COMMIT__) return;
 
-    (self as any).WasmTracingAllocator.dumpLiveAllocations({
+    WasmTracingAllocator!.dumpLiveAllocations({
       keyLabel: "Allocation function",
       valueLabel: "Memory (MiB)",
       // getKey(allocation: { stack: string }) {
@@ -99,7 +172,7 @@ async function main() {
 
   // Used to allow rust to yield to JS at regular intervals
   const syncChannel = new MessageChannel();
-  const syncQ: (() => void)[] = [];
+  const syncQ: ((...args: readonly any[]) => any)[] = [];
 
   syncChannel.port1.onmessage = () => syncQ.shift()?.();
 
@@ -107,7 +180,7 @@ async function main() {
   addEventListener("message", async (evt) => {
     await wasmReadyPromises.init;
 
-    const { encode_gif, run_blueprint, set_comb_pos_data, set_signal_data } = await import("../pkg/anitorio_wasm.js");
+    const { encode_gif, run_blueprint, set_comb_pos_data, set_signal_data } = await import("@/../pkg/anitorio_wasm");
 
     if (evt.data.type === "chunkWritten") {
       const pending = pendingWrites.get(evt.data.id);
@@ -136,8 +209,8 @@ async function main() {
         args: BlueprintArgs;
         imageData: File | Uint8Array<ArrayBuffer> | ImageData;
       } = evt.data.generate;
-      const { outputFormat, targetFps } = blueprintArgs;
-      const useJsDecodedVideo = blueprintArgs.imageMetadata.mimeType.startsWith("video/");
+      const { imageArgs, outputFormat } = blueprintArgs;
+      const useJsDecodedVideo = imageArgs.mimeType.startsWith("video/");
 
       let videoDuration: number | null = null;
 
@@ -219,48 +292,35 @@ async function main() {
       }
 
       try {
-        waitForWriterReady();
+        if (blueprintArgs.streamingDownload) {
+          waitForWriterReady();
+        }
 
         const prefix = FILE_PREFIX_MAP[outputFormat as keyof typeof FILE_PREFIX_MAP];
         if (!prefix) throw new Error(`Unknown output format: ${outputFormat}`);
 
-        postMessage({ writerArgs: { type: "start", filename: `blueprint.${prefix}` } });
+        const filename = `blueprint.${prefix}`;
+
+        postMessage({ writerArgs: { type: "start", filename, streamingDownload: blueprintArgs.streamingDownload } });
 
         await writerReady;
 
         const inputData =
           imageData instanceof File && !useJsDecodedVideo
-            ? new Uint8Array(await imageData.arrayBuffer())
+            ? { byteLength: imageData.size }
             : imageData instanceof ImageData
               ? new Uint8Array(imageData.data.buffer, imageData.data.byteOffset, imageData.data.byteLength)
-              : new Uint8Array();
-
+              : null;
+        const reader = new FileReaderSync();
         const blueprintMetadata = await run_blueprint(blueprintArgs, {
-          getDataLength: () => inputData.byteLength,
-          async getData(inBuffer: WasmSharedMemory) {
-            if (useJsDecodedVideo) return;
-            if (imageData instanceof File) {
-              const reader = imageData.stream().getReader();
-
-              let offset = 0;
-
-              try {
-                while (true) {
-                  const { done, value } = await reader.read();
-                  if (done) break;
-
-                  new Uint8Array(inBuffer.memory.buffer, inBuffer.ptr + offset, value.length).set(value);
-                  offset += value.length;
-                }
-
-                if (offset !== imageData.size) throw new Error("Incomplete file read");
-              } finally {
-                reader.releaseLock();
-              }
-            }
+          getDataLen: () => inputData?.byteLength ?? 0,
+          getData(from, to) {
+            if (useJsDecodedVideo) throw new Error("No data to pass through when using JS decoding");
+            if (imageData instanceof File) return new Uint8Array(reader.readAsArrayBuffer(imageData.slice(from, to)));
+            throw new Error("Unsupported data type");
           },
-          onChunk(data: Uint8Array) {
-            return new Promise<void>((resolve, reject) => {
+          onChunk(data) {
+            return new Promise((resolve, reject) => {
               try {
                 const id = nextWriteId++;
                 pendingWrites.set(id, { resolve, reject });
@@ -268,10 +328,11 @@ async function main() {
               } catch (e) {
                 console.error(e);
                 reject(e);
+                throw e;
               }
             });
           },
-          async onFrame({ outBuffer, dimensions }: { outBuffer: WasmSharedMemory; dimensions: [number, number] }) {
+          async onFrame({ frame, dimensions }) {
             try {
               const { canvas, ctx, sourceCanvas, sourceCtx } = state;
               if (!canvas || !ctx || !sourceCanvas || !sourceCtx) return;
@@ -280,11 +341,9 @@ async function main() {
               if (sourceCanvas.width !== width || sourceCanvas.height !== height) {
                 Object.assign(sourceCanvas, { width, height });
               }
+              sourceCtx.putImageData(new ImageData(frame, width, height), 0, 0);
 
-              const data = new ImageData(new Uint8ClampedArray(outBuffer.memory.buffer, outBuffer.ptr, outBuffer.len), width, height);
-              sourceCtx.putImageData(data, 0, 0);
-
-              const rotation = blueprintArgs.imageRotation === "none" ? 0 : 360 - parseInt(blueprintArgs.imageRotation.match(/\d+/)![0]);
+              const rotation = imageArgs.rotate === "none" ? 0 : 360 - parseInt(imageArgs.rotate.match(/\d+/)![0]);
               const swap = rotation === 90 || rotation === 270;
               const outWidth = swap ? height : width;
               const outHeight = swap ? width : height;
@@ -299,13 +358,9 @@ async function main() {
 
               ctx.translate(outWidth / 2, outHeight / 2);
 
-              if (blueprintArgs.flippedAxes !== "none") {
-                const flipMap: Record<string, [number, number]> = {
-                  both: [-1, -1],
-                  x: [-1, 1],
-                  y: [1, -1],
-                };
-                ctx.scale(...flipMap[blueprintArgs.flippedAxes]);
+              if (imageArgs.flip !== "none") {
+                const flipMap: Record<string, [number, number]> = { both: [-1, -1], x: [-1, 1], y: [1, -1] };
+                ctx.scale(...flipMap[imageArgs.flip]);
               }
               if (rotation % 360 !== 0) {
                 ctx.rotate((rotation * Math.PI) / 180);
@@ -314,11 +369,12 @@ async function main() {
               ctx.drawImage(sourceCanvas, -width / 2, -height / 2);
             } catch (e) {
               console.error(e);
+              throw e;
             }
           },
-          async getFrameData({ inBuffer, dimensions }: { inBuffer: WasmSharedMemory; dimensions: [number, number] }) {
+          async getNextFrame({ inBuffer, dimensions }: { inBuffer: WasmSharedMemory; dimensions: [number, number] }) {
             try {
-              const frameInterval = 1 / targetFps;
+              const frameInterval = 1 / imageArgs.targetFps;
 
               // Stop only when the output timeline reaches the video duration.
               if (nextOutputTime >= videoDuration!) {
@@ -357,22 +413,24 @@ async function main() {
               const timestamp = nextOutputTime;
               nextOutputTime += frameInterval;
 
-              return { isFinished: false, duration: 1 / targetFps, timestamp };
+              return { isFinished: false, duration: 1 / imageArgs.targetFps, timestamp };
             } catch (e) {
               console.error(e);
               throw e;
             }
           },
-          shouldShowPreview() {
+          shouldPreview() {
             try {
               postMessage({ shouldShowPreview: { showPreview: state.shouldShowPreview } });
               return state.shouldShowPreview;
             } catch (e) {
               console.error(e);
+              throw e;
             }
           },
-          yieldToJs: () => new Promise<void>((resolve) => (syncQ.push(resolve), syncChannel.port2.postMessage(null))),
+          jsYield: () => new Promise((resolve) => (syncQ.push(resolve), syncChannel.port2.postMessage(null))),
         });
+
         postMessage({ blueprintMetadata });
         postMessage({ writerArgs: { type: "done" } });
       } catch (e) {
@@ -402,7 +460,7 @@ async function main() {
       postMessage({ writerArgs: { type: "start", filename: `image.gif` } });
 
       await encode_gif(args, {
-        async getFrameData({ inBuffer }: { inBuffer: WasmSharedMemory }) {
+        async get_next_frame({ inBuffer }: { inBuffer: WasmSharedMemory }) {
           try {
             const nextSample = await videoSamples!.next();
             if (nextSample.done) return { isFinished: true };
@@ -451,7 +509,7 @@ async function main() {
         },
       });
       postMessage({ writerArgs: { type: "done" } });
-    } else if (evt.data.wasmMemoryUsage) {
+    } else if (evt.data.wasmMemoryUsage || evt.data.rayonAvailable) {
     } else {
       console.error("Worker: Unhandled message", evt.data);
     }
