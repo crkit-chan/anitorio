@@ -22,11 +22,17 @@
         event.respondWith(
           fetch(request).then((response) => {
             if (response.status === 0) return response;
+            const url = new URL(r.url);
+            const isStreamSaverMitm = url.pathname.endsWith("/anitorio/streamsaver/mitm.html");
             const newHeaders = new Headers(response.headers);
             newHeaders.set("Cross-Origin-Embedder-Policy", coepCredentialless ? "credentialless" : "require-corp");
             coepCredentialless || newHeaders.set("Cross-Origin-Resource-Policy", "cross-origin");
-            newHeaders.set("Cross-Origin-Opener-Policy", "same-origin");
-            return new Response(response.body, { status: response.status, statusText: response.statusText, headers: newHeaders });
+            isStreamSaverMitm || newHeaders.set("Cross-Origin-Opener-Policy", "same-origin");
+            return new Response(response.body, {
+              status: response.status,
+              statusText: response.statusText,
+              headers: newHeaders
+            });
           }).catch((e) => {
             console.error(e);
             return new Response("Failed to fetch", { status: 500 });

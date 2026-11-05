@@ -34,17 +34,28 @@ let coepCredentialless = false;
       if (r.cache === "only-if-cached" && r.mode !== "same-origin") return;
 
       const request = coepCredentialless && r.mode === "no-cors" ? new Request(r, { credentials: "omit" }) : r;
+
       event.respondWith(
         fetch(request)
           .then((response) => {
             if (response.status === 0) return response;
 
-            const newHeaders = new Headers(response.headers);
-            newHeaders.set("Cross-Origin-Embedder-Policy", coepCredentialless ? "credentialless" : "require-corp");
-            coepCredentialless || newHeaders.set("Cross-Origin-Resource-Policy", "cross-origin");
-            newHeaders.set("Cross-Origin-Opener-Policy", "same-origin");
+            const url = new URL(r.url);
 
-            return new Response(response.body, { status: response.status, statusText: response.statusText, headers: newHeaders });
+            // StreamSaver's MITM iframe must not receive COOP.
+            const isStreamSaverMitm = url.pathname.endsWith("/anitorio/streamsaver/mitm.html");
+            const newHeaders = new Headers(response.headers);
+
+            newHeaders.set("Cross-Origin-Embedder-Policy", coepCredentialless ? "credentialless" : "require-corp");
+
+            coepCredentialless || newHeaders.set("Cross-Origin-Resource-Policy", "cross-origin");
+            isStreamSaverMitm || newHeaders.set("Cross-Origin-Opener-Policy", "same-origin");
+
+            return new Response(response.body, {
+              status: response.status,
+              statusText: response.statusText,
+              headers: newHeaders,
+            });
           })
           .catch((e) => {
             console.error(e);
