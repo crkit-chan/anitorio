@@ -1,4 +1,5 @@
 import type { BlueprintArgs, InitOutput } from "@/../pkg/anitorio_wasm";
+import { WASM_BUILD_ARGS } from "@/../pkg/build-info";
 import type { WasmSharedMemory } from "@/types";
 import { BASE_URL, nullify } from "@/utils";
 import type { InputVideoTrack, VideoSample, VideoSampleSink } from "mediabunny";
@@ -46,7 +47,7 @@ async function main() {
 
   const wasmReadyPromises = {
     init: (async () => {
-      if (!__BUILD_COMMIT__) {
+      if (WASM_BUILD_ARGS.includes("--profiling")) {
         ({ WasmTracingAllocator } = await import("@/wasm-tracing-allocator/hooks"));
 
         if (false) {
@@ -136,9 +137,7 @@ async function main() {
   };
 
   function logWasmAllocationInfo() {
-    if (__BUILD_COMMIT__) return;
-
-    WasmTracingAllocator!.dumpLiveAllocations({
+    WasmTracingAllocator?.dumpLiveAllocations({
       keyLabel: "Allocation function",
       valueLabel: "Memory (MiB)",
       // getKey(allocation: { stack: string }) {

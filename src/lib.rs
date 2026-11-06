@@ -12,15 +12,23 @@ mod progress;
 mod ts;
 mod util;
 
+/// .
+///
+/// # Errors
+///
+/// This function will return an error if rayon fails to initialize.
 #[wasm_bindgen]
-pub async fn init_rayon() {
-    wasm_bindgen_rayon::init_thread_pool(4).await.unwrap();
-}
+pub async fn init_rayon(n_threads: Option<usize>) -> Result<(), JsError> {
+    use crate::prelude::*;
 
-#[cfg(feature = "profiling")]
-#[global_allocator]
-static GLOBAL_ALLOCATOR: wasm_tracing_allocator::WasmTracingAllocator<std::alloc::System> =
-    wasm_tracing_allocator::WasmTracingAllocator(std::alloc::System);
+    let n_threads = n_threads.unwrap_or(4);
+
+    wasm_bindgen_rayon::init_thread_pool(n_threads)
+        .await
+        .map_js_err("Could not init thread pool")?;
+
+    Ok(())
+}
 
 #[wasm_bindgen]
 pub fn init() {
