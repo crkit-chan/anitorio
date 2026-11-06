@@ -6,7 +6,7 @@ import { viteStaticCopy } from "vite-plugin-static-copy";
 export default defineConfig({
   appType: "mpa",
   assetsInclude: ["**/*.png", "**/*.jpg", "**/*.gif", "**/*.jpeg", "**/*.lua"],
-  base: "/anitorio/",
+  base: "/",
   build: { target: "esnext" },
   define: {
     __BUILD_NUMBER__: JSON.stringify(process.env.GITHUB_RUN_NUMBER ?? ""),
@@ -24,6 +24,19 @@ export default defineConfig({
     }),
   ],
   resolve: { alias: { "@": path.resolve(__dirname, "web") } },
-  server: { host: "0.0.0.0", port: 3000 },
+  server: {
+    host: "0.0.0.0",
+    port: 3000,
+    // headers: {
+    //   "Cross-Origin-Opener-Policy": "same-origin",
+    //   "Cross-Origin-Embedder-Policy": "require-corp",
+    // },
+  },
   worker: { format: "es" },
+  // preview: {
+  //   headers: {
+  //     "Cross-Origin-Opener-Policy": "same-origin",
+  //     "Cross-Origin-Embedder-Policy": "require-corp",
+  //   },
+  // },
 });
