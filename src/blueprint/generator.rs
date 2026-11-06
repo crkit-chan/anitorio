@@ -12,7 +12,7 @@ use super::{
 use crate::prelude::*;
 use crate::util::format_duration;
 use crate::{image_processing::FrameData, models::RawJsonString};
-use glam::{UVec2, dvec2, uvec2};
+use glam::{UVec2, uvec2, vec2};
 use std::{io, sync::Arc};
 
 /// How many entities to encode in one go. Encoding more entities at once is faster, but uses more
@@ -173,7 +173,7 @@ impl<'a> BlueprintGenerator<'a> {
             dim,
             max_cols_per_grp: max_lamp_cols_per_grp,
             n_groups,
-            occupied: PowerPoleOccupied::new(dvec2(0.0, -f64::from(args.display_margin_y)), args),
+            occupied: PowerPoleOccupied::new(vec2(0.0, -(args.display_margin_y as f32)), args),
             generate_cbs: !matches!(
                 args.image_args.mode,
                 Mode::Static { combs: false, .. } | Mode::Lamps | Mode::LampGrid
@@ -189,15 +189,15 @@ impl<'a> BlueprintGenerator<'a> {
     fn transform_entity(args: &BlueprintArgs, en: &mut BlueprintEntity) {
         let mut pos = en.position;
         pos = match args.image_args.flip {
-            ImageFlip::X => dvec2(-pos.x, pos.y),
-            ImageFlip::Y => dvec2(pos.x, -pos.y),
-            ImageFlip::Both => dvec2(-pos.x, -pos.y),
+            ImageFlip::X => vec2(-pos.x, pos.y),
+            ImageFlip::Y => vec2(pos.x, -pos.y),
+            ImageFlip::Both => vec2(-pos.x, -pos.y),
             _ => pos,
         };
         pos = match args.image_args.rotate {
-            ImageRotate::Deg90 => dvec2(pos.y, -pos.x),
-            ImageRotate::Deg180 => dvec2(-pos.x, -pos.y),
-            ImageRotate::Deg270 => dvec2(-pos.y, pos.x),
+            ImageRotate::Deg90 => vec2(pos.y, -pos.x),
+            ImageRotate::Deg180 => vec2(-pos.x, -pos.y),
+            ImageRotate::Deg270 => vec2(-pos.y, pos.x),
             _ => pos,
         };
 
@@ -436,7 +436,7 @@ impl<'a> BlueprintGenerator<'a> {
             ent_data.next_ent_n += 1;
 
             for en in &mut ents {
-                en.position.y -= f64::from(args.display_margin_y);
+                en.position.y -= args.display_margin_y as f32;
             }
 
             ent_data.ents.extend(ents);
@@ -473,7 +473,7 @@ impl<'a> BlueprintGenerator<'a> {
                     .as_ref(),
                 &mut self.occupied,
                 ent_data.next_ent_n,
-                dvec2(f64::from(grp_left), 0.0),
+                vec2(grp_left as f32, 0.0),
                 args,
             );
             let (top_left_lamp_ent_n, top_right_lamp_ent_n) = io_ents_n;
@@ -495,7 +495,7 @@ impl<'a> BlueprintGenerator<'a> {
                     info.n_scaled_frames.div_ceil(info.frames_per_cb),
                     &self.occupied,
                     ent_data.next_ent_n,
-                    dvec2(f64::from(grp_left), -f64::from(args.display_margin_y)),
+                    vec2(grp_left as f32, -(args.display_margin_y as f32)),
                     self.max_cols_per_grp,
                     args,
                 );

@@ -1,7 +1,6 @@
 pub mod combinator;
 pub mod constants;
 pub mod data;
-mod dvec2_xy;
 pub mod encoder;
 pub mod generator;
 mod lamp;
@@ -11,3 +10,4 @@ mod power_pole;
 mod prelude;
 mod timer;
 pub mod util;
+mod vec2_xy;

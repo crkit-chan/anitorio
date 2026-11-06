@@ -75,7 +75,6 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
   } = {} as any;
 
   // Worker message handler
-
   worker.addEventListener("message", async ({ data }) => {
     if (data.progress) {
       const { percentage, status } = data.progress;
@@ -622,6 +621,8 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
             ⚠️ Streaming unavailable in this browser. This may cause issues with larger files.
           </div>
         </Show>
+
+        {/* <div class="text-center mt-5 text-4xl font-semibold text-tan-500">Anitorio</div> */}
 
         <FactorioDialogDelete
           ref={(api) => (refDialogLargeFile = api)}

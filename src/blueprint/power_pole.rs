@@ -1,18 +1,44 @@
 use super::prelude::*;
 use crate::prelude::*;
-use crate::util::dvec_const_fns::{dvec2_abs, dvec2_div, dvec2_mul, dvec2_round, dvec2_sub};
-use glam::{DVec2, dvec2};
-use std::{collections::BTreeMap, sync::Arc};
+use glam::{Vec2, vec2};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
+
+#[derive(Clone, Copy, Debug)]
+struct OrderedVec2(pub Vec2);
+impl Ord for OrderedVec2 {
+    #[inline]
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        let (a, b) = (self.0, other.0);
+        a.y.total_cmp(&b.y).then_with(|| a.x.total_cmp(&b.x))
+    }
+}
+impl PartialOrd for OrderedVec2 {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl PartialEq for OrderedVec2 {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other).is_eq()
+    }
+}
+impl Eq for OrderedVec2 {}
 
 /// Tracks cells occupied by power poles.
 pub struct PowerPoleOccupied {
-    bounding_box: DVec2,
-    coverage: f64,
+    bounding_box: Vec2,
+    coverage: f32,
     ref_entity: BlueprintEntity,
-    requests: Vec<DVec2>,
+    requests: BTreeSet<OrderedVec2>,
+    start_pos: Vec2,
 }
 impl PowerPoleOccupied {
-    pub fn new(mut start_pos: DVec2, args: &BlueprintArgs) -> Self {
+    pub fn new(mut start_pos: Vec2, args: &BlueprintArgs) -> Self {
         let quality = args.power_pole_quality.clone();
         let quality = quality.filter(|q| *q != *constants::DEFAULT_QUAL_KEY);
         let name = args.power_pole_name.as_ref();
@@ -25,18 +51,19 @@ impl PowerPoleOccupied {
             p.unwrap_or_else(|| panic!("No power pole with name '{name}'!"))
                 .clone()
         });
-        let bounding_box = DVec2::new(f64::from(data.tile_width), f64::from(data.tile_height));
+        let bounding_box = vec2(data.tile_width as f32, data.tile_height as f32);
         let dists = &data.supply_area_distances;
         let half_cov = dists.iter().find(|d| quality == Some(d.quality.clone()));
         let cov = 2.0 * half_cov.unwrap_or(&dists[0]).supply_area_distance;
 
-        start_pos += bounding_box * dvec2(-0.5, 0.5);
+        start_pos += bounding_box * vec2(-0.5, 0.5);
 
         Self {
             bounding_box,
+            coverage: (cov * f64::from(i32::from(args.include_power_poles))) as f32,
             ref_entity: BlueprintEntity::new(0, Arc::from(name), start_pos).with_quality(quality),
-            coverage: cov * f64::from(i32::from(args.include_power_poles)),
-            requests: Vec::new(),
+            requests: BTreeSet::new(),
+            start_pos,
         }
     }
 
@@ -54,31 +81,10 @@ impl PowerPoleOccupied {
     /// A tuple with power pole entities, their wires, occupied grid cells, and the next entity
     /// number.
     pub fn generate_power_poles(
-        &mut self,
+        &self,
         base_ent_n: u32,
         args: &BlueprintArgs,
     ) -> (Vec<BlueprintEntity>, Vec<Wire>, u32) {
-        use core::cmp::Ordering;
-
-        struct OrderedDVec2(DVec2);
-        impl Ord for OrderedDVec2 {
-            fn cmp(&self, other: &Self) -> Ordering {
-                let (a, b) = (&self.0, &other.0);
-                a.y.total_cmp(&b.y).then_with(|| a.x.total_cmp(&b.x))
-            }
-        }
-        impl PartialOrd for OrderedDVec2 {
-            fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-                Some(self.cmp(other))
-            }
-        }
-        impl PartialEq for OrderedDVec2 {
-            fn eq(&self, other: &Self) -> bool {
-                self.cmp(other) == Ordering::Equal
-            }
-        }
-        impl Eq for OrderedDVec2 {}
-
         let mut poles: Vec<BlueprintEntity> = Vec::new();
         let mut wires: Vec<Wire> = Vec::new();
         let mut curr_ent_n = base_ent_n;
@@ -89,33 +95,35 @@ impl PowerPoleOccupied {
         }
 
         let horiz = args.prefer_horizontal_wires ^ matches!(args.image_args.rotate, Deg90 | Deg270);
-        let mut pole_map = BTreeMap::<OrderedDVec2, u32>::new();
+        let mut pole_map = BTreeMap::<OrderedVec2, u32>::new();
 
-        self.requests
-            .sort_by(|a, b| a.y.total_cmp(&b.y).then_with(|| a.x.total_cmp(&b.x)));
+        let mut requests: Vec<_> = self.requests.iter().collect();
+        requests.sort_by(|OrderedVec2(a), OrderedVec2(b)| {
+            a.y.total_cmp(&b.y).then_with(|| a.x.total_cmp(&b.x))
+        });
 
         // Create all power poles first. This lets us determine the topology
         // from the actual generated positions without making assumptions
         // about the shape of the layout.
-        for &req in &self.requests {
+        for req in &self.requests {
             let mut en = self.ref_entity.clone();
             en.entity_number = curr_ent_n;
-            en.position += req;
+            en.position += req.0;
 
-            pole_map.insert(OrderedDVec2(en.position), curr_ent_n);
+            pole_map.insert(OrderedVec2(en.position), curr_ent_n);
             poles.push(en);
             curr_ent_n += 1;
         }
 
         for pole in &poles {
             let pos = pole.position;
-            if (horiz || !pole_map.contains_key(&OrderedDVec2(pos + dvec2(0.0, cov))))
-                && let Some(&prev) = pole_map.get(&OrderedDVec2(pos + dvec2(-cov, 0.0)))
+            if (horiz || !pole_map.contains_key(&OrderedVec2(pos + vec2(0.0, cov))))
+                && let Some(&prev) = pole_map.get(&OrderedVec2(pos + vec2(-cov, 0.0)))
             {
                 wires.push([prev, WIRE_C, pole.entity_number, WIRE_C]);
             }
-            if (!horiz || !pole_map.contains_key(&OrderedDVec2(pos + dvec2(-cov, 0.0))))
-                && let Some(&prev) = pole_map.get(&OrderedDVec2(pos + dvec2(0.0, cov)))
+            if (!horiz || !pole_map.contains_key(&OrderedVec2(pos + vec2(-cov, 0.0))))
+                && let Some(&prev) = pole_map.get(&OrderedVec2(pos + vec2(0.0, cov)))
             {
                 wires.push([prev, WIRE_C, pole.entity_number, WIRE_C]);
             }
@@ -130,21 +138,18 @@ impl PowerPoleOccupied {
     /// # Returns
     ///
     /// A `bool` indicating whether the power pole would NOT occupy the given point.
-    pub const fn test(&self, point: DVec2) -> bool {
+    pub fn test(&self, point: Vec2) -> bool {
         self.test_center(point).0
     }
 
-    const fn test_center(&self, point: DVec2) -> (bool, DVec2) {
+    fn test_center(&self, mut point: Vec2) -> (bool, Vec2) {
         if self.coverage == 0.0 {
-            return (true, DVec2::ZERO);
+            return (true, Vec2::ZERO);
         }
-        let point = dvec2_sub(point, self.ref_entity.position);
+        point -= self.start_pos;
 
-        let center = dvec2_mul(
-            dvec2_round(dvec2_div(point, DVec2::splat(self.coverage))),
-            DVec2::splat(self.coverage),
-        );
-        let delta = dvec2_abs(dvec2_sub(point, center));
+        let center = (point / self.coverage).round() * self.coverage;
+        let delta = (point - center).abs();
         let did_hit = delta.x >= self.bounding_box.x / 2.0 || delta.y >= self.bounding_box.y / 2.0;
 
         (did_hit, center)
@@ -155,11 +160,9 @@ impl PowerPoleOccupied {
     /// # Returns
     ///
     /// A `bool` indicating whether the power pole would NOT occupy the given point.
-    pub fn request(&mut self, point: DVec2) -> bool {
+    pub fn request(&mut self, point: Vec2) -> bool {
         let (hit, center) = self.test_center(point);
-        if !self.requests.contains(&center) {
-            self.requests.push(center);
-        }
+        self.requests.insert(OrderedVec2(center));
         hit
     }
 }
