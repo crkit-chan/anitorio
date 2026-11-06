@@ -8,10 +8,11 @@
     "dev": "vite --debug",
     "build": "npm run build:wasm && npm run build:vite",
     "build:opt": "npm run build:wasm:opt && npm run build:vite",
-    "build:vite": "vite build --config vite.sw.config.ts && vite build",
+    "build:vite": "vite build",
     "build:wasm": "wasm-pack build --target web --release --features profiling",
     "build:wasm:opt": "wasm-pack build --target web --profile release-release --features default",
-    "serve": "vite preview"
+    "serve": "vite preview",
+    "vercel-build": "npm run build:opt"
   },
   "license": "MIT",
   "devDependencies": {
@@ -30,7 +31,6 @@
     "@hevcjs/mediabunny-plugin": "^0.1.0",
     "@thisbeyond/solid-dnd": "^0.7.5",
     "ajv": "^8.20.0",
-    "coi-serviceworker": "^0.1.7",
     "fflate": "^0.8.3",
     "mediabunny": "^1.62.1",
     "solid-js": "^1.9.3",

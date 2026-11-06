@@ -1,3 +1,4 @@
+<!doctype html>
 <!--
 	mitm.html is the lite "man in the middle"
 
@@ -151,9 +152,7 @@
 
     const transferable = data.readableStream ? [ports[0], data.readableStream] : [ports[0]];
 
-    if (!(data.readableStream || data.transferringReadable)) {
-      keepAlive();
-    }
+    keepAlive();
 
     return sw.postMessage(data, transferable);
   }

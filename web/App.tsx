@@ -48,7 +48,6 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
   const [downloadUrl, setDownloadUrl] = createSignal<string | null>(null);
   const [wasmMemoryUsage, setWasmMemoryUsage] = createSignal({ bytes: 0, commited: 0 });
   const [blueprintDownloadStartTime, setBlueprintDownloadStartTime] = createSignal(performance.now());
-  const [rayonAvailable, setRayonAvailable] = createSignal(false);
 
   let refBackground!: BackgroundApi;
   let refDialogLargeFile!: FactorioDialogDeleteApi;
@@ -115,9 +114,6 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
         URL.revokeObjectURL(url);
       }
       downloadBlob(blob, "profile.json");
-    } else if (data.rayonAvailable) {
-      const { available } = data.rayonAvailable;
-      setRayonAvailable(available);
     } else if (data.error) {
       showToast(data.error, { isError: true });
       setIsGenerating(false);
@@ -549,8 +545,6 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
           } else if (disabledKeys.includes(key)) {
             value = { ...value, disabled: true } as any;
           }
-        } else if (key === "useThreads") {
-          value = { ...value, disabled: !rayonAvailable() } as any;
         }
         return [key, value] as const;
       }),

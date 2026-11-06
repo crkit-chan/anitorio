@@ -14,13 +14,19 @@ export default function ResetAllDataButton() {
         <FactorioDialogDelete
           ref={(api) => (refDialogReset = api)}
           onConfirm={() => {
-            indexedDB
-              .databases()
-              .then((dbs) => Promise.all(dbs.map(({ name }) => name && indexedDB.deleteDatabase(name))))
-              .then(() => {
-                localStorage.clear();
-                window.location.reload();
-              });
+            Promise.all([
+              (async () => {
+                const registrations = await navigator.serviceWorker.getRegistrations();
+
+                await Promise.all(registrations.map((registration) => registration.unregister()));
+
+                console.log(`Unregistered ${registrations.length} service workers.`);
+              })(),
+              indexedDB.databases().then((dbs) => Promise.all(dbs.map(({ name }) => name && indexedDB.deleteDatabase(name)))),
+            ]).then(() => {
+              localStorage.clear();
+              window.location.reload();
+            });
           }}
         >
           <h2>Are you sure you want to delete all data?</h2>
