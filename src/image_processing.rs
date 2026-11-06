@@ -3,7 +3,7 @@ use crate::{constants::DEFAULT_FRAME_DELAY, util::format_duration};
 use crate::{prelude::*, ts};
 use glam::{DVec2, UVec2, uvec2};
 use image::{AnimationDecoder, imageops};
-use std::{pin::Pin, sync::Arc, time::Duration};
+use std::{collections::HashMap, pin::Pin, sync::Arc, time::Duration};
 use wasm_bindgen::JsValue;
 
 pub type FrameCallback = Box<
@@ -294,6 +294,27 @@ pub fn get_frames<'a>(
 
     let decoder = FrameDecoder::new(state, info.dimensions.unwrap());
     Ok(ImageFrameData { decoder, info })
+}
+
+pub async fn get_pixel_rgba8_i32_counts(
+    reader: &mut impl std::io::Read,
+    image_args: &ImageArgs,
+    js_next_frame: Option<JsVideoFrameCallback>,
+) -> Result<Vec<(i32, usize)>, JsError> {
+    let mut counts = HashMap::<i32, usize>::new();
+    let mut generator = FrameData::new(reader, image_args, None, js_next_frame)?;
+
+    while let Some(frame) = generator.next().await? {
+        for output in crate::blueprint::util::color_frame_to_outputs(&frame) {
+            *counts.entry(output).or_insert(0) += 1;
+        }
+    }
+
+    // Sort by highest count first
+    let mut entries: Vec<_> = counts.into_iter().collect();
+    entries.sort_unstable_by_key(|&(_, v)| std::cmp::Reverse(v));
+
+    Ok(entries)
 }
 
 enum FrameDecoderState<'a> {

@@ -199,13 +199,8 @@ async function main() {
       const { showPreview } = evt.data.showPreview;
       state.shouldShowPreview = showPreview;
     } else if (evt.data.generate) {
-      const {
-        args: blueprintArgs,
-        imageData,
-      }: {
-        args: BlueprintArgs;
-        imageData: File | Uint8Array<ArrayBuffer> | ImageData;
-      } = evt.data.generate;
+      const { args: blueprintArgs, imageData }: { args: BlueprintArgs; imageData: File | Uint8Array<ArrayBuffer> | ImageData } =
+        evt.data.generate;
       const { imageArgs, outputFormat } = blueprintArgs;
       const useJsDecodedVideo = imageArgs.mimeType.startsWith("video/");
 
@@ -352,7 +347,6 @@ async function main() {
 
               ctx.setTransform(1, 0, 0, 1, 0, 0);
               ctx.clearRect(0, 0, outWidth, outHeight);
-
               ctx.translate(outWidth / 2, outHeight / 2);
 
               if (imageArgs.flip !== "none") {
@@ -395,9 +389,7 @@ async function main() {
               const [width, height] = dimensions;
               const { canvas, ctx } = state;
               if (!canvas || !ctx) throw new Error("Canvas is not initialized");
-              if (canvas.width !== width || canvas.height !== height) {
-                Object.assign(canvas, { width, height });
-              }
+              (canvas.width !== width || canvas.height !== height) && Object.assign(canvas, { width, height });
 
               sample.draw(ctx, 0, 0, width, height);
 
@@ -423,6 +415,21 @@ async function main() {
             } catch (e) {
               console.error(e);
               throw e;
+            }
+          },
+          async resetGenerator() {
+            if (useJsDecodedVideo) {
+              await videoSampleTail;
+
+              videoSampleQueue.length = 0; // clear samples
+              videoSamples = videoSink!.samples();
+              currVideoSample = null;
+              nextOutputTime = 0;
+              videoEnded = false;
+              videoLookahead = null;
+              videoSampleTail = Promise.resolve();
+
+              prefetchVideoSamples();
             }
           },
           jsYield: () => new Promise((resolve) => (syncQ.push(resolve), syncChannel.port2.postMessage(null))),

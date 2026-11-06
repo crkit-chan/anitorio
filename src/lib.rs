@@ -66,6 +66,9 @@ pub struct RunBlueprintCallbacks {
     pub on_frame: ts::TsFn<fn(ts::TsIntoRust<OnFrameArgs>) -> ts::TsFut>,
 
     #[serde(with = "serde_wasm_bindgen::preserve")]
+    pub reset_generator: ts::TsFn<fn() -> ts::TsFut>,
+
+    #[serde(with = "serde_wasm_bindgen::preserve")]
     pub should_preview: ts::TsFn<fn() -> ts::TsBool>,
 }
 
@@ -95,7 +98,7 @@ pub async fn run_blueprint(
     use crate::prelude::*;
     use blueprint::{encoder::BlueprintEncoder, generator::BlueprintGenerator};
     use image::GenericImageView;
-    use image_processing::{FrameCallback, FrameData};
+    use image_processing::{FrameCallback, FrameData, get_pixel_rgba8_i32_counts};
     use js_sys as js;
     use std::{
         cell::{Cell, RefCell},
@@ -166,11 +169,21 @@ pub async fn run_blueprint(
         });
 
         let data_len = callbacks.get_data_len.call_n(())?.as_f64().unwrap();
-        let reader =
+        let mut reader =
             ioutil::JsFileReader::new(callbacks.get_data.clone(), data_len as u64, 1024 * 1024);
         let get_next_frame = (args.image_args.mime_type)
             .starts_with("video/")
             .then(|| callbacks.get_next_frame.clone());
+
+        if false {
+            let counts =
+                get_pixel_rgba8_i32_counts(&mut reader, &args.image_args, get_next_frame.clone())
+                    .await?;
+            log!("{counts:?}");
+
+            reader.reset();
+            callbacks.reset_generator.call_n(())?.await?;
+        }
 
         let generator = FrameData::new(reader, &args.image_args, Some(on_frame), get_next_frame);
         frame_data = Some(generator?);

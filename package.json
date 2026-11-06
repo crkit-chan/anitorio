@@ -8,11 +8,10 @@
     "dev": "vite --debug",
     "build": "npm run build:wasm && npm run build:vite",
     "build:opt": "npm run build:wasm:opt && npm run build:vite",
-    "build:vercel": "npm run build:wasm:vercel && npm run build:vite",
+    "build:start": "npm run build && npm start",
     "build:vite": "vite build",
     "build:wasm-pack": "sh scripts/build-wasm.sh",
     "build:wasm:opt": "npm run build:wasm-pack -- --release",
-    "build:wasm:vercel": "npm run build:wasm-pack --",
     "build:wasm": "npm run build:wasm-pack -- --profiling --features profiling",
     "serve": "vite preview"
   },

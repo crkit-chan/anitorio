@@ -18,17 +18,17 @@ all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
 
-allow_attributes = { level = "warn", priority = -1 }
-allow_attributes_without_reason = { level = "warn", priority = -1 }
-big_endian_bytes = { level = "warn", priority = -1 }
-bool_to_int_with_if = { level = "warn", priority = -1 }
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
+big_endian_bytes = "warn"
+bool_to_int_with_if = "warn"
 cast_possible_truncation = "allow"
 cast_precision_loss = "allow"
 cast_sign_loss = "allow"
-decimal_literal_representation = { level = "warn", priority = -1 }
-deref_by_slicing = { level = "warn", priority = -1 }
-empty_enum_variants_with_brackets = { level = "warn", priority = -1 }
-empty_structs_with_brackets = { level = "warn", priority = -1 }
+decimal_literal_representation = "warn"
+deref_by_slicing = "warn"
+empty_enum_variants_with_brackets = "warn"
+empty_structs_with_brackets = "warn"
 future_not_send = "allow"
 match_wildcard_for_single_variants = "allow"
 too_many_lines = "allow"
@@ -38,8 +38,9 @@ too_many_lines = "allow"
 async-channel = "2"
 base64 = "0.23"
 console_error_panic_hook = { version = "0.1" }
-flate2 = { version = "1.0.17", default-features = false, features = [
+flate2 = { version = "1.1.10", default-features = false, features = [
     "zlib-rs",
+    "runtime_detection",
 ] }
 futures-lite = "2"
 glam = { version = "0.33.8", features = ["serde"] }

@@ -50,6 +50,12 @@ impl JsFileReader {
         }
         Ok(())
     }
+
+    pub fn reset(&mut self) {
+        self.cache.clear();
+        self.cache_start = 0;
+        self.pos = 0;
+    }
 }
 impl io::Read for JsFileReader {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
