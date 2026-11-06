@@ -3,7 +3,7 @@ import ResetAllDataButton from "@/components/ResetAllDataButton";
 import "@/index.css";
 import { ErrorBoundary, Show } from "solid-js";
 import { render } from "solid-js/web";
-import streamSaver from "./vendor/StreamSaver"; // If unsupported, this will fall back to a polyfill that buffers in RAM
+import streamSaver from "streamsaver"; // If unsupported, this will fall back to a polyfill that buffers in RAM
 
 streamSaver.mitm = `${import.meta.env.BASE_URL}streamsaver/mitm.html`;
 
