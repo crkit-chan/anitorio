@@ -316,6 +316,10 @@ async function main() {
           getData(from, to) {
             if (useJsDecodedVideo) throw new Error("No data to pass through when using JS decoding");
             if (imageData instanceof File) return new Uint8Array(reader.readAsArrayBuffer(imageData.slice(from, to)));
+            if (imageData instanceof ImageData) {
+              if (!(inputData instanceof Uint8Array)) throw new Error("Expected inputData to be instanceof Uint8Array");
+              return inputData.slice(from, to);
+            }
             throw new Error("Unsupported data type");
           },
           onChunk(data) {
@@ -340,7 +344,7 @@ async function main() {
               if (sourceCanvas.width !== width || sourceCanvas.height !== height) {
                 Object.assign(sourceCanvas, { width, height });
               }
-              sourceCtx.putImageData(new ImageData(frame, width, height), 0, 0);
+              sourceCtx.putImageData(new ImageData(new Uint8ClampedArray(frame), width, height), 0, 0);
 
               const rotation = imageArgs.rotate === "none" ? 0 : 360 - parseInt(imageArgs.rotate.match(/\d+/)![0]);
               const swap = rotation === 90 || rotation === 270;
@@ -445,6 +449,7 @@ async function main() {
         postMessage({ blueprintMetadata });
         postMessage({ writerArgs: { type: "done" } });
       } catch (e) {
+        console.error(e);
         postMessage({ error: e?.toString() ?? String(e) });
       }
     } else if (evt.data.signalPresetRaw) {

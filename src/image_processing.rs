@@ -269,7 +269,7 @@ pub fn get_frames<'a>(
             let decoder = image::codecs::webp::WebPDecoder::new(reader)?;
             FrameDecoderState::NativeFrames(decoder.into_frames())
         }
-        t if t.starts_with("image/") => {
+        t if t.starts_with("image/") || matches!(image_args.mode, Mode::Static { .. }) => {
             let use_combs = matches!(image_args.mode, Mode::Static { combs: true, .. });
             info.n_frames = Some(1);
             info.duration = Some(if use_combs { 1000.0 } else { 0.0 });
@@ -289,7 +289,7 @@ pub fn get_frames<'a>(
             let get_frame = js_next_frame.expect("JS next frame must be provided for videos");
             FrameDecoderState::JsFrames(get_frame)
         }
-        t => return Err(JsError::new(&format!("Unsupported image type: {t}"))),
+        t => return Err(JsError::new(&format!("Unsupported image type: '{t}'"))),
     };
 
     let decoder = FrameDecoder::new(state, info.dimensions.unwrap());
