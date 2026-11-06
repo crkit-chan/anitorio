@@ -293,7 +293,14 @@ async function main() {
 
         const filename = `blueprint.${prefix}`;
 
-        postMessage({ writerArgs: { type: "start", filename, streamingDownload: blueprintArgs.streamingDownload } });
+        postMessage({
+          writerArgs: {
+            type: "start",
+            filename,
+            streamingDownload: blueprintArgs.streamingDownload,
+            dryRun: blueprintArgs.dryRun,
+          },
+        });
 
         await writerReady;
 

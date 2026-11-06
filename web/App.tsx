@@ -75,6 +75,7 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
   } = {} as any;
 
   // Worker message handler
+
   worker.addEventListener("message", async ({ data }) => {
     if (data.progress) {
       const { percentage, status } = data.progress;
@@ -87,15 +88,15 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
       const { showPreview } = data.shouldShowPreview;
       setWorkerShouldShowPreview(showPreview);
     } else if (data.blueprintMetadata) {
+      const stopTime = performance.now();
       const { blueprintMetadata } = data;
+      const msg = formData.dryRun ? "Dry run complete!" : formData.streamingDownload ? "Blueprint downloaded!" : "Downloading blueprint...";
 
-      if (formData.streamingDownload) {
-        showToast("Blueprint downloaded!");
-      }
+      showToast(msg);
 
       formRefs.progressContainer.classList.add("hidden");
       formRefs.blueprintResult.classList.remove("hidden");
-      formRefs.responseText.innerHTML = `Blueprint downloaded! Done in ${formatDuration(performance.now() - blueprintDownloadStartTime())}!`;
+      formRefs.responseText.innerHTML = `${msg} (Done in ${formatDuration(stopTime - blueprintDownloadStartTime())})`;
       formRefs.submitButton.disabled = false;
     } else if (data.wasmProfile) {
       const { profile } = data.wasmProfile;
@@ -330,6 +331,7 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
       customHeight: +formData.customHeight,
       customWidth: +formData.customWidth,
       displayMarginY: +formData.displayMarginY,
+      dryRun: formData.dryRun,
       imageArgs: {
         dimensions: [animationInfo()!.width!, animationInfo()!.height!],
         duration: currFile()!.type.startsWith("video")

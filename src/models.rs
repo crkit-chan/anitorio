@@ -15,6 +15,7 @@ pub struct BlueprintArgs {
     pub custom_height: Option<u32>,
     pub custom_width: Option<u32>,
     pub display_margin_y: u32,
+    pub dry_run: bool,
     pub image_args: ImageArgs,
     pub include_power_poles: bool,
     pub low_mem_usage: bool,
