@@ -73,12 +73,20 @@ impl PowerPoleOccupied {
 
         let horiz = args.prefer_horizontal_wires ^ matches!(args.image_args.rotate, Deg90 | Deg270);
         let mut pole_pos_map = BTreeMap::<(i32, i32), u32>::new();
+        let n_poles = self.requests.len();
+        let mut requests: Vec<_> = self.requests.iter().collect();
+        requests.sort_by(|&a, &b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
 
-        for &req in {
-            let mut requests: Vec<_> = self.requests.iter().collect();
-            requests.sort_by(|&a, &b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
-            requests
-        } {
+        for (i, &&req) in requests.iter().enumerate() {
+            if matches!(args.image_args.mode, Mode::Static { .. }) && i % 100 == 0 {
+                set_progress(
+                    0.70,
+                    0.85,
+                    (i + 1) as f64 / n_poles as f64,
+                    &format!("Preparing power poles ({} / {n_poles})...", i + 1),
+                );
+            }
+
             pole_pos_map.insert(req, curr_ent_n);
             curr_ent_n += 1;
         }
@@ -86,7 +94,16 @@ impl PowerPoleOccupied {
         let offset_below = ivec2(0, cov as i32);
         let offset_left = ivec2(-cov as i32, 0);
 
-        for (&pos, &ent_n) in &pole_pos_map {
+        for (i, (&pos, &ent_n)) in pole_pos_map.iter().enumerate() {
+            if matches!(args.image_args.mode, Mode::Static { .. }) && i % 100 == 0 {
+                set_progress(
+                    0.85,
+                    0.90,
+                    (i + 1) as f64 / n_poles as f64,
+                    &format!("Generating power poles ({} / {n_poles})...", i + 1),
+                );
+            }
+
             let mut en = self.ref_entity.clone();
             let pos = IVec2::from(pos);
 

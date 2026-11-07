@@ -4,28 +4,29 @@ use wasm_bindgen::prelude::*;
 
 #[derive(tsify::Tsify, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ProgressCallbacks {
+pub struct Callbacks {
     #[serde(with = "serde_wasm_bindgen::preserve")]
     pub on_lamp_group: ts::TsFn<fn(ts::TsNum) -> ts::TsVoid>,
 
     #[serde(with = "serde_wasm_bindgen::preserve")]
     pub on_progress: ts::TsFn<fn(ts::TsNum, ts::TsStr) -> ts::TsVoid>,
+
+    #[serde(with = "serde_wasm_bindgen::preserve")]
+    pub perf_now: ts::TsFn<fn() -> ts::TsNum>,
 }
 
 thread_local! {
-    static PROGRESS_CALLBACKS: RefCell<Option<ProgressCallbacks>> = const { RefCell::new(None) };
-    // static LAMP_GROUP_CALLBACK: RefCell<Option<LampGroupGenerationCallback>> = const { RefCell::new(None) };
-    // static PROGRESS_CALLBACK: RefCell<Option<ProgressCallback>> = const { RefCell::new(None) };
+    static CALLBACKS: RefCell<Option<Callbacks>> = const { RefCell::new(None) };
 }
 
-/// Sets the progress callback to be used during blueprint generation.
+/// Sets the static callbacks to be used during blueprint generation.
 ///
 /// # Arguments
 ///
 /// * `callbacks` - An object of JS functions that will be called during the generation process.
 #[wasm_bindgen]
-pub fn set_progress_callbacks(callbacks: &tsify::Ts<ProgressCallbacks>) {
-    PROGRESS_CALLBACKS.with_borrow_mut(|value| *value = Some(callbacks.to_rust().unwrap()));
+pub fn set_callbacks(callbacks: &tsify::Ts<Callbacks>) {
+    CALLBACKS.with_borrow_mut(|cbs| *cbs = Some(callbacks.to_rust().unwrap()));
 }
 
 /// Reports progress by calling the registered progress callback.
@@ -35,16 +36,16 @@ pub fn set_progress_callbacks(callbacks: &tsify::Ts<ProgressCallbacks>) {
 /// * `percentage` - A value between 0 and 1 representing the progress.
 /// * `status` - A status message indicating the current stage.
 pub fn report_progress<T: Into<f64>>(percentage: T, status: &str) {
-    PROGRESS_CALLBACKS.with_borrow(|progress| {
-        if let Some(ref cbs) = *progress {
+    CALLBACKS.with_borrow(|cbs| {
+        if let Some(cbs) = cbs.as_ref() {
             let pct = 100.0 * percentage.into();
             let _ = cbs.on_progress.call_n((&pct.into(), &status.into()));
         }
     });
 }
 pub fn report_lamp_group<T: Into<f64>>(percentage: T) {
-    PROGRESS_CALLBACKS.with_borrow(|progress| {
-        if let Some(ref cbs) = *progress {
+    CALLBACKS.with_borrow(|cbs| {
+        if let Some(cbs) = cbs.as_ref() {
             let pct = 100.0 * percentage.into();
             let _ = cbs.on_lamp_group.call_n((&pct.into(),));
         }
@@ -53,4 +54,9 @@ pub fn report_lamp_group<T: Into<f64>>(percentage: T) {
 
 pub fn set_progress(start: f64, end: f64, progress: f64, msg: &str) {
     report_progress(progress.mul_add(end - start, start), msg);
+}
+pub fn perf_now() -> f64 {
+    CALLBACKS
+        .with_borrow(|cbs| -> Option<f64> { cbs.as_ref()?.perf_now.call_n(()).ok()?.as_f64() })
+        .unwrap_or_else(crate::util::now_ms)
 }

@@ -10,8 +10,8 @@ use super::{
     },
 };
 use crate::util::format_duration;
+use crate::{callbacks::report_lamp_group, prelude::*};
 use crate::{image_processing::FrameData, models::RawJsonString};
-use crate::{prelude::*, progress::report_lamp_group};
 use glam::{UVec2, dvec2, uvec2};
 use std::{io, sync::Arc};
 
@@ -639,7 +639,7 @@ impl<'a> BlueprintGenerator<'a> {
                     let thresh = 0.60;
                     set_progress(
                         thresh,
-                        0.90,
+                        0.70,
                         f64::from(group_i + 1) / f64::from(n_groups),
                         &format!("Generating data (group {} / {n_groups})", group_i + 1),
                     );

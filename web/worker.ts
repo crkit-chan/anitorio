@@ -119,7 +119,7 @@ async function main() {
         postMessage({ wasmMemoryUsage });
       }, 50);
 
-      const { default: init, init: prepare_wasm, init_rayon, set_progress_callbacks } = await import("@/../pkg/anitorio_wasm.js");
+      const { default: init, init: prepare_wasm, init_rayon, set_callbacks } = await import("@/../pkg/anitorio_wasm.js");
       wasm = await init();
 
       try {
@@ -129,9 +129,10 @@ async function main() {
       }
 
       prepare_wasm();
-      set_progress_callbacks({
+      set_callbacks({
         onProgress: (percentage: number, status: string) => postMessage({ progress: { percentage, status } }),
         onLampGroup: (percentage) => postMessage({ lampProgress: { percentage } }),
+        perfNow: () => performance.now(),
       });
     })(),
     setCombPosData: null as Promise<void> | null,

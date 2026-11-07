@@ -1,6 +1,7 @@
 use wasm_bindgen::prelude::*;
 
 mod blueprint;
+mod callbacks;
 mod constants;
 mod image_processing;
 mod image_util;
@@ -8,7 +9,6 @@ mod ioutil;
 mod macros;
 mod models;
 mod prelude;
-mod progress;
 mod ts;
 mod util;
 
