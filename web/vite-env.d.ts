@@ -1,2 +1,1 @@
-declare const __BUILD_NUMBER__: string;
-declare const __BUILD_COMMIT__: string;
+declare const __BUILD_INFO__: (typeof import("@/../vite.config"))["config"]["define"]["__BUILD_INFO__"];

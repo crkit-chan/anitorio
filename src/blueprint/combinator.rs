@@ -1,6 +1,6 @@
 use super::{power_pole::PowerPoleOccupied, prelude::*};
 use crate::prelude::*;
-use glam::{IVec2, Vec2, vec2};
+use glam::{DVec2, IVec2, dvec2};
 use std::{cell::RefCell, collections::BTreeMap, sync::Arc};
 
 thread_local! {
@@ -10,7 +10,7 @@ thread_local! {
 #[derive(serde::Serialize, Clone)]
 struct CombinatorPositionData {
     compression: Option<SignalCompression>,
-    dim: Vec2,
+    dim: DVec2,
     grayscale_bits: Vec<u32>,
     blueprint: Blueprint,
 }
@@ -28,8 +28,8 @@ pub fn load_comb_pos_json(data_json_reader: impl std::io::Read) -> Result<(), Js
         blueprint: String,
     }
 
-    fn get_bounding_box(en: &BlueprintEntity) -> Result<core::ops::Range<Vec2>, JsError> {
-        let offset = Vec2::from(match en.name.as_ref() {
+    fn get_bounding_box(en: &BlueprintEntity) -> Result<core::ops::Range<DVec2>, JsError> {
+        let offset = DVec2::from(match en.name.as_ref() {
             name if name == &**constants::ARI_CB || name == &**constants::DEC_CB => {
                 match en.direction.unwrap_or(0) {
                     constants::DIR_U | constants::DIR_D => (1.0, 2.0),
@@ -48,7 +48,7 @@ pub fn load_comb_pos_json(data_json_reader: impl std::io::Read) -> Result<(), Js
     let data_iter = parsed.iter().flat_map(|cb| {
         cb.blueprints.to_vec().into_iter().map(move |entry| {
             let mut blueprint = Blueprint::from_blueprint(entry.blueprint)?;
-            let mut bounds = Vec2::INFINITY..Vec2::NEG_INFINITY;
+            let mut bounds = DVec2::INFINITY..DVec2::NEG_INFINITY;
 
             for en in &blueprint.blueprint.entities {
                 let en_bounds = get_bounding_box(en)?;
@@ -105,7 +105,7 @@ pub fn generate_combinators(
     ticks_per_group: u32,
     occupied: &PowerPoleOccupied,
     base_ent_n: u32,
-    start_pos: Vec2,
+    start_pos: DVec2,
     max_cols_per_grp: u32,
     args: &BlueprintArgs,
 ) -> GenerateCombinatorsOutput {
@@ -119,7 +119,7 @@ pub fn generate_combinators(
 
     COMB_POS_DATA.with_borrow(|data| {
         for d in data.as_ref().expect("No combinator positions data") {
-            if d.dim.x <= (max_cols_per_grp as f32)
+            if d.dim.x <= f64::from(max_cols_per_grp)
                 && use_delta_comp == matches!(d.compression, Some(SignalCompression::Delta))
                 && d.grayscale_bits.contains(&args.image_args.grayscale_bits)
                 && d.dim.x > best_pos_data.as_ref().map_or(0.0, |v| v.dim.x)
@@ -152,7 +152,7 @@ pub fn generate_combinators(
 
     // Finds the position for the combinator with the given tag, based off the blueprint string we
     // decoded earlier
-    let get_pos = |tag: &str| -> Vec2 {
+    let get_pos = |tag: &str| -> DVec2 {
         let entry = pos_dict.get(tag).unwrap_or_else(|| panic!("No '{tag}'!"));
         let mut pos = entry.position + base_offset;
         pos.y -= height;
@@ -250,14 +250,14 @@ pub fn generate_combinators(
             .unwrap_or_else(|| (curr_ent_n - 1).max(base_ent_n))
     };
     let cb_midpoint = if use_const_cbs {
-        const { vec2(0.5, -0.5) }
+        const { dvec2(0.5, -0.5) }
     } else if use_compact_layout {
-        const { vec2(0.5, -1.0) } // Base position for vertical layout
+        const { dvec2(0.5, -1.0) } // Base position for vertical layout
     } else {
-        const { vec2(1.0, -0.5) } // Base position for horizontal layout
+        const { dvec2(1.0, -0.5) } // Base position for horizontal layout
     };
-    let mut offset: Vec2;
-    let mut curr_pos: Vec2;
+    let mut offset: DVec2;
+    let mut curr_pos: DVec2;
     let mut grid_pos = IVec2::ZERO; // Current grid position (not absolute, multiplied by combinator's bounding box)
     let mut prev_ents_n: Vec<Option<u32>> = vec![None; max_cols_per_grp as usize];
     let mut prev_prev_ents_n: Vec<Option<u32>> = vec![None; max_cols_per_grp as usize];
@@ -265,25 +265,25 @@ pub fn generate_combinators(
     // Calculate the offsets to test for collisions. In Factorio, all collision boxes are
     // rectangular.
     let size = cb_midpoint.abs() * 2.0;
-    let x_offsets = (0..size.x as usize).map(|v| v as f32 + 0.5 - size.x / 2.0);
-    let y_offsets = (0..size.y as usize).map(|v| v as f32 + 0.5 - size.y / 2.0);
+    let x_offsets = (0..size.x as usize).map(|v| v as f64 + 0.5 - size.x / 2.0);
+    let y_offsets = (0..size.y as usize).map(|v| v as f64 + 0.5 - size.y / 2.0);
     let y_offsets = y_offsets.collect::<Vec<_>>();
-    let hitbox_offsets = x_offsets.flat_map(|x| y_offsets.iter().map(move |&y| vec2(x, y)));
+    let hitbox_offsets = x_offsets.flat_map(|x| y_offsets.iter().map(move |&y| dvec2(x, y)));
     let hitbox_offsets = hitbox_offsets.collect::<Vec<_>>();
     let target_name = Arc::clone(if use_const_cbs {
         &constants::CONSTANT_COMB
     } else {
         &DEC_CB
     });
-    let mut positions = Vec::<(u32, Vec2)>::new();
+    let mut positions = Vec::<(u32, DVec2)>::new();
 
     // Generates combinators up to down, then left to right.
     for tick_i in 0..ticks_per_group as usize {
         loop {
-            offset = cb_midpoint * (1 + 2 * grid_pos).as_vec2(); // Set target midpoint
+            offset = cb_midpoint * (1 + 2 * grid_pos).as_dvec2(); // Set target midpoint
             curr_pos = base_pos + offset;
 
-            if offset.x + cb_midpoint.x > (max_cols_per_grp as f32) {
+            if offset.x + cb_midpoint.x > f64::from(max_cols_per_grp) {
                 grid_pos.x = 0;
                 grid_pos.y += 1;
             } else if (hitbox_offsets.iter()).any(|o| !occupied.test(curr_pos + *o)) {
@@ -361,7 +361,7 @@ pub fn generate_combinators(
 }
 
 pub struct LazyCombinators {
-    positions: Box<[(u32, Vec2)]>,
+    positions: Box<[(u32, DVec2)]>,
     target_name: Arc<str>,
     direction: u32,
 }

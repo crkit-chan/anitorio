@@ -1,6 +1,6 @@
 use super::{power_pole::PowerPoleOccupied, prelude::*};
 use crate::prelude::*;
-use glam::{UVec2, Vec2, vec2};
+use glam::{DVec2, UVec2, dvec2};
 use std::{ops::Not, sync::Arc};
 
 /// Generates a grid of lamp entities for the blueprint.
@@ -24,7 +24,7 @@ pub fn generate_lamps(
     curr_frame: Option<&Arc<image::DynamicImage>>,
     occupied: &mut PowerPoleOccupied,
     base_ent_n: u32,
-    start_pos: Vec2,
+    start_pos: DVec2,
     args: &BlueprintArgs,
 ) -> (
     Vec<BlueprintEntity>,
@@ -39,7 +39,7 @@ pub fn generate_lamps(
     // Auto-rotate wires based on image rotation
     let prefer_horizontal_wires =
         args.prefer_horizontal_wires ^ matches!(args.image_args.rotate, Deg90 | Deg270);
-    let base_pos = start_pos + const { vec2(0.5, 0.5) }; // Lamps are centered on the middle of a tile
+    let base_pos = start_pos + const { dvec2(0.5, 0.5) }; // Lamps are centered on the middle of a tile
     let mode = args.image_args.mode;
     let get_ent_num = |r: u32, c: u32| -> u32 { base_ent_n + r * grid_dim.x + c };
     let mut prev_ent_ns: Vec<Option<u32>> = vec![None; grid_dim.x as usize];
@@ -51,7 +51,7 @@ pub fn generate_lamps(
         let mut was_top = false;
 
         for c in (0..grid_dim.x as usize).rev() {
-            let pos = base_pos + vec2(c as f32, r as f32);
+            let pos = base_pos + dvec2(c as f64, r as f64);
             if !occupied.request(pos) {
                 continue;
             }

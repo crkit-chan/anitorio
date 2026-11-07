@@ -1,9 +1,9 @@
 #![allow(dead_code, reason = "Satisfy Factorio Lua API")]
 
-use super::{constants, vec2_xy};
+use super::{constants, dvec2_xy};
 use crate::models::RawJsonString;
 use crate::util::{is_default, is_none_or_default};
-use glam::Vec2;
+use glam::DVec2;
 use serde::{
     Deserialize, Serialize, Serializer,
     ser::{SerializeSeq, SerializeStruct},
@@ -131,8 +131,8 @@ pub struct BlueprintEntity {
     pub name: Arc<str>,
 
     /// The position of the entity.
-    #[serde(with = "vec2_xy")]
-    pub position: Vec2,
+    #[serde(with = "dvec2_xy")]
+    pub position: DVec2,
 
     /// The direction the entity is facing. Only present for entities that can face in
     /// different directions and when the entity is not facing north.
@@ -160,7 +160,7 @@ pub struct BlueprintEntity {
 }
 impl BlueprintEntity {
     /// Create a new entity with default None values for optional fields
-    pub const fn new(entity_number: u32, name: Arc<str>, position: Vec2) -> Self {
+    pub const fn new(entity_number: u32, name: Arc<str>, position: DVec2) -> Self {
         Self {
             entity_number,
             name,

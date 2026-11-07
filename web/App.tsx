@@ -980,8 +980,8 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
           </a>
 
           <div class="fixed bottom-0 left-0 text-tan-500 m-1 text-xs opacity-20">
-            <Show when={__BUILD_COMMIT__} fallback="Local build">
-              Build #{__BUILD_NUMBER__} ({__BUILD_COMMIT__})
+            <Show when={__BUILD_INFO__.commit} fallback="Local build">
+              Build {__BUILD_INFO__.commit.slice(0, 7)}
             </Show>
           </div>
           <Show when={wasmMemoryUsage()} keyed>

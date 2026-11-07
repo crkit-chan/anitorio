@@ -43,7 +43,6 @@ export async function getVideoData(source: Blob) {
 
 async function main() {
   let prevMemoryUsage = 0;
-  let rayonAvailable = false;
 
   const wasmReadyPromises = {
     init: (async () => {
@@ -125,7 +124,6 @@ async function main() {
 
       try {
         await init_rayon();
-        rayonAvailable = true;
       } catch (error) {
         console.warn("Rayon unavailable:", error);
       }

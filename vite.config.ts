@@ -1,17 +1,20 @@
 import path from "node:path";
-import { defineConfig } from "vite";
+import { defineConfig, UserConfig } from "vite";
 import solidPlugin from "vite-plugin-solid";
 import { viteStaticCopy } from "vite-plugin-static-copy";
 
-export default defineConfig({
+export const config = {
   appType: "mpa",
   assetsInclude: ["**/*.png", "**/*.jpg", "**/*.gif", "**/*.jpeg", "**/*.lua"],
   base: "/",
   build: { target: "esnext" },
   define: {
-    __BUILD_NUMBER__: JSON.stringify(process.env.GITHUB_RUN_NUMBER ?? ""),
-    __BUILD_COMMIT__: JSON.stringify(process.env.GITHUB_SHA?.slice(0, 7) ?? ""),
-  },
+    __BUILD_INFO__: {
+      commit: JSON.stringify(process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? ""),
+      isLocal: process.env.VERCEL_ENV !== "production",
+      timestamp: JSON.stringify(new Date().toISOString()),
+    },
+  } as const,
   plugins: [
     solidPlugin(),
     viteStaticCopy({ targets: [{ src: "robots.txt", dest: "." }] }),
@@ -39,4 +42,6 @@ export default defineConfig({
       "Cross-Origin-Embedder-Policy": "require-corp",
     },
   },
-});
+} satisfies UserConfig;
+
+export default defineConfig(config);
