@@ -199,7 +199,7 @@ async function main() {
       const { showPreview } = evt.data.showPreview;
       state.shouldShowPreview = showPreview;
     } else if (evt.data.generate) {
-      const { args: blueprintArgs, imageData }: { args: BlueprintArgs; imageData: File | Uint8Array<ArrayBuffer> | ImageData } =
+      const { args: blueprintArgs, imageData }: { args: BlueprintArgs; imageData: Uint8Array | SharedArrayBuffer | File } =
         evt.data.generate;
       const { imageArgs, outputFormat } = blueprintArgs;
       const useJsDecodedVideo = imageArgs.mimeType.startsWith("video/");
@@ -307,8 +307,8 @@ async function main() {
         const inputData =
           imageData instanceof File && !useJsDecodedVideo
             ? { byteLength: imageData.size }
-            : imageData instanceof ImageData
-              ? new Uint8Array(imageData.data.buffer, imageData.data.byteOffset, imageData.data.byteLength)
+            : imageData instanceof SharedArrayBuffer
+              ? new Uint8Array(imageData)
               : null;
         const reader = new FileReaderSync();
         const blueprintMetadata = await run_blueprint(blueprintArgs, {
@@ -316,11 +316,9 @@ async function main() {
           getData(from, to) {
             if (useJsDecodedVideo) throw new Error("No data to pass through when using JS decoding");
             if (imageData instanceof File) return new Uint8Array(reader.readAsArrayBuffer(imageData.slice(from, to)));
-            if (imageData instanceof ImageData) {
-              if (!(inputData instanceof Uint8Array)) throw new Error("Expected inputData to be instanceof Uint8Array");
-              return inputData.slice(from, to);
-            }
-            throw new Error("Unsupported data type");
+
+            if (!(inputData instanceof Uint8Array)) throw new Error("Expected inputData to be instanceof Uint8Array");
+            return inputData.slice(from, to);
           },
           onChunk(data) {
             return new Promise((resolve, reject) => {

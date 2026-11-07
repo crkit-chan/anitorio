@@ -320,11 +320,16 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
       return;
     }
 
-    const [data, transfer] = currFile()
-      ? imageData()
-        ? [imageData()!, [imageData()!.data.buffer]]
-        : [currFile()!, []]
-      : [new Uint8Array(), []];
+    let data: Uint8Array | SharedArrayBuffer | File;
+
+    if (!currFile()) {
+      data = new Uint8Array();
+    } else if (imageData()) {
+      data = new SharedArrayBuffer(imageData()!.data.byteLength);
+      new Uint8Array(data).set(imageData()!.data);
+    } else {
+      data = currFile()!;
+    }
 
     const args = {
       customHeight: +formData.customHeight,
@@ -375,7 +380,7 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
     } satisfies BlueprintArgs;
 
     try {
-      worker.postMessage({ generate: { imageData: data, args: args } }, transfer);
+      worker.postMessage({ generate: { imageData: data, args: args } });
     } catch (err: any) {
       console.error("Failed to process file:", err);
       showToast(`Failed to process file: ${err}`, { isError: true });
