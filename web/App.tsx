@@ -1,4 +1,4 @@
-import type { BlueprintArgs, ImageArgs } from "@/../pkg/anitorio_wasm";
+import type { BlueprintArgs, ImageArgs, ImageFlip, ImageRotate } from "@/../pkg/anitorio_wasm";
 import getAnimationInfo, { AnimationInfo, getRawImageData, UnsupportedAnimationError } from "@/animationInfo";
 import Background, { BackgroundApi } from "@/components/Background";
 import FactorioDialogDelete, { FactorioDialogDeleteApi } from "@/components/FactorioDialogDelete";
@@ -48,6 +48,7 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
   const [downloadUrl, setDownloadUrl] = createSignal<string | null>(null);
   const [wasmMemoryUsage, setWasmMemoryUsage] = createSignal({ bytes: 0, commited: 0 });
   const [blueprintDownloadStartTime, setBlueprintDownloadStartTime] = createSignal(performance.now());
+  const [lampProgressPercentage, setLampProgressPercentage] = createSignal(0);
 
   let refBackground!: BackgroundApi;
   let refDialogLargeFile!: FactorioDialogDeleteApi;
@@ -114,6 +115,9 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
         URL.revokeObjectURL(url);
       }
       downloadBlob(blob, "profile.json");
+    } else if (data.lampProgress) {
+      const { percentage } = data.lampProgress;
+      setLampProgressPercentage(percentage);
     } else if (data.error) {
       showToast(data.error, { isError: true });
       setIsGenerating(false);
@@ -268,8 +272,6 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
   async function handleSubmit(evt: SubmitEvent) {
     evt.preventDefault();
 
-    setBlueprintDownloadStartTime(performance.now());
-
     // Validate ALL inputs (instead of only showing errors for the first invalid input)
     let isValid = true;
     for (const e of [evt.target, ...Object.values(formRefs)]) {
@@ -302,6 +304,9 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
     }
 
     setIsGenerating(true);
+    setBlueprintDownloadStartTime(performance.now());
+    setLampProgressPercentage(0);
+
     formRefs.submitButton.disabled = true;
 
     // Reset UI state
@@ -588,6 +593,24 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
             });
           }}
           class="fixed inset-0 w-full h-full object-contain [image-rendering:pixelated]"
+          style={{
+            // Make the lamp generation preview update according to rotaton and flip
+            "clip-path": (() => {
+              const flip = formData.flippedAxes as ImageFlip;
+              const rotate = formData.imageRotation as ImageRotate;
+              const progress = 100 - lampProgressPercentage();
+              let pos = (["deg90", "none", "deg270", "deg180"] as const).indexOf(rotate);
+
+              if (pos % 2 !== 0 && (flip === "x" || flip === "both")) pos += 2;
+              if (pos % 2 === 0 && (flip === "y" || flip === "both")) pos += 2;
+              pos %= 4;
+
+              if (pos === 0) return `inset(${progress}% 0 0 0)`;
+              if (pos === 1) return `inset(0 ${progress}% 0 0)`;
+              if (pos === 2) return `inset(0 0 ${progress}% 0)`;
+              if (pos === 3) return `inset(0 0 0 ${progress}%)`;
+            })(),
+          }}
         />
 
         <Show

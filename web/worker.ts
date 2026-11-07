@@ -120,7 +120,7 @@ async function main() {
         postMessage({ wasmMemoryUsage });
       }, 50);
 
-      const { default: init, init: prepare_wasm, init_rayon, set_progress_callback } = await import("@/../pkg/anitorio_wasm.js");
+      const { default: init, init: prepare_wasm, init_rayon, set_progress_callbacks } = await import("@/../pkg/anitorio_wasm.js");
       wasm = await init();
 
       try {
@@ -131,7 +131,10 @@ async function main() {
       }
 
       prepare_wasm();
-      set_progress_callback((percentage: number, status: string) => postMessage({ progress: { percentage, status } }));
+      set_progress_callbacks({
+        onProgress: (percentage: number, status: string) => postMessage({ progress: { percentage, status } }),
+        onLampGroup: (percentage) => postMessage({ lampProgress: { percentage } }),
+      });
     })(),
     setCombPosData: null as Promise<void> | null,
   };
@@ -310,6 +313,16 @@ async function main() {
             : imageData instanceof SharedArrayBuffer
               ? new Uint8Array(imageData)
               : null;
+
+        try {
+          const [width, height] = imageArgs.dimensions!;
+          if (state.canvas!.width !== width || state.canvas!.height !== height) {
+            Object.assign(state.canvas!, { width, height });
+          }
+          state.ctx!.fillStyle = "#ffffff44";
+          state.ctx!.fillRect(0, 0, state.canvas!.width, state.canvas!.height);
+        } catch {}
+
         const reader = new FileReaderSync();
         const blueprintMetadata = await run_blueprint(blueprintArgs, {
           getDataLen: () => inputData?.byteLength ?? 0,

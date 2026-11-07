@@ -9,9 +9,9 @@ use super::{
         write_to,
     },
 };
-use crate::prelude::*;
 use crate::util::format_duration;
 use crate::{image_processing::FrameData, models::RawJsonString};
+use crate::{prelude::*, progress::report_lamp_group};
 use glam::{UVec2, uvec2, vec2};
 use std::{io, sync::Arc};
 
@@ -448,12 +448,16 @@ impl<'a> BlueprintGenerator<'a> {
         for group_i in 0..n_groups {
             let is_static = matches!(args.image_args.mode, Mode::Static { .. });
             let thresh = if is_static { 0.60 } else { 0.10 };
+            let progress = f64::from(group_i + 1) / f64::from(n_groups);
+
             set_progress(
                 0.00,
                 thresh,
-                f64::from(group_i + 1) / f64::from(n_groups),
+                progress,
                 &format!("Generating lamps (group {} / {n_groups})", group_i + 1),
             );
+
+            report_lamp_group(progress);
 
             let grp_left = group_i * self.max_cols_per_grp;
             let grp_width = (self.max_cols_per_grp).min(self.dim.x - grp_left);
