@@ -650,7 +650,12 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
           </div>
         </Show>
 
-        {/* <div class="text-center mt-5 text-4xl font-semibold text-tan-500">Anitorio</div> */}
+        <div class="text-center shadow-2xl h-22 transition-opacity duration-300" classList={{ "opacity-0": isGenerating() }}>
+          <div class="text-center mt-5 text-4xl font-semibold text-tan-500 ">Anitorio</div>
+          <div class="text-center mt-1 font-semibold text-gray-400 shadow-2xl text-shadow-black/50">
+            A spin-off project from <a href="https://giftor.io">GIFtorio</a>
+          </div>
+        </div>
 
         <FactorioDialogDelete
           ref={(api) => (refDialogLargeFile = api)}
