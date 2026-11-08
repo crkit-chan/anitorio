@@ -336,12 +336,34 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
       data = currFile()!;
     }
 
+    const inputArgs = (() => {
+      const {
+        connectionDirection,
+        colorPaletteSize,
+        imageFilters,
+        imageRotation,
+        flippedAxes,
+        grayscaleBits,
+        maxGroupSize,
+        maxSize,
+        mode,
+        powerPoleQuality,
+        resamplingFilter,
+        signalCompressionType,
+        signalSorting,
+        staticImageMode,
+        targetFps,
+        temporalCompressionWindow,
+        wireColor,
+        ...inputArgs
+      } = { ...formData };
+      return inputArgs;
+    })();
+
     const args = {
-      customHeight: +formData.customHeight,
-      customWidth: +formData.customWidth,
-      displayMarginY: +formData.displayMarginY,
-      dryRun: formData.dryRun,
+      ...inputArgs,
       imageArgs: {
+        colorPaletteSize: formData.colorPaletteSize,
         dimensions: [animationInfo()!.width!, animationInfo()!.height!],
         duration: currFile()!.type.startsWith("video")
           ? refVideo.duration
@@ -365,23 +387,17 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
         rotate: `${formData.imageRotation}` as ImageArgs["rotate"],
         targetFps: +formData.targetFps,
       },
-      includePowerPoles: formData.includePowerPoles,
-      lowMemUsage: formData.lowMemUsage,
       maxGroupSize: +formData.maxGroupSize! || undefined,
       name: currFile()!.name,
-      outputFormat: `${formData.outputFormat}`,
-      powerPoleName: formData.powerPoleName,
       powerPoleQuality: formData.powerPoleQuality ?? undefined,
       preferGreenWires: !!(formData.wireColor === "green"),
       preferHorizontalWires: !!(formData.connectionDirection === "horizontal"),
       signalCompression:
         (formData.signalCompressionType === "delta" && "delta") ||
         (formData.signalCompressionType === "temporal" ? { temporal: { window: +formData.temporalCompressionWindow } } : undefined),
-      streamingDownload: formData.streamingDownload,
       signalSorting:
         formData.signalSorting === "auto" ? (formData.outputFormat === "json" ? "json" : "compression") : `${formData.signalSorting}`,
       timingSignals: timingSignals()!,
-      useThreads: !!formData.useThreads,
     } satisfies BlueprintArgs;
 
     try {

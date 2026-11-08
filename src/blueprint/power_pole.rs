@@ -9,10 +9,10 @@ use std::{
 /// Tracks cells occupied by power poles.
 pub struct PowerPoleOccupied {
     bounding_box: DVec2,
-    coverage: f64,
-    ref_entity: BlueprintEntity,
-    requests: BTreeSet<(i32, i32)>,
-    start_pos: DVec2,
+    coverage:     f64,
+    ref_entity:   BlueprintEntity,
+    requests:     BTreeSet<(i32, i32)>,
+    start_pos:    DVec2,
 }
 impl PowerPoleOccupied {
     pub fn new(mut start_pos: DVec2, args: &BlueprintArgs) -> Self {
@@ -25,8 +25,7 @@ impl PowerPoleOccupied {
             let data = &data.as_ref().expect("No power pole data loaded yet!");
             let poles = &data.electric_poles;
             let p = poles.iter().find(|p| *p.name == *name);
-            p.unwrap_or_else(|| panic!("No power pole with name '{name}'!"))
-                .clone()
+            p.unwrap_or_else(|| panic!("No power pole with name '{name}'!")).clone()
         });
         let bounding_box = dvec2(f64::from(data.tile_width), f64::from(data.tile_height));
         let dists = &data.supply_area_distances;

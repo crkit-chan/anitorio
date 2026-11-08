@@ -23,13 +23,10 @@ impl Write for ChannelWriter {
         if buf.is_empty() {
             return Ok(0);
         }
-
         futures_lite::future::block_on(self.tx.send(Ok(buf.to_vec())))
             .map_err(|e| io::Error::new(io::ErrorKind::BrokenPipe, e.to_string()))?;
-
         Ok(buf.len())
     }
-
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
     }
@@ -46,57 +43,43 @@ fn compress(
         CompressionMode::Blueprint => {
             let base64 = EncoderWriter::new(writer, &STANDARD);
             let mut encoder = ZlibEncoder::new(base64, Compression::best());
-
             while let Ok(chunk) = futures_lite::future::block_on(input.recv()) {
                 encoder.write_all(&chunk)?;
             }
-
             encoder.finish()?.finish()?;
         }
-
         CompressionMode::RawCompressed => {
             let mut encoder = ZlibEncoder::new(writer, Compression::best());
-
             while let Ok(chunk) = futures_lite::future::block_on(input.recv()) {
                 encoder.write_all(&chunk)?;
             }
-
             encoder.finish()?;
         }
     }
-
     Ok(())
 }
 
 struct Compressor {
-    input: Option<Sender<Vec<u8>>>,
+    input:  Option<Sender<Vec<u8>>>,
     output: Receiver<Result<Vec<u8>, String>>,
 }
 impl Compressor {
     pub fn new(mode: CompressionMode) -> Self {
         let (input_tx, input_rx) = async_channel::bounded::<Vec<u8>>(4);
         let (output_tx, output_rx) = async_channel::unbounded::<Result<Vec<u8>, String>>();
-
         spawn(move || {
             if let Err(e) = compress(&mode, &input_rx, &output_tx) {
                 let _ = futures_lite::future::block_on(output_tx.send(Err(e.to_string())));
             }
         });
-
-        Self {
-            input: Some(input_tx),
-            output: output_rx,
-        }
+        Self { input: Some(input_tx), output: output_rx }
     }
-
     pub async fn next_chunk(&self) -> Option<Result<Vec<u8>, String>> {
         self.output.recv().await.ok()
     }
-
     pub fn try_next_chunk(&self) -> Option<Result<Vec<u8>, String>> {
         self.output.try_recv().ok()
     }
-
     pub fn finish(&mut self) {
         self.input.take();
     }
@@ -111,7 +94,6 @@ impl Write for Compressor {
             .input
             .as_ref()
             .ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "Compressor finished"))?;
-
         futures_lite::future::block_on(input.send(buf.to_vec()))
             .map_err(|e| io::Error::new(io::ErrorKind::BrokenPipe, e.to_string()))?;
 
@@ -126,7 +108,10 @@ impl Write for Compressor {
 enum OutputWriter<'a, W: Write> {
     Blueprint(Box<ZlibEncoder<EncoderWriter<'a, GeneralPurpose, W>>>),
     RawCompressed(ZlibEncoder<W>),
-    ThreadedCompressed { compressor: Compressor, writer: W },
+    ThreadedCompressed {
+        compressor: Compressor,
+        writer:     W,
+    },
     Json(W),
 }
 impl<W: Write> io::Write for OutputWriter<'_, W> {
@@ -154,7 +139,6 @@ impl<W: Write> OutputWriter<'_, W> {
                 writer.write_all(&chunk.map_js_err("Write error")?)?;
             }
         }
-
         Ok(())
     }
 
@@ -164,7 +148,6 @@ impl<W: Write> OutputWriter<'_, W> {
                 writer.write_all(&chunk.map_js_err("Write error")?)?;
             }
         }
-
         Ok(())
     }
 
@@ -189,7 +172,7 @@ impl<W: Write> OutputWriter<'_, W> {
 
 pub struct BlueprintEncoder<'a, W: Write> {
     generator: BlueprintGenerator<'a>,
-    writer: Option<OutputWriter<'a, W>>,
+    writer:    Option<OutputWriter<'a, W>>,
 }
 impl<'a, W: Write> BlueprintEncoder<'a, W> {
     pub fn new(
@@ -237,7 +220,6 @@ impl<'a, W: Write> BlueprintEncoder<'a, W> {
         }
 
         let writer = self.writer.as_mut().unwrap();
-
         self.generator.next_chunk(writer).await?;
         writer.drain_available()?;
 
@@ -248,11 +230,9 @@ impl<'a, W: Write> BlueprintEncoder<'a, W> {
         report_progress(1.0, "Finishing...");
 
         let mut writer = self.writer.take().unwrap();
-
         if let OutputWriter::ThreadedCompressed { compressor, .. } = &mut writer {
             compressor.finish();
         }
-
         writer.drain().await?;
         writer.finish()
     }

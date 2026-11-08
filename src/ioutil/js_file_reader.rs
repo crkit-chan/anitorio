@@ -11,12 +11,12 @@ const MAX_SAFE_F64_INT: u64 = (1u64 << 53) - 1;
 /// A JavaScript file reader.
 pub struct JsFileReader {
     callback: JsFileReaderCallback,
-    pos: u64,
-    size: u64,
+    pos:      u64,
+    size:     u64,
 
-    cache: Vec<u8>,
+    cache:       Vec<u8>,
     cache_start: u64,
-    chunk_size: usize,
+    chunk_size:  usize,
 }
 impl JsFileReader {
     pub fn new(callback: JsFileReaderCallback, size: u64, chunk_size: usize) -> Self {

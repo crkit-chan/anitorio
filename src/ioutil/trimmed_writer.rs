@@ -1,18 +1,14 @@
 use std::io;
 
 pub struct TrimmedWriter<'a, W: io::Write> {
-    last: Option<u8>,
+    last:     Option<u8>,
     is_first: bool,
-    writer: &'a mut W,
+    writer:   &'a mut W,
 }
 
 impl<'a, W: io::Write> TrimmedWriter<'a, W> {
     pub const fn new(writer: &'a mut W) -> Self {
-        Self {
-            last: None,
-            is_first: true,
-            writer,
-        }
+        Self { last: None, is_first: true, writer }
     }
 
     pub fn finish(mut self) -> io::Result<()> {

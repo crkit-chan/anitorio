@@ -53,27 +53,28 @@ pub struct BlueprintGenerator<'a> {
     /// Keeps track of positions currently occupied by power poles, and used to request powerage
     /// for generated entities.
     occupied: PowerPoleOccupied,
+    palette:  Option<Vec<[u8; 4]>>,
 
     /// List of unique signals to use for the blueprint.
     signals: Box<[Arc<SignalID>]>,
 
     /// Stores the JSON representation of each signal for efficient JSON reproduction
     signals_json: Arc<[RawJsonString]>,
-    state: BlueprintState,
+    state:        BlueprintState,
 }
 
 /// Data only used when generating from an image or a video.
 struct FrameInfo<'a> {
-    curr_frame: Arc<image::DynamicImage>,
-    frame_data: FrameData<'a>,
-    frames_per_cb: u32,
+    curr_frame:       Arc<image::DynamicImage>,
+    frame_data:       FrameData<'a>,
+    frames_per_cb:    u32,
     group_data_combs: Vec<LazyCombinators>,
-    n_buf_frames: u32,
-    n_scaled_frames: u32,
-    next_frame: Option<Arc<image::DynamicImage>>,
-    patch_states: Vec<GroupPatchState>,
-    ticks_per_frame: u32,
-    use_delta_comp: bool,
+    n_buf_frames:     u32,
+    n_scaled_frames:  u32,
+    next_frame:       Option<Arc<image::DynamicImage>>,
+    patch_states:     Vec<GroupPatchState>,
+    ticks_per_frame:  u32,
+    use_delta_comp:   bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -86,15 +87,15 @@ enum BlueprintState {
 }
 
 struct EntityData {
-    ents: Vec<BlueprintEntity>,
-    wires: Vec<Wire>,
+    ents:       Vec<BlueprintEntity>,
+    wires:      Vec<Wire>,
     next_ent_n: u32,
 }
 struct GroupPatchState {
-    chunk_i: u32,  // which *chunk* we’re patching (not frame)
-    comb_i: usize, // Current combinator (we skip empty data)
+    chunk_i:   u32,   // which *chunk* we’re patching (not frame)
+    comb_i:    usize, // Current combinator (we skip empty data)
     frame_buf: Vec<image::DynamicImage>,
-    sig_buf: Vec<Vec<i32>>,
+    sig_buf:   Vec<Vec<i32>>,
 }
 
 impl<'a> BlueprintGenerator<'a> {
@@ -152,36 +153,42 @@ impl<'a> BlueprintGenerator<'a> {
 
         if let Some(frame_info) = frame_info.as_mut() {
             let states_iter = (0..n_groups).map(|_| GroupPatchState {
-                chunk_i: 0,
-                comb_i: 0,
+                chunk_i:   0,
+                comb_i:    0,
                 frame_buf: Vec::with_capacity(frame_info.frames_per_cb as usize),
-                sig_buf: Vec::with_capacity(frame_info.n_buf_frames as usize),
+                sig_buf:   Vec::with_capacity(frame_info.n_buf_frames as usize),
             });
             frame_info.patch_states = states_iter.collect();
         }
 
         Ok(Self {
             args,
-            frame_info,
+            dim,
             entity_data: const {
                 EntityData {
-                    ents: Vec::new(),
-                    wires: Vec::new(),
+                    ents:       Vec::new(),
+                    wires:      Vec::new(),
                     next_ent_n: 0u32,
                 }
             },
-            dim,
-            max_cols_per_grp: max_lamp_cols_per_grp,
-            n_groups,
-            occupied: PowerPoleOccupied::new(dvec2(0.0, -f64::from(args.display_margin_y)), args),
+            frame_info,
             generate_cbs: !matches!(
                 args.image_args.mode,
                 Mode::Static { combs: false, .. } | Mode::Lamps | Mode::LampGrid
             ),
+            max_cols_per_grp: max_lamp_cols_per_grp,
+            n_groups,
+            occupied: PowerPoleOccupied::new(dvec2(0.0, -f64::from(args.display_margin_y)), args),
+            palette: None,
             signals,
             signals_json,
             state: BlueprintState::Start,
         })
+    }
+
+    pub fn with_palette(mut self, palette: Option<Vec<[u8; 4]>>) -> Self {
+        self.palette = palette;
+        self
     }
 
     /// Calculates the required position for the given entity to counteract the rotation of the
@@ -280,16 +287,16 @@ impl<'a> BlueprintGenerator<'a> {
                 let name = name.map(|n| format!("{n} ({}x{})", self.dim.x, self.dim.y));
                 let bp = BlueprintInner {
                     description: None,
-                    icons: Some(vec![Icon {
+                    icons:       Some(vec![Icon {
                         signal: Arc::from(SignalID {
-                            type_: Arc::from("item"),
-                            name: Arc::clone(&constants::LAMP),
+                            type_:   Arc::from("item"),
+                            name:    Arc::clone(&constants::LAMP),
                             quality: None,
                         }),
-                        index: 1,
+                        index:  1,
                     }]),
-                    item: constants::BLUEPRINT.to_string(),
-                    label: Some(match self.args.image_args.mode {
+                    item:        constants::BLUEPRINT.to_string(),
+                    label:       Some(match self.args.image_args.mode {
                         Mode::Full => name.unwrap_or_else(|| "GIF".to_owned()),
                         Mode::Lamps => format!("{}x{} Lamps", self.dim.x, self.dim.y),
                         Mode::LampGrid => format!("{}x{} Lamp Grid", self.dim.x, self.dim.y),
@@ -298,9 +305,9 @@ impl<'a> BlueprintGenerator<'a> {
                         }
                     }),
                     label_color: Color::from_hex(bp_color),
-                    version: constants::BLUEPRINT_VERSION,
-                    entities: Vec::new(),    // don't serialize
-                    wires: Some(Vec::new()), // don't serialize
+                    version:     constants::BLUEPRINT_VERSION,
+                    entities:    Vec::new(),       // don't serialize
+                    wires:       Some(Vec::new()), // don't serialize
                 };
 
                 write_json_trimmed_to(writer, &bp)?;
@@ -335,9 +342,8 @@ impl<'a> BlueprintGenerator<'a> {
                     for en in &self.entity_data.ents {
                         self.occupied.request(en.position); // Request power poles to power entities
                     }
-                    let (ents, wires, _) = self
-                        .occupied
-                        .generate_power_poles(self.entity_data.next_ent_n, self.args);
+                    let (ents, wires, _) =
+                        self.occupied.generate_power_poles(self.entity_data.next_ent_n, self.args);
                     self.entity_data.ents.extend(ents);
                     self.entity_data.wires.extend(wires);
 
@@ -485,11 +491,7 @@ impl<'a> BlueprintGenerator<'a> {
             if self.generate_cbs {
                 let info = info.as_mut().unwrap();
                 let GenerateCombinatorsOutput {
-                    metadata:
-                        ObjectGeneratorMetadata {
-                            wires,
-                            next_ent_n: new_base_ent_n,
-                        },
+                    metadata: ObjectGeneratorMetadata { wires, next_ent_n: new_base_ent_n },
                     data_cbs: data_combs,
                     other_ents,
                     in_ent_n,
@@ -595,7 +597,7 @@ impl<'a> BlueprintGenerator<'a> {
                         }
                     });
                     LogisticSection {
-                        index: i as u8 + 1,
+                        index:   i as u8 + 1,
                         filters: filters.collect::<Vec<_>>(),
                     }
                 });

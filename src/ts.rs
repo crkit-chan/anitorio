@@ -30,7 +30,7 @@ pub type TsVoid = js_sys::Undefined;
 
 #[repr(transparent)]
 pub struct TsIntoRust<T: DeserializeOwned> {
-    value: JsValue,
+    value:   JsValue,
     _marker: std::marker::PhantomData<fn() -> T>,
 }
 impl<T: DeserializeOwned> TsIntoRust<T> {
@@ -41,10 +41,7 @@ impl<T: DeserializeOwned> TsIntoRust<T> {
 }
 impl<T: DeserializeOwned> From<JsValue> for TsIntoRust<T> {
     fn from(value: JsValue) -> Self {
-        Self {
-            value,
-            _marker: std::marker::PhantomData,
-        }
+        Self { value, _marker: std::marker::PhantomData }
     }
 }
 impl<T: DeserializeOwned> From<TsIntoRust<T>> for JsValue {

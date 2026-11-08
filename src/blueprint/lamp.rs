@@ -78,12 +78,12 @@ pub fn generate_lamps(
                 let sig = Arc::clone(&signals[index]);
                 let grayscale_bits = args.image_args.grayscale_bits;
                 lamp = lamp.with_control_behavior(ControlBehavior::Lamp {
-                    use_colors: true,
-                    color_mode: if grayscale_bits > 0 { 1 } else { 2 },
-                    red_signal: (grayscale_bits > 0).then(|| Arc::clone(&sig)),
+                    use_colors:   true,
+                    color_mode:   if grayscale_bits > 0 { 1 } else { 2 },
+                    red_signal:   (grayscale_bits > 0).then(|| Arc::clone(&sig)),
                     green_signal: (grayscale_bits > 0).then(|| Arc::clone(&sig)),
-                    blue_signal: (grayscale_bits > 0).then(|| Arc::clone(&sig)),
-                    rgb_signal: (grayscale_bits > 0).not().then(|| Arc::clone(&sig)),
+                    blue_signal:  (grayscale_bits > 0).then(|| Arc::clone(&sig)),
+                    rgb_signal:   (grayscale_bits > 0).not().then(|| Arc::clone(&sig)),
                 });
             }
 

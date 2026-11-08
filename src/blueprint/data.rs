@@ -8,22 +8,22 @@ thread_local! {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ElectricPoleSupplyAreaDistancePrototypeData {
-    pub quality: Arc<str>,
+    pub quality:              Arc<str>,
     pub supply_area_distance: f64,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ElectricPolePrototypeData {
-    pub name: Arc<str>,
+    pub name:                  Arc<str>,
     pub supply_area_distances: Box<[ElectricPoleSupplyAreaDistancePrototypeData]>,
-    pub tile_width: i32,
-    pub tile_height: i32,
+    pub tile_width:            i32,
+    pub tile_height:           i32,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct PrototypeData {
-    pub signals: Box<[Arc<SignalID>]>,
-    pub qualities: Box<[Arc<str>]>,
+    pub signals:        Box<[Arc<SignalID>]>,
+    pub qualities:      Box<[Arc<str>]>,
     pub electric_poles: Box<[ElectricPolePrototypeData]>,
 }
 
@@ -40,9 +40,7 @@ pub fn load_data(data_json_reader: impl std::io::Read) -> Result<(), JsError> {
     let mut data: PrototypeData = serde_json::from_reader(data_json_reader)?;
     let mut sig_types: Vec<Arc<str>> = Vec::new(); // Allow "type" field to reference the same strings
     let qualities: Vec<Option<Arc<str>>> = {
-        let quals = (data.qualities.iter())
-            .map(|v| Some(Arc::clone(v)))
-            .collect::<Vec<_>>();
+        let quals = (data.qualities.iter()).map(|v| Some(Arc::clone(v))).collect::<Vec<_>>();
         if quals.is_empty() { vec![None] } else { quals }
     };
     let mut signals: Vec<Arc<SignalID>> = Vec::with_capacity(data.signals.len() * qualities.len());

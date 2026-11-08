@@ -35,14 +35,14 @@ pub fn generate_timer(
         BlueprintEntity::new(1, Arc::clone(&CONSTANT_COMB), TIMER1_POS).with_direction(DIR_R);
     let sections = LogisticSections {
         sections: vec![LogisticSection {
-            index: 1,
+            index:   1,
             filters: vec![BlueprintLogisticFilter {
-                index: 1,
-                type_: Arc::clone(&sig_t.type_),
-                name: Arc::clone(&sig_t.name),
-                quality: sig_t.quality.clone(),
+                index:      1,
+                type_:      Arc::clone(&sig_t.type_),
+                name:       Arc::clone(&sig_t.name),
+                quality:    sig_t.quality.clone(),
                 comparator: Some(ComparatorString::Eq),
-                count: 1,
+                count:      1,
             }],
         }],
     };
@@ -57,9 +57,11 @@ pub fn generate_timer(
     );
     let decider_conditions = DeciderCombinatorParameters {
         conditions: vec![condition],
-        outputs: vec![DeciderCombinatorOutput::new(Arc::clone(sig_t), None)],
+        outputs:    vec![DeciderCombinatorOutput::new(Arc::clone(sig_t), None)],
     };
-    en = en.with_tag("base_timer").with_description("Increments 60 times per second up to the GIF's frame count, then resets to 0. It determines the current frame.");
+    en = en
+        .with_tag("base_timer")
+        .with_description("Increments 60 times per second up to the GIF's frame count, then resets to 0. It determines the current frame.");
     ents.push(en.with_control_behavior(ControlBehavior::DeciderCombinator { decider_conditions }));
 
     let en = BlueprintEntity::new(3, Arc::clone(&ARI_CB), TIMER3_POS).with_direction(DIR_R);

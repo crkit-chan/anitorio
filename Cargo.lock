@@ -9,6 +9,7 @@ dependencies = [
  "async-channel",
  "base64",
  "console_error_panic_hook",
+ "exoquant",
  "flate2",
  "futures-lite",
  "glam",
@@ -197,6 +198,12 @@ dependencies = [
  "event-listener",
  "pin-project-lite",
 ]
+
+[[package]]
+name = "exoquant"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5048aeecde83b7455a63b44aa54da5321d6171cff2adb8a5959849e142e5e4aa"
 
 [[package]]
 name = "fastrand"

@@ -98,8 +98,10 @@ pub async fn run_blueprint(
     use crate::prelude::*;
     use blueprint::{encoder::BlueprintEncoder, generator::BlueprintGenerator};
     use image::GenericImageView;
-    use image_processing::{FrameCallback, FrameData, get_pixel_rgba8_i32_counts};
+    use image_processing::{FrameCallback, FrameData, ImageFrameData};
+    use ioutil::JsFileReader;
     use js_sys as js;
+    use models::BlueprintArgs;
     use std::{
         cell::{Cell, RefCell},
         rc::Rc,
@@ -107,12 +109,13 @@ pub async fn run_blueprint(
 
     const SYNC_TIME_MS: f64 = 1000.0;
 
-    let mut args: models::BlueprintArgs = args.to_rust().unwrap();
-    let callbacks: RunBlueprintCallbacks = callbacks.to_rust().unwrap();
-    let on_frame = Rc::new(callbacks.on_frame);
-    let should_show_preview = Rc::new(callbacks.should_preview);
-    let yield_to_js = Rc::new(callbacks.js_yield);
+    let mut args: BlueprintArgs = args.to_rust().unwrap();
+    let cbs: RunBlueprintCallbacks = callbacks.to_rust().unwrap();
+    let on_frame = Rc::new(cbs.on_frame);
+    let should_show_preview = Rc::new(cbs.should_preview);
+    let yield_to_js = Rc::new(cbs.js_yield);
 
+    let mut palette: Option<Vec<[u8; 4]>> = None;
     let mut frame_data: Option<FrameData> = None;
     let promises = Rc::new(const { RefCell::new(Vec::<ts::TsFut>::new()) });
     let promise_q = Rc::clone(&promises);
@@ -123,7 +126,7 @@ pub async fn run_blueprint(
         args.image_args.target_fps = 1;
     }
     if matches!(args.image_args.mode, Mode::Full | Mode::Static { .. }) {
-        let on_frame: FrameCallback = Box::new(move |img| {
+        let on_frame: Option<Rc<FrameCallback>> = Some(Rc::new(move |img| {
             let on_frame = Rc::clone(&on_frame);
             let should_show_preview = Rc::clone(&should_show_preview);
             let yield_to_js = Rc::clone(&yield_to_js);
@@ -166,38 +169,39 @@ pub async fn run_blueprint(
 
                 Ok(())
             })
-        });
+        }));
 
-        let data_len = callbacks.get_data_len.call_n(())?.as_f64().unwrap();
-        let mut reader =
-            ioutil::JsFileReader::new(callbacks.get_data.clone(), data_len as u64, 1024 * 1024);
+        let palette_size = args.image_args.color_palette_size;
+        let data_len = cbs.get_data_len.call_n(())?.as_f64().unwrap();
         let get_next_frame = (args.image_args.mime_type)
             .starts_with("video/")
-            .then(|| callbacks.get_next_frame.clone());
+            .then(|| cbs.get_next_frame.clone());
 
-        if false {
-            let counts =
-                get_pixel_rgba8_i32_counts(&mut reader, &args.image_args, get_next_frame.clone())
-                    .await?;
-            log!("{counts:?}");
+        if palette_size > 0 {
+            let reader = JsFileReader::new(cbs.get_data.clone(), data_len as u64, 1024 * 1024);
+            let decoder = ImageFrameData::new(reader, &args.image_args, get_next_frame.clone())?;
+            let generator = FrameData::new(decoder, &args.image_args, on_frame.clone());
 
-            reader.reset();
-            callbacks.reset_generator.call_n(())?.await?;
+            palette = Some(image_processing::build_palette(generator, palette_size).await?);
+            cbs.reset_generator.call_n(())?.await?;
         }
 
-        let generator = FrameData::new(reader, &args.image_args, Some(on_frame), get_next_frame);
-        frame_data = Some(generator?);
+        let reader = JsFileReader::new(cbs.get_data.clone(), data_len as u64, 1024 * 1024);
+        let decoder = ImageFrameData::new(reader, &args.image_args, get_next_frame.clone())?;
+        let generator = FrameData::new(decoder, &args.image_args, on_frame.clone());
+
+        frame_data = Some(generator.with_palette(palette.clone()));
     }
 
     // Custom writer that invokes a callback whenever chunk size is reached.
     let writer = ioutil::BufWriter::new(1024 * 1024, !args.low_mem_usage, |chunk| {
-        let promise = callbacks.on_chunk.call_n((&(&*chunk).into(),))?;
+        let promise = cbs.on_chunk.call_n((&(&*chunk).into(),))?;
         promise_q.borrow_mut().push(promise);
         Ok(())
     });
 
     // Yields JSON or compressed blueprint in chunks
-    let generator = BlueprintGenerator::new(frame_data, &args).await?;
+    let generator = BlueprintGenerator::new(frame_data, &args).await?.with_palette(palette);
     let mut encoder = BlueprintEncoder::new(generator, &args, writer)?;
 
     let flush = async || -> Result<(), JsError> {

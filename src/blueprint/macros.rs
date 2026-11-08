@@ -2,11 +2,11 @@
 macro_rules! arithmetic_conds {
     ($in_sig:ident $op:tt $second:expr => $out_sig:ident) => {
         $crate::blueprint::models::ArithmeticCombinatorParameters {
-            first_signal: Some(std::sync::Arc::clone(&$in_sig)),
-            second_signal: None,
+            first_signal:    Some(std::sync::Arc::clone(&$in_sig)),
+            second_signal:   None,
             second_constant: $second,
-            operation: $crate::blueprint::macros::arithmetic_combinator_op!($op),
-            output_signal: Some(std::sync::Arc::clone(&$out_sig)),
+            operation:       $crate::blueprint::macros::arithmetic_combinator_op!($op),
+            output_signal:   Some(std::sync::Arc::clone(&$out_sig)),
         }
     };
 }
@@ -72,10 +72,7 @@ macro_rules! mkwires {
 #[macro_export]
 macro_rules! entity_idx_by_tag {
     ($ents:ident, $tag:expr) => {
-        $ents
-            .iter()
-            .find(|e| e.has_tag($tag.to_string()))
-            .map(|e| e.entity_number)
+        $ents.iter().find(|e| e.has_tag($tag.to_string())).map(|e| e.entity_number)
     };
 }
 

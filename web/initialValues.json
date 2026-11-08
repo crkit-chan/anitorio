@@ -1,5 +1,6 @@
 {
   "connectionDirection": "horizontal",
+  "colorPaletteSize": 0,
   "customHeight": 100,
   "customWidth": 100,
   "displayMarginY": 2,

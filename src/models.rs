@@ -12,25 +12,43 @@ use wasm_bindgen::prelude::*;
     reason = "API may change in the future"
 )]
 pub struct BlueprintArgs {
-    pub custom_height: Option<u32>,
-    pub custom_width: Option<u32>,
-    pub display_margin_y: u32,
-    pub dry_run: bool,
-    pub image_args: ImageArgs,
-    pub include_power_poles: bool,
-    pub low_mem_usage: bool,
-    pub max_group_size: Option<u32>,
-    pub name: Option<String>,
-    pub output_format: OutputFormat,
-    pub power_pole_name: Option<String>,
-    pub power_pole_quality: Option<Arc<str>>,
-    pub prefer_green_wires: bool,
+    pub custom_height:           Option<u32>,
+    pub custom_width:            Option<u32>,
+    pub display_margin_y:        u32,
+    pub dry_run:                 bool,
+    pub image_args:              ImageArgs,
+    pub include_power_poles:     bool,
+    pub low_mem_usage:           bool,
+    pub max_group_size:          Option<u32>,
+    pub name:                    Option<String>,
+    pub output_format:           OutputFormat,
+    pub power_pole_name:         Option<String>,
+    pub power_pole_quality:      Option<Arc<str>>,
+    pub prefer_green_wires:      bool,
     pub prefer_horizontal_wires: bool,
-    pub signal_compression: Option<SignalCompression>,
-    pub signal_sorting: SignalSorting,
-    pub streaming_download: bool,
-    pub timing_signals: TimingSignals,
-    pub use_threads: bool,
+    pub signal_compression:      Option<SignalCompression>,
+    pub signal_sorting:          SignalSorting,
+    pub streaming_download:      bool,
+    pub timing_signals:          TimingSignals,
+    pub use_threads:             bool,
+}
+
+#[derive(Tsify, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageArgs {
+    pub color_palette_size: usize,
+    pub dimensions:         Option<UVec2>,
+    pub duration:           Option<f64>,
+    pub flip:               ImageFlip,
+    pub grayscale_bits:     u32,
+    pub filters:            Vec<ImageFilter>,
+    pub max_size:           u32,
+    pub mime_type:          String,
+    pub mode:               Mode,
+    pub n_frames:           Option<u32>,
+    pub resampling_filter:  ResamplingFilter,
+    pub rotate:             ImageRotate,
+    pub target_fps:         u32,
 }
 
 #[derive(Tsify, Debug, Serialize, Deserialize)]
@@ -50,23 +68,6 @@ pub enum ImageFilter {
     Contrast(f32),
     HueRotate(i32),
     Unsharpen(f32, i32),
-}
-
-#[derive(Tsify, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ImageArgs {
-    pub dimensions: Option<UVec2>,
-    pub duration: Option<f64>,
-    pub flip: ImageFlip,
-    pub grayscale_bits: u32,
-    pub filters: Vec<ImageFilter>,
-    pub max_size: u32,
-    pub mime_type: String,
-    pub mode: Mode,
-    pub n_frames: Option<u32>,
-    pub resampling_filter: ResamplingFilter,
-    pub rotate: ImageRotate,
-    pub target_fps: u32,
 }
 
 #[derive(Tsify, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -157,7 +158,7 @@ pub struct JsVideoFrameData {
 
 #[derive(Tsify, Deserialize)]
 pub struct EncodeGifArgs {
-    pub dim: UVec2,
+    pub dim:   UVec2,
     pub speed: u8,
 }
 

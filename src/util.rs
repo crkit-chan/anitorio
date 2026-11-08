@@ -2,17 +2,15 @@ use wasm_bindgen::prelude::*;
 
 pub fn format_duration<T: Into<u128>>(ms: T) -> String {
     let ms = ms.into();
-
     let total_seconds = ms / 1000;
 
     let hours = total_seconds / 3600;
     let minutes = (total_seconds % 3600) / 60;
     let seconds = total_seconds % 60;
 
-    if hours == 0 {
-        format!("{minutes:02}:{seconds:02}")
-    } else {
-        format!("{hours:02}:{minutes:02}:{seconds:02}")
+    match hours {
+        0 => format!("{minutes:02}:{seconds:02}"),
+        _ => format!("{hours:02}:{minutes:02}:{seconds:02}"),
     }
 }
 
@@ -72,8 +70,7 @@ impl<T: Into<JsValue> + Clone> JsReflectGetSet for T {}
 
 pub trait JsCall<T: js_sys::JsFunction>: Into<js_sys::Function<T>> + Clone {
     fn call_n<Args: js_sys::JsArgs<T>>(&self, args: Args) -> Result<T::Ret, JsError> {
-        args.apply_call(&self.clone().into(), &JsValue::NULL)
-            .map_js_err("Call error")
+        args.apply_call(&self.clone().into(), &JsValue::NULL).map_js_err("Call error")
     }
 }
 impl<T: js_sys::JsFunction, S: Into<js_sys::Function<T>> + Clone> JsCall<T> for S {}

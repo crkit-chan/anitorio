@@ -13,7 +13,7 @@ use tsify::Tsify;
 use wasm_bindgen::prelude::*;
 
 pub struct ObjectGeneratorMetadata {
-    pub wires: Vec<Wire>,
+    pub wires:      Vec<Wire>,
     pub next_ent_n: u32,
 }
 
@@ -108,12 +108,12 @@ impl Blueprint {
     reason = "Correctness with Factorio Lua API"
 )]
 pub struct BlueprintBook {
-    pub icons: Option<Vec<Icon>>,
-    pub active_index: u32,
+    pub icons:          Option<Vec<Icon>>,
+    pub active_index:   u32,
     pub blueprint_book: BlueprintBookInner,
-    pub item: String,
-    pub label: Option<String>,
-    pub version: Option<u64>,
+    pub item:           String,
+    pub label:          Option<String>,
+    pub version:        Option<u64>,
 }
 
 #[derive(Tsify, Clone, Serialize, Deserialize)]
@@ -217,7 +217,7 @@ impl BlueprintEntity {
 pub struct BlueprintInner {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    pub icons: Option<Vec<Icon>>,
+    pub icons:       Option<Vec<Icon>>,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub entities: Vec<BlueprintEntity>,
@@ -232,7 +232,7 @@ pub struct BlueprintInner {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label_color: Option<Color>,
-    pub version: u64,
+    pub version:     u64,
 }
 
 #[derive(Tsify, Clone, Serialize, Deserialize)]
@@ -257,7 +257,7 @@ pub struct BlueprintLogisticFilter {
     /// The comparator for quality. nil if any quality.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub comparator: Option<ComparatorString>,
-    pub count: i32,
+    pub count:      i32,
 }
 
 #[derive(Tsify, Clone, Serialize, Deserialize)]
@@ -371,9 +371,7 @@ pub enum ControlBehavior {
 }
 impl ControlBehavior {
     pub const fn arithmetic(arithmetic_conditions: ArithmeticCombinatorParameters) -> Self {
-        Self::ArithmeticCombinator {
-            arithmetic_conditions,
-        }
+        Self::ArithmeticCombinator { arithmetic_conditions }
     }
     pub const fn decider(decider_conditions: DeciderCombinatorParameters) -> Self {
         Self::DeciderCombinator { decider_conditions }
@@ -382,7 +380,7 @@ impl ControlBehavior {
 
 #[derive(Tsify, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CircuitNetworkSelection {
-    pub red: bool,
+    pub red:   bool,
     pub green: bool,
 }
 impl Default for CircuitNetworkSelection {
@@ -392,25 +390,16 @@ impl Default for CircuitNetworkSelection {
 }
 impl CircuitNetworkSelection {
     pub const fn both() -> Self {
-        Self {
-            red: true,
-            green: true,
-        }
+        Self { red: true, green: true }
     }
     pub const fn default() -> Self {
         Self::both()
     }
     pub const fn green() -> Self {
-        Self {
-            red: false,
-            green: true,
-        }
+        Self { red: false, green: true }
     }
     pub const fn red() -> Self {
-        Self {
-            red: true,
-            green: false,
-        }
+        Self { red: true, green: false }
     }
 }
 
@@ -564,8 +553,8 @@ impl DeciderCombinatorParameters {
 
 #[derive(Clone)]
 pub struct DeciderCombinatorCustomParameters {
-    pub conditions: Vec<DeciderCombinatorCondition>,
-    pub indices: Box<[(usize, i32)]>,
+    pub conditions:  Vec<DeciderCombinatorCondition>,
+    pub indices:     Box<[(usize, i32)]>,
     pub signal_list: Arc<[RawJsonString]>,
 }
 impl Serialize for DeciderCombinatorCustomParameters {
@@ -580,7 +569,7 @@ impl Serialize for DeciderCombinatorCustomParameters {
             state.skip_field("outputs")
         } else {
             let outputs = IndexedDeciderCombinatorOutputs {
-                indices: &self.indices,
+                indices:     &self.indices,
                 signal_list: &self.signal_list,
             };
             state.serialize_field("outputs", &outputs)
@@ -589,7 +578,7 @@ impl Serialize for DeciderCombinatorCustomParameters {
     }
 }
 struct IndexedDeciderCombinatorOutputs<'a> {
-    indices: &'a [(usize, i32)],
+    indices:     &'a [(usize, i32)],
     signal_list: &'a [RawJsonString],
 }
 impl Serialize for IndexedDeciderCombinatorOutputs<'_> {
@@ -607,15 +596,15 @@ impl Serialize for IndexedDeciderCombinatorOutputs<'_> {
 }
 #[derive(Serialize)]
 struct IndexedDeciderCombinatorOutput<'a> {
-    signal: &'a serde_json::value::RawValue,
+    signal:                &'a serde_json::value::RawValue,
     copy_count_from_input: bool,
-    constant: i32,
+    constant:              i32,
 }
 
 #[derive(Tsify, Clone, Serialize, Deserialize)]
 pub struct Icon {
     pub signal: Arc<SignalID>,
-    pub index: u32,
+    pub index:  u32,
 }
 
 pub type LogisticFilterIndex = u16;
@@ -653,8 +642,8 @@ pub struct SignalID {
 impl SignalID {
     pub fn new_virtual(name: &Arc<str>) -> Self {
         Self {
-            type_: Arc::clone(&constants::SIG_TYPE_VIRTUAL),
-            name: Arc::clone(name),
+            type_:   Arc::clone(&constants::SIG_TYPE_VIRTUAL),
+            name:    Arc::clone(name),
             quality: None,
         }
     }

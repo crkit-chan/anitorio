@@ -9,19 +9,19 @@ thread_local! {
 
 #[derive(serde::Serialize, Clone)]
 struct CombinatorPositionData {
-    compression: Option<SignalCompression>,
-    dim: DVec2,
+    compression:    Option<SignalCompression>,
+    dim:            DVec2,
     grayscale_bits: Vec<u32>,
-    blueprint: Blueprint,
+    blueprint:      Blueprint,
 }
 
 pub fn load_comb_pos_json(data_json_reader: impl std::io::Read) -> Result<(), JsError> {
     #[derive(serde::Deserialize)]
     struct CombinatorPositionJson {
-        compression: Option<SignalCompression>,
+        compression:    Option<SignalCompression>,
         #[serde(rename = "grayscaleBits")]
         grayscale_bits: OneOrMany<u32>,
-        blueprints: OneOrMany<PositionEntry>,
+        blueprints:     OneOrMany<PositionEntry>,
     }
     #[derive(Clone, serde::Deserialize)]
     struct PositionEntry {
@@ -75,11 +75,11 @@ pub fn load_comb_pos_json(data_json_reader: impl std::io::Read) -> Result<(), Js
 }
 
 pub struct GenerateCombinatorsOutput {
-    pub data_cbs: LazyCombinators,
+    pub data_cbs:   LazyCombinators,
     pub other_ents: Vec<BlueprintEntity>,
-    pub metadata: ObjectGeneratorMetadata,
+    pub metadata:   ObjectGeneratorMetadata,
 
-    pub in_ent_n: u32,
+    pub in_ent_n:  u32,
     pub out_ent_n: u32,
 }
 
@@ -167,7 +167,7 @@ pub fn generate_combinators(
         let cond = DeciderCombinatorCondition::new(SIG_EACH.clone(), 0, CompStr::Ne);
         let dc = DeciderCombinatorParameters {
             conditions: vec![cond],
-            outputs: vec![cb_output],
+            outputs:    vec![cb_output],
         };
         en = en.with_tag("delay comb").with_direction(get_dir("delay"));
         en = en.with_control_behavior(ControlBehavior::decider(dc));
@@ -186,7 +186,7 @@ pub fn generate_combinators(
                     .with_compare_type(CompareTypeString::And)
                     .with_first_signal_networks(CircuitNetworkSelection::red()),
             ],
-            outputs: vec![cb_output.with_networks(CircuitNetworkSelection::green())],
+            outputs:    vec![cb_output.with_networks(CircuitNetworkSelection::green())],
         };
         en = en.with_direction(get_dir("memory"));
         en = en.with_control_behavior(ControlBehavior::decider(dc));
@@ -202,11 +202,11 @@ pub fn generate_combinators(
         let mut en = BlueprintEntity::new(curr_ent_n, Arc::clone(&ARI_CB), get_pos(">>"));
         let desc = "Shifts the input numbers until they are in the range of the current frame.";
         let ac = ArithmeticCombinatorParameters {
-            first_signal: Some(SIG_EACH.clone()),
-            second_signal: Some(args.timing_signals.f.clone()),
+            first_signal:    Some(SIG_EACH.clone()),
+            second_signal:   Some(args.timing_signals.f.clone()),
             second_constant: 0,
-            operation: ArithmeticCombinatorParameterOperation::Shr,
-            output_signal: Some(SIG_EACH.clone()),
+            operation:       ArithmeticCombinatorParameterOperation::Shr,
+            output_signal:   Some(SIG_EACH.clone()),
         };
         en = en.with_tag(">> comb").with_direction(get_dir(">>"));
         en = en.with_control_behavior(ControlBehavior::arithmetic(ac));
@@ -351,19 +351,16 @@ pub fn generate_combinators(
             },
         },
         other_ents,
-        metadata: ObjectGeneratorMetadata {
-            wires,
-            next_ent_n: curr_ent_n,
-        },
+        metadata: ObjectGeneratorMetadata { wires, next_ent_n: curr_ent_n },
         in_ent_n,
         out_ent_n,
     }
 }
 
 pub struct LazyCombinators {
-    positions: Box<[(u32, DVec2)]>,
+    positions:   Box<[(u32, DVec2)]>,
     target_name: Arc<str>,
-    direction: u32,
+    direction:   u32,
 }
 impl LazyCombinators {
     #[expect(clippy::unnecessary_wraps, reason = "Matches API of Vec<T>::get")]

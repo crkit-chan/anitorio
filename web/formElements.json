@@ -290,6 +290,15 @@
     },
     "splash": "Tip: From Factorio v2.0.25 onwards, JSON and blueprint files can be imported directly into the game via drag-and-drop."
   },
+  "colorPaletteSize": {
+    "name": "Palette Size",
+    "type": "number",
+    "compact": false,
+    "min": 0,
+    "max": 256,
+    "step": 1,
+    "tooltip": "If set to a non-zero value, only uses this many shades of different colour."
+  },
   "lowMemUsage": {
     "name": "Low RAM Mode",
     "type": "checkbox",

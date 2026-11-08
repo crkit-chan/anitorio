@@ -3,30 +3,28 @@ use crate::{constants::DEFAULT_FRAME_DELAY, util::format_duration};
 use crate::{prelude::*, ts};
 use glam::{DVec2, UVec2, uvec2};
 use image::{AnimationDecoder, imageops};
-use std::{collections::HashMap, pin::Pin, sync::Arc, time::Duration};
+use std::{pin::Pin, rc::Rc, sync::Arc, time::Duration};
 use wasm_bindgen::JsValue;
 
-pub type FrameCallback = Box<
-    dyn for<'a> Fn(
-        &'a image::DynamicImage,
-    ) -> Pin<Box<dyn Future<Output = Result<(), JsError>> + 'a>>,
->;
+pub type FrameCallback = dyn for<'a> Fn(
+    &'a image::DynamicImage,
+) -> Pin<Box<dyn Future<Output = Result<(), JsError>> + 'a>>;
 
 pub struct FrameData<'a> {
-    args: &'a ImageArgs,
-    curr_n_us: u64,
-    decoder: FrameDecoder<'a>,
-    fps_timer: f64,
-    in_dim: UVec2,
-    in_frame_i: u32,
-    is_first: bool,
-    on_frame: Option<FrameCallback>,
-    out_dim_raw: DVec2,
-    out_frame_i: usize,
+    args:         &'a ImageArgs,
+    curr_n_us:    u64,
+    decoder:      FrameDecoder<'a>,
+    fps_timer:    f64,
+    in_dim:       UVec2,
+    in_frame_i:   u32,
+    is_first:     bool,
+    on_frame:     Option<Rc<FrameCallback>>,
+    out_dim_raw:  DVec2,
+    out_frame_i:  usize,
     out_n_frames: u32,
-    prev_img: Option<(Arc<image::DynamicImage>, u64)>,
+    palette:      Option<Vec<[u8; 4]>>,
+    prev_img:     Option<(Arc<image::DynamicImage>, u64)>,
 }
-
 impl FrameData<'_> {
     /// Returns the dimensions of the output frames.
     ///
@@ -60,22 +58,20 @@ impl FrameData<'_> {
 }
 impl<'a> FrameData<'a> {
     pub fn new(
-        reader: impl std::io::Read + 'a,
+        frame_data: ImageFrameData<'a>,
         image_args: &'a ImageArgs,
-        on_frame: Option<FrameCallback>,
-        js_next_frame: Option<JsVideoFrameCallback>,
-    ) -> Result<Self, JsError> {
+        on_frame: Option<Rc<FrameCallback>>,
+    ) -> Self {
         const fn expected_output_frames(n_ms: u64, fps: u32) -> u32 {
             1 + ((n_ms * fps as u64) / 1000) as u32
         }
 
-        let frame_data = get_frames(reader, image_args, js_next_frame)?;
         let in_dim = frame_data.dimensions();
         let scale_factor = (f64::from(image_args.max_size) / f64::from(in_dim.x))
             .min(f64::from(image_args.max_size) / f64::from(in_dim.y))
             .min(1.0);
 
-        Ok({
+        {
             let mut obj = Self {
                 out_n_frames: match image_args.mode {
                     Mode::Static { .. } => 1,
@@ -94,11 +90,12 @@ impl<'a> FrameData<'a> {
                 on_frame,
                 out_dim_raw: scale_factor * DVec2::from(in_dim),
                 out_frame_i: 0,
+                palette: None,
                 prev_img: None,
             };
             obj.decoder.dim = obj.out_dim_raw();
             obj
-        })
+        }
     }
 
     pub async fn next(&mut self) -> Result<Option<Arc<image::DynamicImage>>, JsError> {
@@ -149,8 +146,7 @@ impl<'a> FrameData<'a> {
             if self.is_first {
                 self.is_first = false;
             } else {
-                let duration: f64;
-                let progress: f64;
+                let (duration, progress): (f64, f64);
                 let args = &self.args;
 
                 if use_js_decode {
@@ -177,13 +173,26 @@ impl<'a> FrameData<'a> {
         }
     }
 
+    pub fn with_palette(mut self, palette: Option<Vec<[u8; 4]>>) -> Self {
+        self.palette = palette;
+        self
+    }
+
     //// Returns the current output time in microseconds.
     fn out_t_us(&self) -> u64 {
         (self.out_frame_i as u64 * 1000 * 1000) / u64::from(self.args.target_fps)
     }
 
     /// Converts the input frame to the target output using the specified settings.
-    pub fn convert_frame(&self, buf: image::RgbaImage) -> image::DynamicImage {
+    pub fn convert_frame(&self, mut buf: image::RgbaImage) -> image::DynamicImage {
+        if let Some(palette) = self.palette.as_ref() {
+            let outputs = quantised_frame_to_outputs(&buf, palette)
+                .iter()
+                .flat_map(|&v| palette[v as usize])
+                .collect::<Vec<_>>();
+            buf = image::RgbaImage::from_raw(buf.width(), buf.height(), outputs).unwrap();
+        }
+
         let mut img = image::DynamicImage::ImageRgba8(buf);
         let out_dim = self.out_dim_raw.round().as_uvec2();
 
@@ -234,87 +243,134 @@ impl<'a> FrameData<'a> {
 
 pub struct ImageFrameData<'a> {
     decoder: FrameDecoder<'a>,
-    info: ImageArgs,
+    info:    ImageArgs,
 }
-impl ImageFrameData<'_> {
+impl<'a> ImageFrameData<'a> {
     pub const fn dimensions(&self) -> UVec2 {
         self.info.dimensions.unwrap()
     }
+
+    /// Decodes the provided image data into a vector of frames based on the image type.
+    ///
+    /// Supported types: "gif" and "webp".
+    ///
+    /// # Arguments
+    ///
+    /// * `image_data` - A byte slice containing the image data.
+    /// * `image_type` - The type of the image ("gif" or "webp").
+    ///
+    /// # Returns
+    ///
+    /// An iterator of `Frame` objects or a JavaScript error.
+    pub fn new(
+        mut reader: impl std::io::Read + 'a,
+        image_args: &'a ImageArgs,
+        js_next_frame: Option<JsVideoFrameCallback>,
+    ) -> Result<Self, JsError> {
+        let mut info: ImageArgs = image_args.clone();
+        let state = match image_args.mime_type.as_str() {
+            "image/gif" => {
+                let decoder = image::codecs::gif::GifDecoder::new(reader)?;
+                FrameDecoderState::NativeFrames(decoder.into_frames())
+            }
+            "image/webp" => {
+                let decoder = image::codecs::webp::WebPDecoder::new(reader)?;
+                FrameDecoderState::NativeFrames(decoder.into_frames())
+            }
+            t if t.starts_with("image/") || matches!(image_args.mode, Mode::Static { .. }) => {
+                let use_combs = matches!(image_args.mode, Mode::Static { combs: true, .. });
+                info.n_frames = Some(1);
+                info.duration = Some(if use_combs { 1000.0 } else { 0.0 });
+
+                let dim = image_args.dimensions.expect("No image size");
+                let mut data = Vec::new();
+                reader.read_to_end(&mut data)?;
+
+                let frames = image::Frames::new(Box::new(core::iter::once(Ok(image::Frame::new(
+                    image::RgbaImage::from_raw(dim.x, dim.y, data)
+                        .expect("buffer length must be width * height * 4"),
+                ))))); // bruh
+                FrameDecoderState::NativeFrames(frames)
+            }
+            t if t.starts_with("video/") => {
+                info.n_frames = None;
+                let get_frame = js_next_frame.expect("JS next frame must be provided for videos");
+                FrameDecoderState::JsFrames(get_frame)
+            }
+            t => return Err(JsError::new(&format!("Unsupported image type: '{t}'"))),
+        };
+
+        let decoder = FrameDecoder::new(state, info.dimensions.unwrap());
+        Ok(ImageFrameData { decoder, info })
+    }
 }
 
-/// Decodes the provided image data into a vector of frames based on the image type.
-///
-/// Supported types: "gif" and "webp".
+/// Picks one palette of `size` colors for all frames. Index 0 is always black, since black
+/// pixels are left out of the blueprint entirely.
 ///
 /// # Arguments
 ///
-/// * `image_data` - A byte slice containing the image data.
-/// * `image_type` - The type of the image ("gif" or "webp").
+/// * `frames` - The processed frames.
+/// * `size` - Number of palette entries, including black.
 ///
 /// # Returns
 ///
-/// An iterator of `Frame` objects or a JavaScript error.
-pub fn get_frames<'a>(
-    mut reader: impl std::io::Read + 'a,
-    image_args: &'a ImageArgs,
-    js_next_frame: Option<JsVideoFrameCallback>,
-) -> Result<ImageFrameData<'a>, JsError> {
-    let mut info: ImageArgs = image_args.clone();
-    let state = match image_args.mime_type.as_str() {
-        "image/gif" => {
-            let decoder = image::codecs::gif::GifDecoder::new(reader)?;
-            FrameDecoderState::NativeFrames(decoder.into_frames())
-        }
-        "image/webp" => {
-            let decoder = image::codecs::webp::WebPDecoder::new(reader)?;
-            FrameDecoderState::NativeFrames(decoder.into_frames())
-        }
-        t if t.starts_with("image/") || matches!(image_args.mode, Mode::Static { .. }) => {
-            let use_combs = matches!(image_args.mode, Mode::Static { combs: true, .. });
-            info.n_frames = Some(1);
-            info.duration = Some(if use_combs { 1000.0 } else { 0.0 });
-
-            let dim = image_args.dimensions.expect("No image size");
-            let mut data = Vec::new();
-            reader.read_to_end(&mut data)?;
-
-            let frames = image::Frames::new(Box::new(core::iter::once(Ok(image::Frame::new(
-                image::RgbaImage::from_raw(dim.x, dim.y, data)
-                    .expect("buffer length must be width * height * 4"),
-            ))))); // bruh
-            FrameDecoderState::NativeFrames(frames)
-        }
-        t if t.starts_with("video/") => {
-            info.n_frames = None;
-            let get_frame = js_next_frame.expect("JS next frame must be provided for videos");
-            FrameDecoderState::JsFrames(get_frame)
-        }
-        t => return Err(JsError::new(&format!("Unsupported image type: '{t}'"))),
-    };
-
-    let decoder = FrameDecoder::new(state, info.dimensions.unwrap());
-    Ok(ImageFrameData { decoder, info })
-}
-
-pub async fn get_pixel_rgba8_i32_counts(
-    reader: &mut impl std::io::Read,
-    image_args: &ImageArgs,
-    js_next_frame: Option<JsVideoFrameCallback>,
-) -> Result<Vec<(i32, usize)>, JsError> {
-    let mut counts = HashMap::<i32, usize>::new();
-    let mut generator = FrameData::new(reader, image_args, None, js_next_frame)?;
+/// The palette colors as RGB triples.
+pub async fn build_palette(
+    mut generator: FrameData<'_>,
+    size: usize,
+) -> Result<Vec<[u8; 4]>, JsError> {
+    let mut hist = exoquant::Histogram::new();
 
     while let Some(frame) = generator.next().await? {
-        for output in crate::blueprint::util::color_frame_to_outputs(&frame) {
-            *counts.entry(output).or_insert(0) += 1;
-        }
+        let frame = Arc::unwrap_or_clone(frame);
+        hist.extend(
+            (frame.to_rgba8().as_chunks::<4>().0)
+                .iter()
+                .map(|&[r, g, b, a]| exoquant::Color::new(r, g, b, a)),
+        );
     }
 
-    // Sort by highest count first
-    let mut entries: Vec<_> = counts.into_iter().collect();
-    entries.sort_unstable_by_key(|&(_, v)| std::cmp::Reverse(v));
+    let mut palette = exoquant::generate_palette(
+        &hist,
+        &exoquant::SimpleColorSpace::default(),
+        &exoquant::optimizer::KMeans,
+        size,
+    );
+    let darkest = (0..palette.len()).min_by_key(|&i| {
+        let c = palette[i];
+        c.r + c.g + c.b
+    });
+    palette.swap(0, darkest.unwrap());
+    palette[0] = exoquant::Color::new(0, 0, 0, 0);
 
-    Ok(entries)
+    Ok(palette.iter().map(|v| [v.r, v.g, v.b, v.a]).collect())
+}
+
+/// Finds the palette entry closest to a color.9
+///
+/// # Arguments
+///
+/// * `palette` - The palette colors.
+/// * `color` - The RGB color to match.
+///
+/// # Returns
+///
+/// The index of the closest palette entry.
+pub fn quantised_frame_to_outputs(frame: &image::RgbaImage, palette: &[[u8; 4]]) -> Vec<u32> {
+    (frame.as_raw().as_chunks::<4>().0)
+        .iter()
+        .map(|entry| nearest_palette_index(palette, entry))
+        .collect()
+}
+
+pub fn nearest_palette_index(palette: &[[u8; 4]], color: &[u8]) -> u32 {
+    let distance = |entry: &[u8; 4]| -> i32 {
+        (entry.iter().zip(color))
+            .map(|(&a, &b)| (i32::from(a) - i32::from(b)).pow(2))
+            .sum()
+    };
+    (0..palette.len()).min_by_key(|&i| distance(&palette[i])).unwrap() as u32
 }
 
 enum FrameDecoderState<'a> {
@@ -326,18 +382,13 @@ enum FrameDecoderState<'a> {
 struct FrameWithTime(image::Frame, u64);
 struct FrameDecoder<'a> {
     curr_n_us: u64,
-    dim: UVec2,
-    finished: bool,
-    state: FrameDecoderState<'a>,
+    dim:       UVec2,
+    finished:  bool,
+    state:     FrameDecoderState<'a>,
 }
 impl<'a> FrameDecoder<'a> {
     const fn new(state: FrameDecoderState<'a>, dim: UVec2) -> Self {
-        FrameDecoder {
-            curr_n_us: 0,
-            dim,
-            finished: false,
-            state,
-        }
+        FrameDecoder { curr_n_us: 0, dim, finished: false, state }
     }
 
     const fn is_finished(&self) -> bool {

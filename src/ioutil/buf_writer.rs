@@ -20,8 +20,8 @@ impl<F: FnMut(Vec<u8>) -> Result<(), JsValue>> BufWriter<F> {
     }
 
     pub fn finish(&mut self) -> io::Result<()> {
-        if let BufWriterState::Streaming(writer) = &mut self.writer {
-            writer.finish()?;
+        if let BufWriterState::Streaming(w) = &mut self.writer {
+            w.finish()?;
         }
         Ok(())
     }
@@ -29,15 +29,15 @@ impl<F: FnMut(Vec<u8>) -> Result<(), JsValue>> BufWriter<F> {
 impl<F: FnMut(Vec<u8>) -> Result<(), JsValue>> Write for BufWriter<F> {
     fn write(&mut self, data: &[u8]) -> io::Result<usize> {
         match &mut self.writer {
-            BufWriterState::Callback(writer) => writer.write(data),
-            BufWriterState::Streaming(writer) => writer.write(data),
+            BufWriterState::Callback(w) => w.write(data),
+            BufWriterState::Streaming(w) => w.write(data),
         }
     }
 
     fn flush(&mut self) -> io::Result<()> {
         match &mut self.writer {
-            BufWriterState::Callback(writer) => writer.flush(),
-            BufWriterState::Streaming(writer) => writer.flush(),
+            BufWriterState::Callback(w) => w.flush(),
+            BufWriterState::Streaming(w) => w.flush(),
         }
     }
 }
