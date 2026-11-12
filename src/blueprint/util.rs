@@ -64,14 +64,8 @@ pub fn color_frame_to_outputs(frame: &image::DynamicImage) -> Vec<i32> {
         let mut i = 0;
 
         while i + 16 <= rgba.len() {
-            #[expect(
-                clippy::cast_ptr_alignment,
-                reason = "v128_load supports unaligned memory accesses"
-            )]
-            #[expect(
-                clippy::ptr_as_ptr,
-                reason = "Pointer is cast only to pass the byte buffer to v128_load"
-            )]
+            #[expect(clippy::cast_ptr_alignment, reason = "v128_load uses unaligned memory")]
+            #[expect(clippy::ptr_as_ptr, reason = "Cast to pass byte buf to v128_load")]
             unsafe {
                 let input = v128_load(rgba.as_ptr().add(i) as *const v128); // Load 4 RGBA pixels: [R0 G0 B0 A0 R1 G1 B1 A1 R2 G2 B2 A2 R3 G3 B3 A3]
                 let packed = i8x16_shuffle::<2, 1, 0, 16, 6, 5, 4, 16, 10, 9, 8, 16, 14, 13, 12, 16>(

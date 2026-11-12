@@ -103,10 +103,7 @@ impl Blueprint {
 }
 
 #[derive(Tsify, Clone, Serialize, Deserialize)]
-#[expect(
-    clippy::struct_field_names,
-    reason = "Correctness with Factorio Lua API"
-)]
+#[expect(clippy::struct_field_names, reason = "Factorio Lua API")]
 pub struct BlueprintBook {
     pub icons:          Option<Vec<Icon>>,
     pub active_index:   u32,
@@ -378,29 +375,21 @@ impl ControlBehavior {
     }
 }
 
-#[derive(Tsify, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Tsify, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CircuitNetworkSelection {
     pub red:   bool,
     pub green: bool,
 }
 impl Default for CircuitNetworkSelection {
     fn default() -> Self {
-        Self::both()
+        Self::BOTH
     }
 }
 impl CircuitNetworkSelection {
-    pub const fn both() -> Self {
-        Self { red: true, green: true }
-    }
-    pub const fn default() -> Self {
-        Self::both()
-    }
-    pub const fn green() -> Self {
-        Self { red: false, green: true }
-    }
-    pub const fn red() -> Self {
-        Self { red: true, green: false }
-    }
+    pub const BOTH: Self = Self { red: true, green: true };
+    pub const GREEN: Self = Self { red: false, green: true };
+    pub const NONE: Self = Self { red: false, green: false };
+    pub const RED: Self = Self { red: true, green: false };
 }
 
 #[derive(Tsify, Default, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -454,7 +443,7 @@ impl DeciderCombinatorCondition {
             constant: Some(constant),
             comparator,
             compare_type: const { CompareTypeString::default() },
-            first_signal_networks: const { CircuitNetworkSelection::default() },
+            first_signal_networks: CircuitNetworkSelection::BOTH,
         }
     }
 
@@ -499,7 +488,7 @@ impl DeciderCombinatorOutput {
             copy_count_from_input: constant.is_none(),
             constant: constant.unwrap_or(Self::default_constant()),
             signal,
-            networks: const { CircuitNetworkSelection::default() },
+            networks: CircuitNetworkSelection::BOTH,
         }
     }
 

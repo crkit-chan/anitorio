@@ -12,6 +12,7 @@ pub struct Callbacks {
     pub on_progress: ts::TsFn<fn(ts::TsNum, ts::TsStr) -> ts::TsVoid>,
 
     #[serde(with = "serde_wasm_bindgen::preserve")]
+    #[allow(clippy::allow_attributes, dead_code, reason = "api")]
     pub perf_now: ts::TsFn<fn() -> ts::TsNum>,
 }
 
@@ -55,6 +56,8 @@ pub fn report_lamp_group<T: Into<f64>>(percentage: T) {
 pub fn set_progress(start: f64, end: f64, progress: f64, msg: &str) {
     report_progress(progress.mul_add(end - start, start), msg);
 }
+
+#[allow(clippy::allow_attributes, dead_code, reason = "api")]
 pub fn perf_now() -> f64 {
     CALLBACKS
         .with_borrow(|cbs| -> Option<f64> { cbs.as_ref()?.perf_now.call_n(()).ok()?.as_f64() })

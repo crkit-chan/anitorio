@@ -71,8 +71,7 @@ impl<T: DeserializeOwned> IntoWasmAbi for TsIntoRust<T> {
     }
 }
 
-#[allow(clippy::allow_attributes, reason = "may be fixed in future")]
-#[allow(clippy::use_self, reason = "clippy bug")]
+#[allow(clippy::use_self, clippy::allow_attributes, reason = "clippy bug")]
 impl<T: DeserializeOwned> UpcastFrom<TsIntoRust<T>> for TsIntoRust<T> {} // A wrapper can upcast to itself.
 impl<T: DeserializeOwned> UpcastFrom<TsIntoRust<T>> for JsValue {} // A wrapper can upcast to JsValue.
 

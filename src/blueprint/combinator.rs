@@ -18,7 +18,8 @@ struct CombinatorPositionData {
 pub fn load_comb_pos_json(data_json_reader: impl std::io::Read) -> Result<(), JsError> {
     #[derive(serde::Deserialize)]
     struct CombinatorPositionJson {
-        compression:    Option<SignalCompression>,
+        compression: Option<SignalCompression>,
+
         #[serde(rename = "grayscaleBits")]
         grayscale_bits: OneOrMany<u32>,
         blueprints:     OneOrMany<PositionEntry>,
@@ -70,7 +71,7 @@ pub fn load_comb_pos_json(data_json_reader: impl std::io::Read) -> Result<(), Js
         })
     });
 
-    COMB_POS_DATA.replace(Some(data_iter.collect::<Result<Box<_>, JsError>>()?));
+    COMB_POS_DATA.replace(Some(data_iter.collect::<Result<_, JsError>>()?));
     Ok(())
 }
 
@@ -140,7 +141,6 @@ pub fn generate_combinators(
     let mut first_connection_ent_n: Option<u32> = None;
     let mut curr_ent_n = base_ent_n;
     let mut other_ents = Vec::new(); // shifters / etc
-    // let mut data_cbs = Vec::new(); // data entities
     let mut wires = Vec::new();
 
     let use_const_cbs = matches!(args.image_args.mode, Mode::Static { const_cb: true, .. });
@@ -181,12 +181,12 @@ pub fn generate_combinators(
         let dc = DeciderCombinatorParameters {
             conditions: vec![
                 DeciderCombinatorCondition::new(SIG_EACH.clone(), 0, CompStr::Ne)
-                    .with_first_signal_networks(CircuitNetworkSelection::green()),
+                    .with_first_signal_networks(CircuitNetworkSelection::GREEN),
                 DeciderCombinatorCondition::new(args.timing_signals.p.clone(), 0, CompStr::Ne)
                     .with_compare_type(CompareTypeString::And)
-                    .with_first_signal_networks(CircuitNetworkSelection::red()),
+                    .with_first_signal_networks(CircuitNetworkSelection::RED),
             ],
-            outputs:    vec![cb_output.with_networks(CircuitNetworkSelection::green())],
+            outputs:    vec![cb_output.with_networks(CircuitNetworkSelection::GREEN)],
         };
         en = en.with_direction(get_dir("memory"));
         en = en.with_control_behavior(ControlBehavior::decider(dc));
@@ -340,8 +340,7 @@ pub fn generate_combinators(
 
     GenerateCombinatorsOutput {
         data_cbs: LazyCombinators {
-            positions: positions.into_boxed_slice(),
-            target_name,
+            curr_i: 0,
             direction: if use_const_cbs {
                 constants::DIR_D
             } else if use_compact_layout {
@@ -349,6 +348,8 @@ pub fn generate_combinators(
             } else {
                 constants::DIR_R
             },
+            positions: positions.into_boxed_slice(),
+            target_name,
         },
         other_ents,
         metadata: ObjectGeneratorMetadata { wires, next_ent_n: curr_ent_n },
@@ -358,18 +359,20 @@ pub fn generate_combinators(
 }
 
 pub struct LazyCombinators {
+    curr_i:      usize,
+    direction:   u32,
     positions:   Box<[(u32, DVec2)]>,
     target_name: Arc<str>,
-    direction:   u32,
 }
 impl LazyCombinators {
-    #[expect(clippy::unnecessary_wraps, reason = "Matches API of Vec<T>::get")]
-    pub fn get(&self, index: usize) -> Option<BlueprintEntity> {
-        let (curr_ent_n, pos) = self.positions[index];
+    pub fn next(&mut self) -> BlueprintEntity {
+        let (curr_ent_n, pos) = self.positions[self.curr_i];
         let mut entity = BlueprintEntity::new(curr_ent_n, Arc::clone(&self.target_name), pos);
-        if index == 0 {
+        if self.curr_i == 0 {
             entity = entity.with_tag("first data comb");
         }
-        Some(entity.with_direction(self.direction))
+        self.curr_i += 1;
+
+        entity.with_direction(self.direction)
     }
 }

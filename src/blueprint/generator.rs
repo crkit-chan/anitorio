@@ -92,8 +92,7 @@ struct EntityData {
     next_ent_n: u32,
 }
 struct GroupPatchState {
-    chunk_i:   u32,   // which *chunk* we’re patching (not frame)
-    comb_i:    usize, // Current combinator (we skip empty data)
+    chunk_i:   u32, // which *chunk* we’re patching (not frame)
     frame_buf: Vec<image::DynamicImage>,
     sig_buf:   Vec<Vec<i32>>,
 }
@@ -154,7 +153,6 @@ impl<'a> BlueprintGenerator<'a> {
         if let Some(frame_info) = frame_info.as_mut() {
             let states_iter = (0..n_groups).map(|_| GroupPatchState {
                 chunk_i:   0,
-                comb_i:    0,
                 frame_buf: Vec::with_capacity(frame_info.frames_per_cb as usize),
                 sig_buf:   Vec::with_capacity(frame_info.n_buf_frames as usize),
             });
@@ -647,7 +645,7 @@ impl<'a> BlueprintGenerator<'a> {
                     );
                 }
                 let state = &mut info.patch_states[group_i as usize]; // Individual state for each group of lamps
-                let data_combs = &group_data_combs[group_i as usize];
+                let data_combs = &mut group_data_combs[group_i as usize];
                 let frame_sigs: Vec<i32>;
 
                 let grp_left = group_i * max_cols_per_grp;
@@ -693,12 +691,11 @@ impl<'a> BlueprintGenerator<'a> {
                         })
                         .collect::<Box<_>>();
                     if !target_outputs.is_empty() {
-                        let en = data_combs.get(state.comb_i).unwrap();
+                        let en = data_combs.next();
                         let range = uvec2(1, 2) + (ticks_per_grp * state.chunk_i);
                         let cb = mk_cb(range.x, range.y, target_outputs);
                         output_data.push(en.with_control_behavior(cb));
                         state.sig_buf[0] = frame_sigs; // cache absolute output
-                        state.comb_i += 1;
                     }
                 } else {
                     // Temporal compression branch
@@ -728,11 +725,10 @@ impl<'a> BlueprintGenerator<'a> {
 
                         if !target_outputs.is_empty() {
                             let target_i = base_chunk_i + cb_i as u32;
-                            let en = data_combs.get(state.comb_i).unwrap();
+                            let en = data_combs.next();
                             let range = (uvec2(0, 1) + target_i) * ticks_per_grp;
                             let cb = mk_cb(range.x, range.y, target_outputs);
                             output_data.push(en.with_control_behavior(cb));
-                            state.comb_i += 1;
                         }
                     }
 
@@ -743,12 +739,11 @@ impl<'a> BlueprintGenerator<'a> {
                             .collect::<Box<_>>()
                         && !target_outputs.is_empty()
                     {
-                        let en = data_combs.get(state.comb_i).unwrap();
+                        let en = data_combs.next();
                         let range = ticks_per_grp
                             * uvec2(base_chunk_i, base_chunk_i + state.sig_buf.len() as u32);
                         let cb = mk_cb(range.x, range.y, target_outputs);
                         output_data.push(en.with_control_behavior(cb));
-                        state.comb_i += 1;
                     }
                     state.sig_buf.clear();
                 }

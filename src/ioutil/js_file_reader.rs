@@ -51,6 +51,7 @@ impl JsFileReader {
         Ok(())
     }
 
+    #[allow(clippy::allow_attributes, dead_code, reason = "api")]
     pub fn reset(&mut self) {
         self.cache.clear();
         self.cache_start = 0;

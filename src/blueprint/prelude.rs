@@ -3,6 +3,5 @@ pub use super::macros::*;
 pub use super::models::{ComparatorString as CompStr, *};
 pub use wasm_bindgen::JsError;
 
-#[allow(unused, reason = "Log may not be used")]
-#[allow(clippy::allow_attributes, reason = "Log may not be used")]
+#[allow(unused, clippy::allow_attributes, reason = "Log may not be used")]
 pub use crate::macros::log;
