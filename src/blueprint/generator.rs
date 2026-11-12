@@ -70,7 +70,6 @@ struct FrameInfo<'a> {
     frames_per_cb:    u32,
     group_data_combs: Vec<LazyCombinators>,
     n_buf_frames:     u32,
-    n_scaled_frames:  u32,
     next_frame:       Option<Arc<image::DynamicImage>>,
     patch_states:     Vec<GroupPatchState>,
     ticks_per_frame:  u32,
@@ -113,7 +112,6 @@ impl<'a> BlueprintGenerator<'a> {
         let dim: UVec2;
 
         if let Some(mut frame_data) = data {
-            let n_scaled_frames = frame_data.total_frames() * if time_comp_win > 0 { 2 } else { 1 };
             let frames_per_cb = 32u32.checked_div(gray_bits).unwrap_or(1);
             let n_buf_frames = match time_comp_win {
                 w if w > 0 => (w * args.image_args.target_fps).div_ceil(1000 * frames_per_cb),
@@ -126,7 +124,6 @@ impl<'a> BlueprintGenerator<'a> {
                 group_data_combs: Vec::new(),
                 frames_per_cb,
                 n_buf_frames,
-                n_scaled_frames,
                 next_frame: None,
                 patch_states: Vec::new(),
                 ticks_per_frame: 60 / args.image_args.target_fps,
@@ -495,8 +492,6 @@ impl<'a> BlueprintGenerator<'a> {
                     in_ent_n,
                     out_ent_n,
                 } = generate_combinators(
-                    info.n_scaled_frames.div_ceil(info.frames_per_cb),
-                    &self.occupied,
                     ent_data.next_ent_n,
                     dvec2(f64::from(grp_left), -f64::from(args.display_margin_y)),
                     self.max_cols_per_grp,
@@ -580,7 +575,7 @@ impl<'a> BlueprintGenerator<'a> {
         let sig_p = self.args.timing_signals.p.clone();
         let mut output_data: Vec<BlueprintEntity> = Vec::new();
 
-        let mk_cb = |start: u32, end: u32, indices: Box<[(usize, i32)]>| -> ControlBehavior {
+        let mk_cb = |range: UVec2, indices: Box<[(usize, i32)]>| -> ControlBehavior {
             if matches!(mode, Mode::Static { const_cb: true, .. }) {
                 let sections = indices.chunks(1000).enumerate().map(|(i, chunk)| {
                     let filters = chunk.iter().enumerate().map(|(j, &(sig_i, count))| {
@@ -606,12 +601,12 @@ impl<'a> BlueprintGenerator<'a> {
                 let conditions = vec![
                     DeciderCombinatorCondition::new(
                         Arc::clone(&sig_p),
-                        start.cast_signed(),
+                        range.x.cast_signed(),
                         CompStr::Ge,
                     ),
                     DeciderCombinatorCondition::new(
                         Arc::clone(&sig_p),
-                        end.cast_signed(),
+                        range.y.cast_signed(),
                         CompStr::Lt,
                     )
                     .with_compare_type(CompareTypeString::And),
@@ -691,9 +686,12 @@ impl<'a> BlueprintGenerator<'a> {
                         })
                         .collect::<Box<_>>();
                     if !target_outputs.is_empty() {
-                        let en = data_combs.next();
+                        let (next_ent_n, en) =
+                            data_combs.next(self.entity_data.next_ent_n, &self.occupied);
+                        self.entity_data.next_ent_n = next_ent_n;
+
                         let range = uvec2(1, 2) + (ticks_per_grp * state.chunk_i);
-                        let cb = mk_cb(range.x, range.y, target_outputs);
+                        let cb = mk_cb(range, target_outputs);
                         output_data.push(en.with_control_behavior(cb));
                         state.sig_buf[0] = frame_sigs; // cache absolute output
                     }
@@ -724,10 +722,13 @@ impl<'a> BlueprintGenerator<'a> {
                             .collect::<Box<_>>();
 
                         if !target_outputs.is_empty() {
-                            let target_i = base_chunk_i + cb_i as u32;
-                            let en = data_combs.next();
-                            let range = (uvec2(0, 1) + target_i) * ticks_per_grp;
-                            let cb = mk_cb(range.x, range.y, target_outputs);
+                            let (next_ent_n, en) =
+                                data_combs.next(self.entity_data.next_ent_n, &self.occupied);
+                            self.entity_data.next_ent_n = next_ent_n;
+
+                            let range =
+                                (uvec2(0, 1) + (base_chunk_i + cb_i as u32)) * ticks_per_grp;
+                            let cb = mk_cb(range, target_outputs);
                             output_data.push(en.with_control_behavior(cb));
                         }
                     }
@@ -739,10 +740,13 @@ impl<'a> BlueprintGenerator<'a> {
                             .collect::<Box<_>>()
                         && !target_outputs.is_empty()
                     {
-                        let en = data_combs.next();
+                        let (next_ent_n, en) =
+                            data_combs.next(self.entity_data.next_ent_n, &self.occupied);
+                        self.entity_data.next_ent_n = next_ent_n;
+
                         let range = ticks_per_grp
                             * uvec2(base_chunk_i, base_chunk_i + state.sig_buf.len() as u32);
-                        let cb = mk_cb(range.x, range.y, target_outputs);
+                        let cb = mk_cb(range, target_outputs);
                         output_data.push(en.with_control_behavior(cb));
                     }
                     state.sig_buf.clear();
@@ -785,6 +789,13 @@ impl<'a> BlueprintGenerator<'a> {
     fn make_wires(&mut self, writer: &mut impl io::Write) -> Result<(), JsError> {
         let all_ents = &mut self.entity_data.ents;
         let all_wires = &mut self.entity_data.wires;
+
+        if let Some(frame_info) = self.frame_info.as_ref() {
+            for cb in &frame_info.group_data_combs {
+                all_wires.extend_from_slice(cb.get_wires());
+            }
+        }
+
         let n_wires = all_wires.len();
 
         // Swap all wires if requested (default uses red wires, so swap all for green).

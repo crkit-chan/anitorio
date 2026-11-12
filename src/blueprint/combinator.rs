@@ -103,8 +103,6 @@ pub struct GenerateCombinatorsOutput {
 ///
 /// Does not populate combinators with data.
 pub fn generate_combinators(
-    ticks_per_group: u32,
-    occupied: &PowerPoleOccupied,
     base_ent_n: u32,
     start_pos: DVec2,
     max_cols_per_grp: u32,
@@ -137,7 +135,6 @@ pub fn generate_combinators(
             }
         }
     }
-    let mut first_data_cb_ent_n: Option<u32> = None;
     let mut first_connection_ent_n: Option<u32> = None;
     let mut curr_ent_n = base_ent_n;
     let mut other_ents = Vec::new(); // shifters / etc
@@ -256,11 +253,6 @@ pub fn generate_combinators(
     } else {
         const { dvec2(1.0, -0.5) } // Base position for horizontal layout
     };
-    let mut offset: DVec2;
-    let mut curr_pos: DVec2;
-    let mut grid_pos = IVec2::ZERO; // Current grid position (not absolute, multiplied by combinator's bounding box)
-    let mut prev_ents_n: Vec<Option<u32>> = vec![None; max_cols_per_grp as usize];
-    let mut prev_prev_ents_n: Vec<Option<u32>> = vec![None; max_cols_per_grp as usize];
 
     // Calculate the offsets to test for collisions. In Factorio, all collision boxes are
     // rectangular.
@@ -269,78 +261,31 @@ pub fn generate_combinators(
     let y_offsets = (0..size.y as usize).map(|v| v as f64 + 0.5 - size.y / 2.0);
     let y_offsets = y_offsets.collect::<Vec<_>>();
     let hitbox_offsets = x_offsets.flat_map(|x| y_offsets.iter().map(move |&y| dvec2(x, y)));
-    let hitbox_offsets = hitbox_offsets.collect::<Vec<_>>();
+    let hitbox_offsets = hitbox_offsets.collect::<Box<_>>();
     let target_name = Arc::clone(if use_const_cbs {
         &constants::CONSTANT_COMB
     } else {
         &DEC_CB
     });
-    let mut positions = Vec::<(u32, DVec2)>::new();
-
-    // Generates combinators up to down, then left to right.
-    for tick_i in 0..ticks_per_group as usize {
-        loop {
-            offset = cb_midpoint * (1 + 2 * grid_pos).as_dvec2(); // Set target midpoint
-            curr_pos = base_pos + offset;
-
-            if offset.x + cb_midpoint.x > f64::from(max_cols_per_grp) {
-                grid_pos.x = 0;
-                grid_pos.y += 1;
-            } else if (hitbox_offsets.iter()).any(|o| !occupied.test(curr_pos + *o)) {
-                grid_pos.x += 1; // Note we test if powerage is needed, don't necessarily request it
-            } else {
-                break;
-            }
-        }
-
-        if tick_i == 0 {
-            first_data_cb_ent_n = Some(curr_ent_n);
-
-            if use_delta_comp {
-                let ent_n = entity_idx_by_tag!(other_ents, "memory comb").expect("No memory comb!");
-                wires.push([curr_ent_n, WIRE_OUT_G, ent_n, WIRE_G]);
-            } else if gray_bits > 0 {
-                let ent_n = entity_idx_by_tag!(other_ents, ">> comb").expect("No >> comb!");
-                wires.push([curr_ent_n, WIRE_OUT_G, ent_n, WIRE_G]);
-            }
-        }
-
-        positions.push((curr_ent_n, curr_pos));
-
-        let x_i = grid_pos.x as usize;
-        let prefer_horiz = false;
-        let mut cands: Vec<usize> = Vec::new();
-
-        if grid_pos.y > 0 && (!prefer_horiz || grid_pos.x == 0) {
-            cands.push(x_i); // Vertical connection
-        }
-        if grid_pos.x > 0
-            && (prefer_horiz || prev_ents_n[x_i].is_none() || prev_prev_ents_n[x_i - 1].is_none())
-        {
-            cands.push(x_i - 1); // Horizontal connection
-        }
-        for i in cands {
-            if let Some(prev) = prev_ents_n[i] {
-                wires.push([prev, WIRE_R, curr_ent_n, WIRE_R]); // Timing signals wire
-                wires.push([prev, WIRE_OUT_G, curr_ent_n, WIRE_OUT_G]); // Lamp data wire
-            }
-        }
-
-        prev_prev_ents_n[x_i] = prev_ents_n[x_i];
-        prev_ents_n[x_i] = Some(curr_ent_n);
-        curr_ent_n += 1;
-        grid_pos.x += 1;
-    }
-    wires.push([
-        in_ent_n,
-        WIRE_R,
-        first_data_cb_ent_n.expect("No first data combinator"),
-        WIRE_R,
-    ]);
 
     GenerateCombinatorsOutput {
         data_cbs: LazyCombinators {
-            curr_i: 0,
+            base_pos,
+            cb_midpoint: if use_const_cbs {
+                const { dvec2(0.5, -0.5) }
+            } else if use_compact_layout {
+                const { dvec2(0.5, -1.0) } // Base position for vertical layout
+            } else {
+                const { dvec2(1.0, -0.5) } // Base position for horizontal layout
+            },
+            connect_ent_n: if use_delta_comp {
+                Some(entity_idx_by_tag!(other_ents, "memory comb").expect("No memory comb!"))
+            } else if gray_bits > 0 {
+                Some(entity_idx_by_tag!(other_ents, ">> comb").expect("No >> comb!"))
+            } else {
+                None
+            },
+            curr_pos: DVec2::ZERO,
             direction: if use_const_cbs {
                 constants::DIR_D
             } else if use_compact_layout {
@@ -348,8 +293,16 @@ pub fn generate_combinators(
             } else {
                 constants::DIR_R
             },
-            positions: positions.into_boxed_slice(),
+            grid_pos: IVec2::ZERO,
+            hitbox_offsets,
+            in_ent_n,
+            offset: DVec2::ZERO,
+            max_cols_per_grp,
+            prev_ents_n: vec![None; max_cols_per_grp as usize].into_boxed_slice(),
+            prev_prev_ents_n: vec![None; max_cols_per_grp as usize].into_boxed_slice(),
             target_name,
+            tick_i: 0usize,
+            wires: Vec::new(),
         },
         other_ents,
         metadata: ObjectGeneratorMetadata { wires, next_ent_n: curr_ent_n },
@@ -359,20 +312,88 @@ pub fn generate_combinators(
 }
 
 pub struct LazyCombinators {
-    curr_i:      usize,
-    direction:   u32,
-    positions:   Box<[(u32, DVec2)]>,
-    target_name: Arc<str>,
+    base_pos:         DVec2,
+    cb_midpoint:      DVec2,
+    connect_ent_n:    Option<u32>,
+    curr_pos:         DVec2,
+    direction:        u32,
+    grid_pos:         IVec2,
+    hitbox_offsets:   Box<[DVec2]>,
+    in_ent_n:         u32,
+    max_cols_per_grp: u32,
+    offset:           DVec2,
+    prev_ents_n:      Box<[Option<u32>]>,
+    prev_prev_ents_n: Box<[Option<u32>]>,
+    target_name:      Arc<str>,
+    tick_i:           usize,
+    wires:            Vec<Wire>,
 }
 impl LazyCombinators {
-    pub fn next(&mut self) -> BlueprintEntity {
-        let (curr_ent_n, pos) = self.positions[self.curr_i];
-        let mut entity = BlueprintEntity::new(curr_ent_n, Arc::clone(&self.target_name), pos);
-        if self.curr_i == 0 {
-            entity = entity.with_tag("first data comb");
-        }
-        self.curr_i += 1;
+    pub fn get_wires(&self) -> &[[u32; 4]] {
+        &self.wires
+    }
 
-        entity.with_direction(self.direction)
+    pub fn next(
+        &mut self,
+        curr_ent_n: u32,
+        occupied: &PowerPoleOccupied,
+    ) -> (u32, BlueprintEntity) {
+        let (mut curr_pos, mut offset): (DVec2, DVec2);
+        let (cb_mid, mut grid_pos) = (self.cb_midpoint, self.grid_pos);
+
+        loop {
+            offset = cb_mid * (1 + 2 * grid_pos).as_dvec2(); // Set target midpoint
+            curr_pos = self.base_pos + offset;
+
+            if offset.x + self.cb_midpoint.x > f64::from(self.max_cols_per_grp) {
+                grid_pos.x = 0;
+                grid_pos.y += 1;
+            } else if (self.hitbox_offsets.iter()).any(|o| !occupied.test(curr_pos + *o)) {
+                grid_pos.x += 1; // Note we test if powerage is needed, don't necessarily request it
+            } else {
+                break;
+            }
+        }
+
+        if self.tick_i == 0 {
+            if let Some(connect_ent_n) = self.connect_ent_n {
+                self.wires.push([curr_ent_n, WIRE_OUT_G, connect_ent_n, WIRE_G]);
+            }
+            self.wires.push([self.in_ent_n, WIRE_R, curr_ent_n, WIRE_R]);
+        }
+
+        let x_i = grid_pos.x as usize;
+        let prefer_horiz = false;
+        let mut cands: Vec<usize> = Vec::new();
+
+        if grid_pos.y > 0 && (!prefer_horiz || grid_pos.x == 0) {
+            cands.push(x_i); // Vertical connection
+        }
+        if grid_pos.x > 0
+            && (prefer_horiz
+                || self.prev_ents_n[x_i].is_none()
+                || self.prev_prev_ents_n[x_i - 1].is_none())
+        {
+            cands.push(x_i - 1); // Horizontal connection
+        }
+        for i in cands {
+            if let Some(prev) = self.prev_ents_n[i] {
+                self.wires.push([prev, WIRE_R, curr_ent_n, WIRE_R]); // Timing signals wire
+                self.wires.push([prev, WIRE_OUT_G, curr_ent_n, WIRE_OUT_G]); // Lamp data wire
+            }
+        }
+        grid_pos.x += 1;
+
+        self.curr_pos = curr_pos;
+        self.grid_pos = grid_pos;
+        self.offset = offset;
+        self.prev_ents_n[x_i] = Some(curr_ent_n);
+        self.prev_prev_ents_n[x_i] = self.prev_ents_n[x_i];
+        self.tick_i += 1;
+
+        let en = BlueprintEntity::new(curr_ent_n, Arc::clone(&self.target_name), self.curr_pos)
+            .with_direction(self.direction);
+
+        (curr_ent_n + 1, en)
     }
 }
