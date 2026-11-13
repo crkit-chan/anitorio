@@ -6,6 +6,7 @@ line-length = 200
 docstring-code-format = true
 preview = true
 quote-style = "double"
+skip-magic-trailing-comma = true
 
 
 [lint]
