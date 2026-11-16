@@ -193,7 +193,6 @@ impl<'a, W: Write> BlueprintEncoder<'a, W> {
             }
             _ => OutputWriter::Json(writer),
         };
-
         Ok(Self { generator, writer })
     }
 
@@ -201,10 +200,8 @@ impl<'a, W: Write> BlueprintEncoder<'a, W> {
         if self.generator.done() {
             return Ok(None);
         }
-
         self.generator.next_chunk(&mut self.writer).await?;
         self.writer.drain_available()?;
-
         Ok(Some(()))
     }
 

@@ -328,10 +328,9 @@ impl<'a> BlueprintGenerator<'a> {
                     // Set description of constant combinator
                     if true
                         && let Some(incrementer) = self.entity_data.ents.first()
-                        && incrementer.has_tag("incrementer".to_owned())
+                        && incrementer.has_tag("incrementer")
                     {
-                        let desc = &self.get_description();
-                        self.entity_data.ents[0] = incrementer.clone().with_description(desc);
+                        self.entity_data.ents[0].player_description = Some(self.get_description());
                     }
 
                     for en in &self.entity_data.ents {
@@ -370,9 +369,7 @@ impl<'a> BlueprintGenerator<'a> {
 
     /// Gets the description to attach to the blueprint.
     fn get_description(&self) -> String {
-        // Note: we use the `var` font for bold text as the word "var" is short and takes up less
-        // space.
-
+        // Note: we use the `var` font for bold text as the word "var" is short and takes up less space.
         let name = self.args.name.clone();
         let info = self.frame_info.as_ref();
         let dim = self.dim;
@@ -572,7 +569,7 @@ impl<'a> BlueprintGenerator<'a> {
         let use_delta_comp = info.use_delta_comp;
         let ticks_per_grp = ticks_per_frame * frames_per_cb;
         let mode = self.args.image_args.mode;
-        let sig_p = self.args.timing_signals.p.clone();
+        let sig_p = Arc::clone(&self.args.timing_signals.p);
         let mut output_data: Vec<BlueprintEntity> = Vec::new();
 
         let mk_cb = |range: UVec2, indices: Box<[(usize, i32)]>| -> ControlBehavior {

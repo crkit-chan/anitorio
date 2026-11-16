@@ -172,8 +172,8 @@ impl BlueprintEntity {
         }
     }
 
-    pub fn has_tag(&self, tag: String) -> bool {
-        self.custom_tag == Some(tag)
+    pub fn has_tag(&self, tag: &str) -> bool {
+        self.custom_tag.as_deref() == Some(tag)
     }
 
     pub const fn with_always_on(mut self, always_on: bool) -> Self {

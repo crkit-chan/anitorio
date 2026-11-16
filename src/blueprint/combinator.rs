@@ -108,27 +108,29 @@ pub fn generate_combinators(
     // Positions for combinators, for different widths.
     // TODO: Don't recalculate this for every group
     let mut best_pos_data: Option<CombinatorPositionData> = None;
-    let mut pos_dict: BTreeMap<String, &BlueprintEntity> = BTreeMap::new();
+    let mut pos_dict: BTreeMap<&str, &BlueprintEntity> = BTreeMap::new();
     let mut base_pos = start_pos;
     let use_compact_layout = max_cols_per_grp < 2;
     let use_delta_comp = args.signal_compression == Some(SignalCompression::Delta);
 
     COMB_POS_DATA.with_borrow(|data| {
+        let mut best_data: Option<&CombinatorPositionData> = None;
         for d in data.as_ref().expect("No combinator positions data") {
             if d.dim.x <= f64::from(max_cols_per_grp)
                 && use_delta_comp == matches!(d.compression, Some(SignalCompression::Delta))
                 && d.grayscale_bits.contains(&args.image_args.grayscale_bits)
                 && d.dim.x > best_pos_data.as_ref().map_or(0.0, |v| v.dim.x)
             {
-                best_pos_data = Some(d.clone());
+                best_data = Some(d);
             }
         }
+        best_pos_data = best_data.cloned();
     });
 
     if let Some(d) = best_pos_data.as_ref() {
         for en in &d.blueprint.blueprint.entities {
             if let Some(tag) = en.player_description.as_ref() {
-                pos_dict.insert(tag.clone(), en);
+                pos_dict.insert(tag, en);
             }
         }
     }
@@ -176,7 +178,7 @@ pub fn generate_combinators(
             conditions: vec![
                 DeciderCombinatorCondition::new(SIG_EACH.clone(), 0, CompStr::Ne)
                     .with_first_signal_networks(CircuitNetworkSelection::GREEN),
-                DeciderCombinatorCondition::new(args.timing_signals.p.clone(), 0, CompStr::Ne)
+                DeciderCombinatorCondition::new(Arc::clone(&args.timing_signals.p), 0, CompStr::Ne)
                     .with_compare_type(CompareTypeString::And)
                     .with_first_signal_networks(CircuitNetworkSelection::RED),
             ],
@@ -193,29 +195,33 @@ pub fn generate_combinators(
     }
 
     if gray_bits > 0 {
-        let mut en = BlueprintEntity::new(curr_ent_n, Arc::clone(&ARI_CB), get_pos(">>"));
-        let desc = "Shifts the input numbers until they are in the range of the current frame.";
-        let ac = ArithmeticCombinatorParameters {
-            first_signal:    Some(SIG_EACH.clone()),
-            second_signal:   Some(args.timing_signals.f.clone()),
-            second_constant: 0,
-            operation:       ArithmeticCombinatorParameterOperation::Shr,
-            output_signal:   Some(SIG_EACH.clone()),
-        };
-        en = en.with_tag(">> comb").with_direction(get_dir(">>"));
-        en = en.with_control_behavior(ControlBehavior::arithmetic(ac));
-        other_ents.push(en.with_description(desc));
+        {
+            let mut en = BlueprintEntity::new(curr_ent_n, Arc::clone(&ARI_CB), get_pos(">>"));
+            let desc = "Shifts the input numbers until they are in the range of the current frame.";
+            let ac = ArithmeticCombinatorParameters {
+                first_signal:    Some(SIG_EACH.clone()),
+                second_signal:   Some(Arc::clone(&args.timing_signals.f)),
+                second_constant: 0,
+                operation:       ArithmeticCombinatorParameterOperation::Shr,
+                output_signal:   Some(SIG_EACH.clone()),
+            };
+            en = en.with_tag(">> comb").with_direction(get_dir(">>"));
+            en = en.with_control_behavior(ControlBehavior::arithmetic(ac));
+            other_ents.push(en.with_description(desc));
+        }
 
         if first_connection_ent_n.is_none() {
-            first_connection_ent_n = Some(curr_ent_n);
+            first_connection_ent_n.replace(curr_ent_n);
         }
         curr_ent_n += 1;
 
-        let mut en = BlueprintEntity::new(curr_ent_n, Arc::clone(&ARI_CB), get_pos("AND"));
-        let ac = arithmetic_conds!(SIG_EACH AND match gray_bits { 1 => 1, 4 => 15, _ => 255 } => SIG_EACH);
-        en = en.with_tag("AND comb").with_direction(get_dir("AND")).with_description("Filters out the bits that are not relevant for the current frame, after bit-shifting. (The value of each signal encodes multiple frames)");
-        other_ents.push(en.with_control_behavior(ControlBehavior::arithmetic(ac)));
-        wires.push(mkwires!(R other_ents; OUT ">> comb" => IN "AND comb"));
+        {
+            let mut en = BlueprintEntity::new(curr_ent_n, Arc::clone(&ARI_CB), get_pos("AND"));
+            let ac = arithmetic_conds!(SIG_EACH AND match gray_bits { 1 => 1, 4 => 15, _ => 255 } => SIG_EACH);
+            en = en.with_tag("AND comb").with_direction(get_dir("AND")).with_description("Filters out the bits that are not relevant for the current frame, after bit-shifting. (The value of each signal encodes multiple frames)");
+            other_ents.push(en.with_control_behavior(ControlBehavior::arithmetic(ac)));
+            wires.push(mkwires!(R other_ents; OUT ">> comb" => IN "AND comb"));
+        }
 
         if use_delta_comp {
             wires.push(mkwires!(G other_ents; OUT "memory comb" => IN ">> comb"));
@@ -223,7 +229,7 @@ pub fn generate_combinators(
         }
         curr_ent_n += 1;
 
-        if gray_bits == 1 || gray_bits == 4 {
+        if matches!(gray_bits, 1 | 4) {
             let mut en = BlueprintEntity::new(curr_ent_n, Arc::clone(&ARI_CB), get_pos("*"));
             let conds =
                 arithmetic_conds!(SIG_EACH * if gray_bits == 1 { 255 } else { 17 } => SIG_EACH);
@@ -237,12 +243,6 @@ pub fn generate_combinators(
     }
 
     let in_ent_n = first_connection_ent_n.unwrap();
-    let out_ent_n = if gray_bits > 0 {
-        (curr_ent_n - 1).max(base_ent_n)
-    } else {
-        entity_idx_by_tag!(other_ents, "memory comb")
-            .unwrap_or_else(|| (curr_ent_n - 1).max(base_ent_n))
-    };
     let cb_midpoint = if use_const_cbs {
         const { dvec2(0.5, -0.5) }
     } else if use_compact_layout {
@@ -251,30 +251,10 @@ pub fn generate_combinators(
         const { dvec2(1.0, -0.5) } // Base position for horizontal layout
     };
 
-    // Calculate the offsets to test for collisions. In Factorio, all collision boxes are
-    // rectangular.
-    let size = cb_midpoint.abs() * 2.0;
-    let x_offsets = (0..size.x as usize).map(|v| v as f64 + 0.5 - size.x / 2.0);
-    let y_offsets = (0..size.y as usize).map(|v| v as f64 + 0.5 - size.y / 2.0);
-    let y_offsets = y_offsets.collect::<Vec<_>>();
-    let hitbox_offsets = x_offsets.flat_map(|x| y_offsets.iter().map(move |&y| dvec2(x, y)));
-    let hitbox_offsets = hitbox_offsets.collect::<Box<_>>();
-    let target_name = Arc::clone(if use_const_cbs {
-        &constants::CONSTANT_COMB
-    } else {
-        &DEC_CB
-    });
-
     GenerateCombinatorsOutput {
         data_cbs: LazyCombinators {
             base_pos,
-            cb_midpoint: if use_const_cbs {
-                const { dvec2(0.5, -0.5) }
-            } else if use_compact_layout {
-                const { dvec2(0.5, -1.0) } // Base position for vertical layout
-            } else {
-                const { dvec2(1.0, -0.5) } // Base position for horizontal layout
-            },
+            cb_midpoint,
             connect_ent_n: if use_delta_comp {
                 Some(entity_idx_by_tag!(other_ents, "memory comb").expect("No memory comb!"))
             } else if gray_bits > 0 {
@@ -290,21 +270,42 @@ pub fn generate_combinators(
             } else {
                 constants::DIR_R
             },
+            first_ent_n: (curr_ent_n == base_ent_n).then_some(curr_ent_n),
             grid_pos: IVec2::ZERO,
-            hitbox_offsets,
+            // Calculate the offsets to test for collisions. In Factorio, all collision boxes are rectangular.
+            hitbox_offsets: {
+                let size = cb_midpoint.abs() * 2.0;
+                let dx = (0..size.x as usize).map(|v| v as f64 + 0.5 - size.x / 2.0);
+                let dy = (0..size.y as usize).map(|v| v as f64 + 0.5 - size.y / 2.0);
+                let dy = dy.collect::<Vec<_>>();
+                let deltas = dx.flat_map(|x| dy.iter().map(move |&y| dvec2(x, y)));
+                deltas.collect::<Box<_>>()
+            },
             in_ent_n,
             offset: DVec2::ZERO,
             max_cols_per_grp,
             prev_ents_n: vec![None; max_cols_per_grp as usize].into_boxed_slice(),
             prev_prev_ents_n: vec![None; max_cols_per_grp as usize].into_boxed_slice(),
-            target_name,
+            target_name: Arc::clone(if use_const_cbs {
+                &constants::CONSTANT_COMB
+            } else {
+                &DEC_CB
+            }),
             tick_i: 0usize,
             wires: Vec::new(),
         },
-        other_ents,
-        metadata: ObjectGeneratorMetadata { wires, next_ent_n: curr_ent_n },
         in_ent_n,
-        out_ent_n,
+        out_ent_n: if gray_bits > 0 {
+            (curr_ent_n - 1).max(base_ent_n)
+        } else {
+            entity_idx_by_tag!(other_ents, "memory comb")
+                .unwrap_or_else(|| (curr_ent_n - 1).max(base_ent_n))
+        },
+        other_ents,
+        metadata: ObjectGeneratorMetadata {
+            wires,
+            next_ent_n: curr_ent_n + u32::from(curr_ent_n == base_ent_n),
+        },
     }
 }
 
@@ -314,6 +315,9 @@ pub struct LazyCombinators {
     connect_ent_n:    Option<u32>,
     curr_pos:         DVec2,
     direction:        u32,
+    /// Forces the first entity number for e.g. when ``LazyCombinators.next()`` returns
+    /// the first entity a wire should connect to
+    first_ent_n:      Option<u32>,
     grid_pos:         IVec2,
     hitbox_offsets:   Box<[DVec2]>,
     in_ent_n:         u32,
@@ -326,15 +330,19 @@ pub struct LazyCombinators {
     wires:            Vec<Wire>,
 }
 impl LazyCombinators {
-    pub fn get_wires(&self) -> &[[u32; 4]] {
+    pub fn get_wires(&self) -> &[Wire] {
         &self.wires
     }
 
     pub fn next(
         &mut self,
-        curr_ent_n: u32,
+        mut curr_ent_n: u32,
         occupied: &PowerPoleOccupied,
     ) -> (u32, BlueprintEntity) {
+        if let Some(ent_n) = self.first_ent_n {
+            curr_ent_n = ent_n; // Forcibly use a custom ent_n for wiring if first
+        }
+
         let (mut curr_pos, mut offset): (DVec2, DVec2);
         let (cb_mid, mut grid_pos) = (self.cb_midpoint, self.grid_pos);
 
@@ -390,6 +398,8 @@ impl LazyCombinators {
 
         let en = BlueprintEntity::new(curr_ent_n, Arc::clone(&self.target_name), self.curr_pos)
             .with_direction(self.direction);
+
+        self.first_ent_n.take(); // Discard ``first_ent_n`
 
         (curr_ent_n + 1, en)
     }

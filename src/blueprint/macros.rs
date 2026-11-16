@@ -72,7 +72,7 @@ macro_rules! mkwires {
 #[macro_export]
 macro_rules! entity_idx_by_tag {
     ($ents:ident, $tag:expr) => {
-        $ents.iter().find(|e| e.has_tag($tag.to_string())).map(|e| e.entity_number)
+        $ents.iter().find(|e| e.has_tag($tag)).map(|e| e.entity_number)
     };
 }
 
