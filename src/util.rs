@@ -45,9 +45,19 @@ pub enum OneOrMany<T> {
     One(T),
     Many(Vec<T>),
 }
-impl<T: Clone> OneOrMany<T> {
+impl<T> OneOrMany<T> {
+    pub fn into_vec(self) -> Vec<T> {
+        match self {
+            Self::One(v) => vec![v],
+            Self::Many(v) => v,
+        }
+    }
+
     /// Returns a new clone of the contained value.
-    pub fn to_vec(&self) -> Vec<T> {
+    pub fn to_vec(&self) -> Vec<T>
+    where
+        T: Clone,
+    {
         match self {
             Self::One(v) => vec![v.clone()],
             Self::Many(v) => v.clone(),

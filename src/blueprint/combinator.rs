@@ -45,9 +45,8 @@ pub fn load_comb_pos_json(data_json_reader: impl std::io::Read) -> Result<(), Js
     }
 
     let parsed: Box<[CombinatorPositionJson]> = serde_json::from_reader(data_json_reader)?;
-
-    let data_iter = parsed.iter().flat_map(|cb| {
-        cb.blueprints.to_vec().into_iter().map(move |entry| {
+    let data_iter = parsed.into_iter().flat_map(|cb| {
+        cb.blueprints.into_vec().into_iter().map(move |entry| {
             let mut blueprint = Blueprint::from_blueprint(entry.blueprint)?;
             let mut bounds = DVec2::INFINITY..DVec2::NEG_INFINITY;
 
@@ -56,10 +55,8 @@ pub fn load_comb_pos_json(data_json_reader: impl std::io::Read) -> Result<(), Js
                 bounds.start = bounds.start.min(en_bounds.start);
                 bounds.end = bounds.end.max(en_bounds.end);
             }
-            let offset = -bounds.start;
-
             for en in &mut blueprint.blueprint.entities {
-                en.position += offset;
+                en.position -= bounds.start;
             }
 
             Ok(CombinatorPositionData {

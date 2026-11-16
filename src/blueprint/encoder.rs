@@ -20,11 +20,10 @@ struct ChannelWriter {
 }
 impl Write for ChannelWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        if buf.is_empty() {
-            return Ok(0);
+        if !buf.is_empty() {
+            futures_lite::future::block_on(self.tx.send(Ok(buf.to_vec())))
+                .map_err(|e| io::Error::new(io::ErrorKind::BrokenPipe, e.to_string()))?;
         }
-        futures_lite::future::block_on(self.tx.send(Ok(buf.to_vec())))
-            .map_err(|e| io::Error::new(io::ErrorKind::BrokenPipe, e.to_string()))?;
         Ok(buf.len())
     }
     fn flush(&mut self) -> io::Result<()> {
@@ -38,7 +37,6 @@ fn compress(
     output: &Sender<Result<Vec<u8>, String>>,
 ) -> io::Result<()> {
     let writer = ChannelWriter { tx: output.clone() };
-
     match mode {
         CompressionMode::Blueprint => {
             let base64 = EncoderWriter::new(writer, &STANDARD);
@@ -46,16 +44,16 @@ fn compress(
             while let Ok(chunk) = futures_lite::future::block_on(input.recv()) {
                 encoder.write_all(&chunk)?;
             }
-            encoder.finish()?.finish()?;
+            encoder.finish()?.finish()
         }
         CompressionMode::RawCompressed => {
             let mut encoder = ZlibEncoder::new(writer, Compression::best());
             while let Ok(chunk) = futures_lite::future::block_on(input.recv()) {
                 encoder.write_all(&chunk)?;
             }
-            encoder.finish()?;
+            encoder.finish()
         }
-    }
+    }?;
     Ok(())
 }
 
@@ -86,20 +84,16 @@ impl Compressor {
 }
 impl Write for Compressor {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        if buf.is_empty() {
-            return Ok(0);
+        if !buf.is_empty() {
+            let input = self
+                .input
+                .as_ref()
+                .ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "Compressor finished"))?;
+            futures_lite::future::block_on(input.send(buf.to_vec()))
+                .map_err(|e| io::Error::new(io::ErrorKind::BrokenPipe, e.to_string()))?;
         }
-
-        let input = self
-            .input
-            .as_ref()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "Compressor finished"))?;
-        futures_lite::future::block_on(input.send(buf.to_vec()))
-            .map_err(|e| io::Error::new(io::ErrorKind::BrokenPipe, e.to_string()))?;
-
         Ok(buf.len())
     }
-
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
     }
@@ -133,6 +127,10 @@ impl<W: Write> io::Write for OutputWriter<'_, W> {
     }
 }
 impl<W: Write> OutputWriter<'_, W> {
+    pub fn new_threaded_compressed(mode: CompressionMode, writer: W) -> Self {
+        Self::ThreadedCompressed { compressor: Compressor::new(mode), writer }
+    }
+
     pub async fn drain(&mut self) -> Result<(), JsError> {
         if let Self::ThreadedCompressed { compressor, writer } = self {
             while let Some(chunk) = compressor.next_chunk().await {
@@ -141,7 +139,6 @@ impl<W: Write> OutputWriter<'_, W> {
         }
         Ok(())
     }
-
     pub fn drain_available(&mut self) -> Result<(), JsError> {
         if let Self::ThreadedCompressed { compressor, writer } = self {
             while let Some(chunk) = compressor.try_next_chunk() {
@@ -150,29 +147,25 @@ impl<W: Write> OutputWriter<'_, W> {
         }
         Ok(())
     }
-
     pub fn finish(self) -> Result<W, JsError> {
-        match self {
-            Self::Blueprint(zlib) => {
-                let mut b64 = zlib.finish()?;
-                b64.finish().map_js_err("Could not finish b64 writer")
-            }
+        Ok(match self {
+            Self::Blueprint(z) => z.finish()?.finish().map_js_err("Could not finish b64 writer")?,
             Self::Json(mut w) => {
                 w.flush()?;
-                Ok(w)
+                w
             }
-            Self::RawCompressed(zlib) => zlib.finish().map_js_err("Could not finish zlib writer"),
+            Self::RawCompressed(z) => z.finish().map_js_err("Could not finish zlib writer")?,
             Self::ThreadedCompressed { compressor, writer } => {
                 drop(compressor);
-                Ok(writer)
+                writer
             }
-        }
+        })
     }
 }
 
 pub struct BlueprintEncoder<'a, W: Write> {
     generator: BlueprintGenerator<'a>,
-    writer:    Option<OutputWriter<'a, W>>,
+    writer:    OutputWriter<'a, W>,
 }
 impl<'a, W: Write> BlueprintEncoder<'a, W> {
     pub fn new(
@@ -184,32 +177,22 @@ impl<'a, W: Write> BlueprintEncoder<'a, W> {
             let prefix = FACTORIO_VERSION_PREFIX.as_bytes();
             writer.write_all(prefix)?;
         }
-        let writer = Some(match args.output_format {
-            OutputFormat::Blueprint => {
-                if args.use_threads {
-                    OutputWriter::ThreadedCompressed {
-                        compressor: Compressor::new(CompressionMode::Blueprint),
-                        writer,
-                    }
-                } else {
-                    OutputWriter::Blueprint(Box::new(ZlibEncoder::new(
-                        EncoderWriter::new(writer, &STANDARD),
-                        Compression::best(),
-                    )))
-                }
+        let writer = match args.output_format {
+            OutputFormat::Blueprint if args.use_threads => {
+                OutputWriter::new_threaded_compressed(CompressionMode::Blueprint, writer)
+            }
+            OutputFormat::Blueprint => OutputWriter::Blueprint(Box::new(ZlibEncoder::new(
+                EncoderWriter::new(writer, &STANDARD),
+                Compression::best(),
+            ))),
+            OutputFormat::RawCompressed if args.use_threads => {
+                OutputWriter::new_threaded_compressed(CompressionMode::RawCompressed, writer)
             }
             OutputFormat::RawCompressed => {
-                if args.use_threads {
-                    OutputWriter::ThreadedCompressed {
-                        compressor: Compressor::new(CompressionMode::RawCompressed),
-                        writer,
-                    }
-                } else {
-                    OutputWriter::RawCompressed(ZlibEncoder::new(writer, Compression::best()))
-                }
+                OutputWriter::RawCompressed(ZlibEncoder::new(writer, Compression::best()))
             }
             _ => OutputWriter::Json(writer),
-        });
+        };
 
         Ok(Self { generator, writer })
     }
@@ -219,9 +202,8 @@ impl<'a, W: Write> BlueprintEncoder<'a, W> {
             return Ok(None);
         }
 
-        let writer = self.writer.as_mut().unwrap();
-        self.generator.next_chunk(writer).await?;
-        writer.drain_available()?;
+        self.generator.next_chunk(&mut self.writer).await?;
+        self.writer.drain_available()?;
 
         Ok(Some(()))
     }
@@ -229,11 +211,10 @@ impl<'a, W: Write> BlueprintEncoder<'a, W> {
     pub async fn finish(mut self) -> Result<W, JsError> {
         report_progress(1.0, "Finishing...");
 
-        let mut writer = self.writer.take().unwrap();
-        if let OutputWriter::ThreadedCompressed { compressor, .. } = &mut writer {
+        if let OutputWriter::ThreadedCompressed { compressor, .. } = &mut self.writer {
             compressor.finish();
         }
-        writer.drain().await?;
-        writer.finish()
+        self.writer.drain().await?;
+        self.writer.finish()
     }
 }

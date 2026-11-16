@@ -47,8 +47,6 @@ impl PowerPoleOccupied {
     ///
     /// # Arguments
     ///
-    /// * `lamp_dim` - Width and height of the lamp grid.
-    /// * `n_frames` - Number of frames (affects vertical coverage).
     /// * `base_ent_n` - Starting entity number.
     /// * `args` - Args for generating the blueprint.
     ///
