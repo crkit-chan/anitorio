@@ -30,6 +30,8 @@ pub struct BlueprintGenerator<'a> {
     /// Copy of the parsed arguments passed in from JS.
     args: &'a BlueprintArgs,
 
+    description: Option<String>,
+
     /// Stores entities, wires, and next entity number.
     entity_data: EntityData,
 
@@ -158,6 +160,7 @@ impl<'a> BlueprintGenerator<'a> {
 
         Ok(Self {
             args,
+            description: None,
             dim,
             entity_data: const {
                 EntityData {
@@ -244,6 +247,9 @@ impl<'a> BlueprintGenerator<'a> {
             // Only sort by name (compressor really likes this)
             SignalSorting::Compression => {
                 signals.sort_by(|a, b| a.type_.cmp(&b.type_).then_with(|| a.name.cmp(&b.name)));
+                signals.sort_by(|a, b| {
+                    a.type_.len().cmp(&b.type_.len()).then_with(|| a.name.len().cmp(&b.name.len()))
+                });
             }
             // Sort by total length of the type + name + quality (actual smallest JSON)
             SignalSorting::Json => signals.sort_by_key(|s| {
@@ -370,8 +376,15 @@ impl<'a> BlueprintGenerator<'a> {
         Ok(())
     }
 
+    pub fn get_description(&mut self) -> String {
+        if self.description.is_none() {
+            self.description = Some(self.generate_description());
+        }
+        self.description.as_ref().unwrap().clone()
+    }
+
     /// Gets the description to attach to the blueprint.
-    fn get_description(&self) -> String {
+    fn generate_description(&self) -> String {
         // Note: we use the `var` font for bold text as the word "var" is short and takes up less space.
         let name = self.args.name.clone();
         let info = self.frame_info.as_ref();
@@ -769,6 +782,10 @@ impl<'a> BlueprintGenerator<'a> {
         for en in &mut output_data {
             self.occupied.request(en.position); // Request powerage for generated combinators
             Self::transform_entity(self.args, en);
+
+            if en.name.as_ref() == CONSTANT_COMB.as_ref() && true {
+                en.player_description = Some(self.get_description());
+            }
         }
         if !output_data.is_empty() {
             write_to(writer, b",")?;
