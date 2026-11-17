@@ -257,9 +257,12 @@ impl<'a> BlueprintGenerator<'a> {
             }),
             _ => {}
         }
+        signals.sort_by_key(|s| s.name.contains("parameter")); // Push "parameter" signals to end
+
         let signals_str = (signals.iter())
             .map(|s| serde_json::value::RawValue::from_string(serde_json::to_string(s).unwrap()))
             .collect::<Result<Arc<_>, _>>()?;
+
         Ok((signals, signals_str))
     }
 
