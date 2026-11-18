@@ -390,6 +390,13 @@ impl CircuitNetworkSelection {
     pub const GREEN: Self = Self { red: false, green: true };
     pub const NONE: Self = Self { red: false, green: false };
     pub const RED: Self = Self { red: true, green: false };
+
+    pub const fn swap(&mut self) {
+        if self.red != self.green {
+            self.red ^= true;
+            self.green ^= true;
+        }
+    }
 }
 
 #[derive(Tsify, Default, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -455,6 +462,10 @@ impl DeciderCombinatorCondition {
         self.first_signal_networks = networks;
         self
     }
+
+    pub const fn swap_networks(&mut self) {
+        self.first_signal_networks.swap();
+    }
 }
 
 #[derive(Tsify, Clone, Serialize, Deserialize)]
@@ -515,8 +526,7 @@ impl DeciderCombinatorOutput {
     }
 
     pub const fn swap_networks(&mut self) {
-        self.networks.red ^= true;
-        self.networks.green ^= true;
+        self.networks.swap();
     }
 }
 
@@ -532,11 +542,8 @@ pub struct DeciderCombinatorParameters {
 }
 impl DeciderCombinatorParameters {
     pub fn swap_networks(&mut self) {
-        (self.outputs.iter_mut()).for_each(DeciderCombinatorOutput::swap_networks);
-        for c in &mut self.conditions {
-            c.first_signal_networks.red ^= true;
-            c.first_signal_networks.green ^= true;
-        }
+        self.outputs.iter_mut().for_each(DeciderCombinatorOutput::swap_networks);
+        self.conditions.iter_mut().for_each(DeciderCombinatorCondition::swap_networks);
     }
 }
 

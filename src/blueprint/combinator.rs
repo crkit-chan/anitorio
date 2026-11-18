@@ -1,5 +1,5 @@
 use super::{power_pole::PowerPoleOccupied, prelude::*};
-use crate::prelude::*;
+use crate::{arithmetic_conds, decider_cond, entity_idx_by_tag, mkwires, prelude::*};
 use glam::{DVec2, IVec2, dvec2};
 use std::{cell::RefCell, collections::BTreeMap, sync::Arc};
 
@@ -50,6 +50,7 @@ pub fn load_comb_pos_json(data_json_reader: impl std::io::Read) -> Result<(), Js
             let mut blueprint = Blueprint::from_blueprint(entry.blueprint)?;
             let mut bounds = DVec2::INFINITY..DVec2::NEG_INFINITY;
 
+            // Extend bounds to fit all entities
             for en in &blueprint.blueprint.entities {
                 let en_bounds = get_bounding_box(en)?;
                 bounds.start = bounds.start.min(en_bounds.start);
@@ -113,6 +114,7 @@ pub fn generate_combinators(
     let use_compact_layout = max_cols_per_grp < 2;
     let use_delta_comp = args.signal_compression == Some(SignalCompression::Delta);
 
+    // Find the most suitable combinator position data
     COMB_POS_DATA.with_borrow(|data| {
         let mut best_data: Option<&CombinatorPositionData> = None;
         for d in data.as_ref().expect("No combinator positions data") {
@@ -160,7 +162,7 @@ pub fn generate_combinators(
     if use_delta_comp {
         let mut en = BlueprintEntity::new(curr_ent_n, Arc::clone(&DEC_CB), get_pos("delay"));
         let cb_output = DeciderCombinatorOutput::new(Arc::clone(&SIG_EACH), None);
-        let cond = DeciderCombinatorCondition::new(SIG_EACH.clone(), 0, CompStr::Ne);
+        let cond = decider_cond!(SIG_EACH, !=, 0);
         let dc = DeciderCombinatorParameters {
             conditions: vec![cond],
             outputs:    vec![cb_output],
@@ -176,9 +178,9 @@ pub fn generate_combinators(
         let cb_output = DeciderCombinatorOutput::new(Arc::clone(&SIG_EACH), None);
         let dc = DeciderCombinatorParameters {
             conditions: vec![
-                DeciderCombinatorCondition::new(SIG_EACH.clone(), 0, CompStr::Ne)
+                decider_cond!(SIG_EACH, !=, 0)
                     .with_first_signal_networks(CircuitNetworkSelection::GREEN),
-                DeciderCombinatorCondition::new(Arc::clone(&args.timing_signals.p), 0, CompStr::Ne)
+                decider_cond!(args.timing_signals.p, !=, 0)
                     .with_compare_type(CompareTypeString::And)
                     .with_first_signal_networks(CircuitNetworkSelection::RED),
             ],
@@ -333,6 +335,8 @@ impl LazyCombinators {
     pub fn get_wires(&self) -> &[Wire] {
         &self.wires
     }
+
+    pub fn next_palette() {}
 
     pub fn next(
         &mut self,

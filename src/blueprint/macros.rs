@@ -5,14 +5,14 @@ macro_rules! arithmetic_conds {
             first_signal:    Some(std::sync::Arc::clone(&$in_sig)),
             second_signal:   None,
             second_constant: $second,
-            operation:       $crate::blueprint::macros::arithmetic_combinator_op!($op),
+            operation:       $crate::blueprint::macros::arithmetic_cond_op!($op),
             output_signal:   Some(std::sync::Arc::clone(&$out_sig)),
         }
     };
 }
 
 #[macro_export]
-macro_rules! arithmetic_combinator_op {
+macro_rules! arithmetic_cond_op {
     (*) => {
         $crate::blueprint::models::ArithmeticCombinatorParameterOperation::Mul
     };
@@ -48,6 +48,39 @@ macro_rules! arithmetic_combinator_op {
     };
 }
 
+#[macro_export]
+macro_rules! decider_cond {
+    ($sig_a:expr, $op:tt, $sig_b:expr) => {
+        $crate::blueprint::models::DeciderCombinatorCondition::new(
+            std::sync::Arc::clone(&$sig_a),
+            $sig_b,
+            $crate::blueprint::macros::decider_cond_op!($op),
+        )
+    };
+}
+
+#[macro_export]
+macro_rules! decider_cond_op {
+    (==) => {
+        $crate::blueprint::models::ComparatorString::Eq
+    };
+    (>) => {
+        $crate::blueprint::models::ComparatorString::Gt
+    };
+    (<) => {
+        $crate::blueprint::models::ComparatorString::Lt
+    };
+    (>=) => {
+        $crate::blueprint::models::ComparatorString::Ge
+    };
+    (<=) => {
+        $crate::blueprint::models::ComparatorString::Le
+    };
+    (!=) => {
+        $crate::blueprint::models::ComparatorString::Ne
+    };
+}
+
 /// High-level utility macro for making wire connections.
 #[macro_export]
 macro_rules! mkwires {
@@ -76,7 +109,5 @@ macro_rules! entity_idx_by_tag {
     };
 }
 
-pub use arithmetic_combinator_op;
-pub use arithmetic_conds;
-pub use entity_idx_by_tag;
-pub use mkwires;
+pub use arithmetic_cond_op;
+pub use decider_cond_op;

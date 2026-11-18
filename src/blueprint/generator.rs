@@ -9,8 +9,8 @@ use super::{
         write_to,
     },
 };
-use crate::util::format_duration;
 use crate::{callbacks::report_lamp_group, prelude::*};
+use crate::{decider_cond, util::format_duration};
 use crate::{image_processing::FrameData, models::RawJsonString};
 use glam::{UVec2, dvec2, uvec2};
 use std::{io, sync::Arc};
@@ -192,13 +192,20 @@ impl<'a> BlueprintGenerator<'a> {
     /// Calculates the required position for the given entity to counteract the rotation of the
     /// image.
     fn transform_entity(args: &BlueprintArgs, en: &mut BlueprintEntity) {
+        if !args.prefer_green_wires
+            && let Some(ControlBehavior::DeciderCombinator { decider_conditions }) =
+                en.control_behavior.as_mut()
+        {
+            decider_conditions.swap_networks();
+        }
+
         let mut pos = en.position;
-        pos = match args.image_args.flip {
-            ImageFlip::X => dvec2(-pos.x, pos.y),
-            ImageFlip::Y => dvec2(pos.x, -pos.y),
-            ImageFlip::Both => dvec2(-pos.x, -pos.y),
-            _ => pos,
-        };
+        match args.image_args.flip {
+            ImageFlip::X => pos.x *= -1.0,
+            ImageFlip::Y => pos.y *= -1.0,
+            ImageFlip::Both => pos *= -1.0,
+            _ => (),
+        }
         pos = match args.image_args.rotate {
             ImageRotate::Deg90 => dvec2(pos.y, -pos.x),
             ImageRotate::Deg180 => dvec2(-pos.x, -pos.y),
@@ -612,17 +619,9 @@ impl<'a> BlueprintGenerator<'a> {
                 ControlBehavior::ConstantCombinator { sections }
             } else {
                 let conditions = vec![
-                    DeciderCombinatorCondition::new(
-                        Arc::clone(&sig_p),
-                        range.x.cast_signed(),
-                        CompStr::Ge,
-                    ),
-                    DeciderCombinatorCondition::new(
-                        Arc::clone(&sig_p),
-                        range.y.cast_signed(),
-                        CompStr::Lt,
-                    )
-                    .with_compare_type(CompareTypeString::And),
+                    decider_cond!(sig_p, >=, range.x.cast_signed()),
+                    decider_cond!(sig_p, <, range.y.cast_signed())
+                        .with_compare_type(CompareTypeString::And),
                 ];
                 let decider_conditions = DeciderCombinatorCustomParameters {
                     conditions,
@@ -804,7 +803,6 @@ impl<'a> BlueprintGenerator<'a> {
     }
 
     fn make_wires(&mut self, writer: &mut impl io::Write) -> Result<(), JsError> {
-        let all_ents = &mut self.entity_data.ents;
         let all_wires = &mut self.entity_data.wires;
 
         if let Some(frame_info) = self.frame_info.as_ref() {
@@ -818,7 +816,7 @@ impl<'a> BlueprintGenerator<'a> {
         // Swap all wires if requested (default uses red wires, so swap all for green).
         // Circuit network filters are already handled.
         if !self.args.prefer_green_wires {
-            invert_wires(all_ents, all_wires);
+            invert_wires(all_wires);
         }
         for (i, wires) in all_wires.chunks(WIRE_ENCODE_CHUNK_SIZE).enumerate() {
             let display_i = (i + 1) * WIRE_ENCODE_CHUNK_SIZE;

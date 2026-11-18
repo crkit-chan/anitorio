@@ -1,5 +1,5 @@
 use super::prelude::*;
-use crate::prelude::*;
+use crate::{arithmetic_conds, decider_cond, prelude::*};
 use std::sync::Arc;
 
 /// Generates timer entities and wires for the blueprint's timing mechanism.
@@ -50,11 +50,7 @@ pub fn generate_timer(
     ents.push(en.with_tag("incrementer"));
 
     let mut en = BlueprintEntity::new(2, Arc::clone(&DEC_CB), TIMER2_POS).with_direction(DIR_R);
-    let condition = DeciderCombinatorCondition::new(
-        Arc::clone(sig_t),
-        i32::try_from(stop).map_js_err("Overflow when converting stop time to i32")?,
-        ComparatorString::Lt,
-    );
+    let condition = decider_cond!(sig_t, <, i32::try_from(stop).map_js_err("Overflow when converting stop time to i32")?);
     let decider_conditions = DeciderCombinatorParameters {
         conditions: vec![condition],
         outputs:    vec![DeciderCombinatorOutput::new(Arc::clone(sig_t), None)],

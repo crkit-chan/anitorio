@@ -13,7 +13,7 @@ pub fn write_json_trimmed_to<T: ?Sized + serde::Serialize>(
     write_to(writer, &json_bytes[1..json_bytes.len() - 1]) // Remove braces
 }
 
-pub fn invert_wires(ents: &mut [BlueprintEntity], wires: &mut [Wire]) {
+pub fn invert_wires(wires: &mut [Wire]) {
     const fn get_swap(wire_id: u32) -> u32 {
         match wire_id {
             1 => 2,
@@ -21,13 +21,6 @@ pub fn invert_wires(ents: &mut [BlueprintEntity], wires: &mut [Wire]) {
             3 => 4,
             4 => 3,
             _ => wire_id,
-        }
-    }
-    for e in ents.iter_mut() {
-        if let Some(ControlBehavior::DeciderCombinator { decider_conditions }) =
-            e.control_behavior.as_mut()
-        {
-            decider_conditions.swap_networks();
         }
     }
     for wire in wires.iter_mut() {
