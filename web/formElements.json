@@ -253,5 +253,10 @@
     "type": "checkbox",
     "tooltip": "If enabled, use a separate thread for running blueprint compression.",
     "splash": "This feature is experimental and may not always work in all environments."
+  },
+  "detailedDescriptions": {
+    "name": "Detailed Descriptions",
+    "type": "checkbox",
+    "tooltip": "Enables / disables all most descriptions on combinators (except for the main constant combinator)."
   }
 }

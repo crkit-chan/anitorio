@@ -13,6 +13,7 @@ use wasm_bindgen::prelude::*;
 )]
 pub struct BlueprintArgs {
     pub custom_dim:              Option<UVec2>,
+    pub detailed_descriptions:   bool,
     pub display_margin_y:        u32,
     pub dry_run:                 bool,
     pub image_args:              ImageArgs,

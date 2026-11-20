@@ -615,14 +615,16 @@ impl<'a> BlueprintGenerator<'a> {
                 let sections = LogisticSections { sections: sections.collect() };
                 ControlBehavior::ConstantCombinator { sections }
             } else {
-                let decider_conditions = DeciderCombinatorCustomParameters {
-                    conditions: boxed_slice![
+                let signal_list = Arc::clone(&self.signals_json);
+                let conditions = match range.y - range.x {
+                    1 => boxed_slice![decider_cond!(sig_p, ==, range.x.cast_signed()),],
+                    _ => boxed_slice![
                         decider_cond!(sig_p, >=, range.x.cast_signed()),
                         decider_cond!(sig_p, <, range.y.cast_signed()).with_compare_type("&"),
                     ],
-                    indices,
-                    signal_list: Arc::clone(&self.signals_json),
                 };
+                let decider_conditions =
+                    DeciderCombinatorCustomParameters { conditions, indices, signal_list };
                 ControlBehavior::DeciderCombinatorCustom { decider_conditions }
             }
         };
@@ -788,9 +790,9 @@ impl<'a> BlueprintGenerator<'a> {
 
         for en in &mut output_data {
             self.occupied.request(en.position); // Request powerage for generated combinators
-            Self::transform_entity(self.args, en);
+            Self::transform_entity(self.args, en); // Translate positions
 
-            if en.name.as_ref() == CONSTANT_COMB.as_ref() && true {
+            if en.name.as_ref() == CONSTANT_COMB.as_ref() {
                 en.player_description = Some(self.get_description());
             }
         }

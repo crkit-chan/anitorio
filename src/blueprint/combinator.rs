@@ -205,13 +205,13 @@ pub fn generate_combinators(
         data_cbs.target_name = DEC_CB.clone();
 
         for (i, &[r, g, b, ..]) in palette.colors.iter().enumerate().skip(1) {
+            in_ent_n.get_or_insert(curr_ent_n); // The input timing wire should connect to the first palette combinator
+            out_ent_n.get_or_insert(curr_ent_n);
+
             // Generate next entity without including wires
             let (next_ent_n, mut en) = data_cbs.next_entity(curr_ent_n, occupied, true);
             let color = rgb_to_int(r, g, b);
             let grid_x = data_cbs.grid_pos.x;
-
-            in_ent_n.get_or_insert(curr_ent_n); // The input timing wire should connect to the first palette combinator
-            out_ent_n.get_or_insert(curr_ent_n);
 
             en.control_behavior = Some(ControlBehavior::decider(DeciderCombinatorParameters {
                 conditions: boxed_slice![
@@ -223,11 +223,15 @@ pub fn generate_combinators(
                     Some(color.cast_signed()),
                 )],
             }));
-            other_ents.push(en.with_description(&[
-                // Note: not i + 1 because we already skip the first colour (black)
-                format!("[font=var]Index combinator {} / {}.", i, palette.colors.len() - 1),
-                format!("\nMaps the index '{i}' to the colour [color=#{color:06X}]●[/color] #{color:06X}.[/font]"),
-            ].join("\n")));
+
+            if args.detailed_descriptions {
+                en = en.with_description(&[
+                    // Note: not i + 1 because we already skip the first colour (black)
+                    format!("[font=var]Index combinator {} / {}.", i, palette.colors.len() - 1),
+                    format!("\nMaps the index '{i}' to the colour [color=#{color:06X}]●[/color] #{color:06X}.[/font]"),
+                ].join("\n"));
+            }
+            other_ents.push(en);
 
             if best_first_connection_cand.as_ref().is_none_or(|c| grid_x <= c.grid_x) {
                 best_first_connection_cand = Some(EntityCand { grid_x, ent_n: curr_ent_n });
@@ -269,7 +273,10 @@ pub fn generate_combinators(
                 conditions: boxed_slice![decider_cond!(SIG_EACH, !=, 0)],
                 outputs:    boxed_slice![DeciderCombinatorOutput::new(&SIG_EACH, None)],
             }));
-            other_ents.push(en.with_description("Utility 1-tick delay combinator."));
+            if args.detailed_descriptions {
+                en = en.with_description("Utility 1-tick delay combinator.");
+            }
+            other_ents.push(en);
 
             if let Some(palette_in_ent_n) = palette_in_ent_n {
                 wires.push([palette_in_ent_n, WIRE_R, curr_ent_n, WIRE_R]);
@@ -292,7 +299,10 @@ pub fn generate_combinators(
                     DeciderCombinatorOutput::new(&SIG_EACH, None).with_networks("g")
                 ],
             }));
-            other_ents.push(en.with_description("Memory cell for delta compression. This holds all the signal values, then allows us to set any signal value by applying a delta. We can reach any number in one tick using overflow logic."));
+            if args.detailed_descriptions {
+                en = en.with_description("Memory cell for delta compression. This holds all the signal values, then allows us to set any signal value by applying a delta. We can reach any number in one tick using overflow logic.");
+            }
+            other_ents.push(en);
             data_cbs.out_ent_n = Some(curr_ent_n); // data combinators should output to the memory combinator
 
             ent_to_palette_ent_n = Some(curr_ent_n);
@@ -308,9 +318,11 @@ pub fn generate_combinators(
         {
             let mut en = BlueprintEntity::new(curr_ent_n, &ARI_CB, get_pos(">>"));
             en = en.with_tag(">> comb").with_direction(get_dir(">>"));
-            en = en.with_description(
-                "Shifts the input numbers until they are in the range of the current frame.",
-            );
+            if args.detailed_descriptions {
+                en = en.with_description(
+                    "Shifts the input numbers until they are in the range of the current frame.",
+                );
+            }
             other_ents.push(en.with_control_behavior(ControlBehavior::arithmetic(
                 ArithmeticCombinatorParameters {
                     first_signal:           Some(Arc::clone(&SIG_EACH)),
@@ -330,7 +342,9 @@ pub fn generate_combinators(
         {
             let mut en = BlueprintEntity::new(curr_ent_n, &ARI_CB, get_pos("AND"));
             en = en.with_tag("AND comb").with_direction(get_dir("AND"));
-            en = en.with_description("Filters out the bits that are not relevant for the current frame, after bit-shifting. (The value of each signal encodes multiple frames)");
+            if args.detailed_descriptions {
+                en = en.with_description("Filters out the bits that are not relevant for the current frame, after bit-shifting. (The value of each signal encodes multiple frames)");
+            }
             other_ents.push(en.with_control_behavior(ControlBehavior::arithmetic(
                 arithmetic_conds!(SIG_EACH AND ((1u32 << bits) - 1).cast_signed() => SIG_EACH),
             )));
