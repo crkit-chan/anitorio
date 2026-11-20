@@ -26,6 +26,16 @@ macro_rules! lazy_arc_const {
     };
 }
 
+#[macro_export]
+macro_rules! boxed_slice {
+    ($elem:expr; $n:expr) => {
+        ::std::vec![$elem; $n].into_boxed_slice()
+    };
+    ($($elem:expr),* $(,)?) => {
+        ::std::vec![$($elem),*].into_boxed_slice()
+    };
+}
+
 pub use lazy_arc_const;
 #[allow(
     clippy::allow_attributes,

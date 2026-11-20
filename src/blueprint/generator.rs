@@ -1,18 +1,19 @@
-use super::{
-    combinator::{GenerateCombinatorsOutput, LazyCombinators, generate_combinators},
-    lamp::generate_lamps,
-    power_pole::PowerPoleOccupied,
-    prelude::*,
-    timer::generate_timer,
-    util::{
-        color_frame_to_outputs, grayscale_frames_to_outputs, invert_wires, write_json_trimmed_to,
-        write_to,
-    },
+use super::combinator::{GenerateCombinatorsOutput, LazyCombinators, generate_combinators};
+use super::lamp::generate_lamps;
+use super::power_pole::PowerPoleOccupied;
+use super::prelude::*;
+use super::timer::generate_timer;
+use super::util::{
+    color_frame_to_outputs, grayscale_frames_to_outputs, palette_frames_to_outputs,
+    write_json_trimmed_to, write_to,
 };
-use crate::{callbacks::report_lamp_group, prelude::*};
+use crate::callbacks::report_lamp_group;
+use crate::image_processing::FrameData;
+use crate::models::RawJsonString;
+use crate::{boxed_slice, prelude::*};
 use crate::{decider_cond, util::format_duration};
-use crate::{image_processing::FrameData, models::RawJsonString};
 use glam::{UVec2, dvec2, uvec2};
+use image::GenericImageView;
 use std::{io, sync::Arc};
 
 /// How many entities to encode in one go. Encoding more entities at once is faster, but uses more
@@ -55,7 +56,7 @@ pub struct BlueprintGenerator<'a> {
     /// Keeps track of positions currently occupied by power poles, and used to request powerage
     /// for generated entities.
     occupied: PowerPoleOccupied,
-    palette:  Option<Vec<[u8; 4]>>,
+    palette:  Option<ColorPalette>,
 
     /// List of unique signals to use for the blueprint.
     signals: Box<[Arc<SignalID>]>,
@@ -74,7 +75,7 @@ struct FrameInfo<'a> {
     n_buf_frames:     u32,
     next_frame:       Option<Arc<image::DynamicImage>>,
     patch_states:     Vec<GroupPatchState>,
-    ticks_per_frame:  u32,
+    ticks_per_frame:  u8,
     use_delta_comp:   bool,
 }
 
@@ -87,14 +88,15 @@ enum BlueprintState {
     Finished,
 }
 
+#[derive(Default)]
 struct EntityData {
     ents:       Vec<BlueprintEntity>,
-    wires:      Vec<Wire>,
+    wires:      Wires,
     next_ent_n: u32,
 }
 struct GroupPatchState {
     chunk_i:   u32, // which *chunk* we’re patching (not frame)
-    frame_buf: Vec<image::DynamicImage>,
+    frame_buf: Vec<image::SubImage<Arc<image::DynamicImage>>>,
     sig_buf:   Vec<Vec<i32>>,
 }
 
@@ -104,7 +106,6 @@ impl<'a> BlueprintGenerator<'a> {
         args: &'a BlueprintArgs,
     ) -> Result<Self, JsError> {
         let (signals, signals_json) = Self::get_signal_data(args)?;
-        let gray_bits = args.image_args.grayscale_bits;
         let comb_comp = args.signal_compression;
         let time_comp_win = match comb_comp {
             Some(SignalCompression::Temporal { window }) => window,
@@ -114,10 +115,12 @@ impl<'a> BlueprintGenerator<'a> {
         let dim: UVec2;
 
         if let Some(mut frame_data) = data {
-            let frames_per_cb = 32u32.checked_div(gray_bits).unwrap_or(1);
-            let n_buf_frames = match time_comp_win {
-                w if w > 0 => (w * args.image_args.target_fps).div_ceil(1000 * frames_per_cb),
-                _ => 1,
+            let frames_per_cb = 32u32.checked_div(args.image_args.bits()).unwrap_or(1);
+            let n_buf_frames = if time_comp_win > 0 {
+                (time_comp_win * u32::from(args.image_args.target_fps))
+                    .div_ceil(1000 * frames_per_cb)
+            } else {
+                1
             };
             dim = frame_data.out_dim();
             frame_info = Some(FrameInfo {
@@ -132,9 +135,7 @@ impl<'a> BlueprintGenerator<'a> {
                 use_delta_comp: comb_comp.is_some_and(|c| c == SignalCompression::Delta),
             });
         } else {
-            let w = args.custom_width.expect("Must have width or frame data.");
-            let h = args.custom_height.expect("Must have height or frame data.");
-            dim = uvec2(w, h);
+            dim = args.custom_dim.expect("Must have custom_dim or frame_data.");
         }
         let use_const_cbs = matches!(args.image_args.mode, Mode::Static { const_cb: true, .. });
         let max_lamp_cols_per_grp = match args.image_args.mode {
@@ -162,13 +163,7 @@ impl<'a> BlueprintGenerator<'a> {
             args,
             description: None,
             dim,
-            entity_data: const {
-                EntityData {
-                    ents:       Vec::new(),
-                    wires:      Vec::new(),
-                    next_ent_n: 0u32,
-                }
-            },
+            entity_data: EntityData::default(),
             frame_info,
             generate_cbs: !matches!(
                 args.image_args.mode,
@@ -184,7 +179,7 @@ impl<'a> BlueprintGenerator<'a> {
         })
     }
 
-    pub fn with_palette(mut self, palette: Option<Vec<[u8; 4]>>) -> Self {
+    pub fn with_palette(mut self, palette: Option<ColorPalette>) -> Self {
         self.palette = palette;
         self
     }
@@ -206,29 +201,28 @@ impl<'a> BlueprintGenerator<'a> {
             ImageFlip::Both => pos *= -1.0,
             _ => (),
         }
-        pos = match args.image_args.rotate {
-            ImageRotate::Deg90 => dvec2(pos.y, -pos.x),
-            ImageRotate::Deg180 => dvec2(-pos.x, -pos.y),
-            ImageRotate::Deg270 => dvec2(-pos.y, pos.x),
-            _ => pos,
-        };
+        match args.image_args.rotate {
+            ImageRotate::Deg90 => pos = dvec2(pos.y, -pos.x),
+            ImageRotate::Deg180 => pos *= -1.0,
+            ImageRotate::Deg270 => pos = dvec2(-pos.y, pos.x),
+            _ => (),
+        }
 
         en.position = pos;
-        en.direction = en.direction.map(|v| {
-            let mut v = i64::from(v);
-            v += match args.image_args.rotate {
-                ImageRotate::Deg90 => 12,
-                ImageRotate::Deg180 => 8,
-                ImageRotate::Deg270 => 4,
-                _ => 0,
-            };
-            v += match args.image_args.flip {
-                ImageFlip::X if (v + 4) % 8 == 0 => 8,
-                ImageFlip::Y if v % 8 == 0 => 8,
-                ImageFlip::Both => 8,
-                _ => 0,
-            };
-            (v % 16) as u32
+        en.direction = en.direction.map(|mut v| {
+            match args.image_args.rotate {
+                ImageRotate::Deg90 => v += 12,
+                ImageRotate::Deg180 => v += 8,
+                ImageRotate::Deg270 => v += 4,
+                _ => (),
+            }
+            match args.image_args.flip {
+                ImageFlip::X if (v + 4) % 8 == 0 => v += 8,
+                ImageFlip::Y if v % 8 == 0 => v += 8,
+                ImageFlip::Both => v += 8,
+                _ => (),
+            }
+            v % 16
         });
     }
 
@@ -295,10 +289,10 @@ impl<'a> BlueprintGenerator<'a> {
                     _ => "#888888",
                 };
                 let name = self.args.name.clone();
-                let name = name.map(|n| format!("{n} ({}x{})", self.dim.x, self.dim.y));
+                let name = format!("{name} ({}x{})", self.dim.x, self.dim.y);
                 let bp = BlueprintInner {
                     description: None,
-                    icons:       Some(vec![Icon {
+                    icons:       Some(boxed_slice![Icon {
                         signal: Arc::from(SignalID {
                             type_:   Arc::from("item"),
                             name:    Arc::clone(&constants::LAMP),
@@ -308,17 +302,15 @@ impl<'a> BlueprintGenerator<'a> {
                     }]),
                     item:        constants::BLUEPRINT.to_string(),
                     label:       Some(match self.args.image_args.mode {
-                        Mode::Full => name.unwrap_or_else(|| "GIF".to_owned()),
+                        Mode::Full => name,
                         Mode::Lamps => format!("{}x{} Lamps", self.dim.x, self.dim.y),
                         Mode::LampGrid => format!("{}x{} Lamp Grid", self.dim.x, self.dim.y),
-                        Mode::Static { .. } => {
-                            self.args.name.clone().unwrap_or_else(|| "Image".to_owned())
-                        }
+                        Mode::Static { .. } => self.args.name.clone(),
                     }),
                     label_color: Color::from_hex(bp_color),
                     version:     constants::BLUEPRINT_VERSION,
-                    entities:    Vec::new(),       // don't serialize
-                    wires:       Some(Vec::new()), // don't serialize
+                    entities:    boxed_slice![],     // don't serialize
+                    wires:       Some(Wires::new()), // don't serialize
                 };
 
                 write_json_trimmed_to(writer, &bp)?;
@@ -401,17 +393,16 @@ impl<'a> BlueprintGenerator<'a> {
         let name = match self.args.image_args.mode {
             Mode::LampGrid => format!("{}x{} Lamp Grid", dim.x, dim.y),
             Mode::Lamps => format!("{}x{} Lamps", dim.x, dim.y),
-            _ => name.unwrap_or_else(|| "Blueprint".to_owned()),
+            _ => name,
         };
 
         output.extend([
-            format!("\n[img=item.small-lamp]  [font=compi]{name}[/font]"),
-            String::new(),
+            format!("[img=item.small-lamp]  [font=compi]{name}[/font]"),
+            "\n".to_owned(),
             format!("\n[font=var]Dimensions[/font]:    {}x{}", dim.x, dim.y),
         ]);
 
         if let Some(fd) = info.map(|x| &x.frame_data) {
-            let duration = format_duration(fd.curr_duration_us().div_ceil(1000));
             let color_format = match self.args.image_args.grayscale_bits {
                 0 => "Full Color (RGB8)",
                 1 => "Black & White",
@@ -419,10 +410,8 @@ impl<'a> BlueprintGenerator<'a> {
                 8 => "8-bit Grayscale (256 colors)",
                 x => &format!("{x}"),
             };
-            let n_frames = fd.curr_total_frames();
-            let fps = self.args.image_args.target_fps;
-
             output.push(format!("\n[font=var]Color Format[/font]:   {color_format}"));
+
             if let Some(compression) = self.args.signal_compression {
                 let compression = match compression {
                     SignalCompression::Delta => "Delta",
@@ -430,10 +419,21 @@ impl<'a> BlueprintGenerator<'a> {
                 };
                 output.push(format!("\n[font=var]Compression[/font]:  {compression}"));
             }
+
+            let fps = self.args.image_args.target_fps;
+            let n_frames = fd.curr_total_frames();
+            let duration = format_duration((1000 * n_frames as u64) / u64::from(fps));
             output.extend([
                 format!("\n[font=var]Duration[/font]:   {duration}"),
-                format!("\n[font=var]Frames[/font]:     {n_frames} ({fps} FPS)"),
+                format!("\n[font=var]Frames[/font]:      {n_frames} ({fps} FPS)"),
             ]);
+        }
+
+        if self.signals.iter().any(|s| s.type_.as_ref() == "space-location") {
+            output.push(
+                "\n\n [space-age][font=scenario-message-dialog]  Uses the Space Age DLC.[/font]"
+                    .to_owned(),
+            );
         }
 
         let footer = "Generated using Anitorio.";
@@ -445,12 +445,13 @@ impl<'a> BlueprintGenerator<'a> {
     fn place_entities(&mut self, writer: &mut impl io::Write) -> Result<(), JsError> {
         let args = self.args;
         let info = &mut self.frame_info;
+        let occupied = &mut self.occupied;
         let signals = &mut self.signals;
         let ent_data = &mut self.entity_data;
 
         if self.generate_cbs && !matches!(args.image_args.mode, Mode::Static { timer: false, .. }) {
             let info = info.as_mut().unwrap();
-            let stop = info.frame_data.total_frames() * info.ticks_per_frame;
+            let stop = info.frame_data.total_frames() * info.ticks_per_frame as usize;
             let (mut ents, wires) =
                 generate_timer(stop, info.ticks_per_frame, info.frames_per_cb, args)?;
             ent_data.next_ent_n = ents.iter().map(|e| e.entity_number).max().unwrap_or(0);
@@ -493,9 +494,8 @@ impl<'a> BlueprintGenerator<'a> {
                 signals,
                 uvec2(grp_width, self.dim.y),
                 matches!(self.args.image_args.mode, Mode::Static { combs: false, .. })
-                    .then(|| Arc::clone(&info.as_ref().unwrap().curr_frame)) // Pass image data to lamp generation
-                    .as_ref(),
-                &mut self.occupied,
+                    .then(|| Arc::clone(&info.as_ref().unwrap().curr_frame)), // Pass image data to lamp generation
+                occupied,
                 ent_data.next_ent_n,
                 dvec2(f64::from(grp_left), 0.0),
                 args,
@@ -516,6 +516,8 @@ impl<'a> BlueprintGenerator<'a> {
                     dvec2(f64::from(grp_left), -f64::from(args.display_margin_y)),
                     self.max_cols_per_grp,
                     args,
+                    occupied,
+                    self.palette.as_ref(),
                 );
                 ent_data.next_ent_n = new_base_ent_n;
                 if group_i == 0 {
@@ -523,7 +525,7 @@ impl<'a> BlueprintGenerator<'a> {
                 }
                 info.group_data_combs.push(data_combs);
                 ent_data.ents.extend(other_ents);
-                ent_data.wires.extend(wires);
+                ent_data.wires.extend(wires.into_iter());
 
                 (cb_in_ent_n, cb_out_ent_n) = (in_ent_n, out_ent_n);
             }
@@ -532,8 +534,7 @@ impl<'a> BlueprintGenerator<'a> {
                 let wires = &mut ent_data.wires;
                 if let Some(top_left_lamp_ent_n) = top_left_lamp_ent_n {
                     if !matches!(args.image_args.mode, Mode::Static { timer: false, .. }) {
-                        // Timing wire
-                        wires.push([top_left_lamp_ent_n, WIRE_R, cb_in_ent_n, WIRE_R]);
+                        wires.push([top_left_lamp_ent_n, WIRE_R, cb_in_ent_n, WIRE_R]); // Timing wire
                     }
 
                     // Data wire
@@ -556,7 +557,7 @@ impl<'a> BlueprintGenerator<'a> {
             prev_top_right_lamp_ent_n = top_right_lamp_ent_n;
 
             for lamp in &grp_lamps {
-                self.occupied.request(lamp.position); // Request powerage for lamps
+                occupied.request(lamp.position); // Request powerage for lamps
             }
             if group_i > 0 {
                 write_to(writer, b",")?;
@@ -567,7 +568,7 @@ impl<'a> BlueprintGenerator<'a> {
             }
 
             write_json_trimmed_to(writer, &grp_lamps)?;
-            ent_data.wires.extend(grp_lamp_wires);
+            ent_data.wires.extend(grp_lamp_wires.into_iter());
         }
 
         ent_data.ents.sort_by_key(|e| e.entity_number);
@@ -590,7 +591,7 @@ impl<'a> BlueprintGenerator<'a> {
         let n_groups = self.n_groups;
         let ticks_per_frame = info.ticks_per_frame;
         let use_delta_comp = info.use_delta_comp;
-        let ticks_per_grp = ticks_per_frame * frames_per_cb;
+        let ticks_per_grp = u32::from(ticks_per_frame) * frames_per_cb;
         let mode = self.args.image_args.mode;
         let sig_p = Arc::clone(&self.args.timing_signals.p);
         let mut output_data: Vec<BlueprintEntity> = Vec::new();
@@ -609,22 +610,16 @@ impl<'a> BlueprintGenerator<'a> {
                             count,
                         }
                     });
-                    LogisticSection {
-                        index:   i as u8 + 1,
-                        filters: filters.collect::<Vec<_>>(),
-                    }
+                    LogisticSection { index: i as u8 + 1, filters: filters.collect() }
                 });
-                let sections = sections.collect::<Vec<_>>();
-                let sections = LogisticSections { sections };
+                let sections = LogisticSections { sections: sections.collect() };
                 ControlBehavior::ConstantCombinator { sections }
             } else {
-                let conditions = vec![
-                    decider_cond!(sig_p, >=, range.x.cast_signed()),
-                    decider_cond!(sig_p, <, range.y.cast_signed())
-                        .with_compare_type(CompareTypeString::And),
-                ];
                 let decider_conditions = DeciderCombinatorCustomParameters {
-                    conditions,
+                    conditions: boxed_slice![
+                        decider_cond!(sig_p, >=, range.x.cast_signed()),
+                        decider_cond!(sig_p, <, range.y.cast_signed()).with_compare_type("&"),
+                    ],
                     indices,
                     signal_list: Arc::clone(&self.signals_json),
                 };
@@ -655,21 +650,34 @@ impl<'a> BlueprintGenerator<'a> {
                 let data_combs = &mut group_data_combs[group_i as usize];
                 let frame_sigs: Vec<i32>;
 
-                let grp_left = group_i * max_cols_per_grp;
-                let grp_right = ((group_i + 1) * max_cols_per_grp).min(self.dim.x);
+                let target_outputs_len: usize;
 
-                let img = frame.crop_imm(grp_left, 0, grp_right - grp_left, self.dim.y);
-                let target_outputs_len = (img.width() * img.height()) as usize;
+                {
+                    let grp_left = group_i * max_cols_per_grp;
+                    let grp_right = ((group_i + 1) * max_cols_per_grp).min(self.dim.x);
+                    let (x, y) = (grp_left, 0);
+                    let (w, h) = (grp_right - grp_left, self.dim.y);
+                    target_outputs_len = (w * h) as usize;
 
-                if gray_bits > 0 {
-                    state.frame_buf.push(img);
-                    if state.frame_buf.len() < frames_per_cb as usize && !is_last_frame {
-                        continue; // wait until we have a full chunk for this group
+                    if self.palette.is_some() || gray_bits > 0 {
+                        state.frame_buf.push(image::SubImage::new(Arc::clone(frame), x, y, w, h));
+                        if state.frame_buf.len() < frames_per_cb as usize && !is_last_frame {
+                            continue; // wait until we have a full chunk for this group
+                        }
+                        let frames = (state.frame_buf.iter())
+                            .map(|f| f.inner().view(x, y, w, h))
+                            .collect::<Box<_>>();
+
+                        frame_sigs = if let Some(palette) = &self.palette {
+                            palette_frames_to_outputs(&frames, palette)?
+                        } else {
+                            grayscale_frames_to_outputs(&frames, gray_bits)?
+                        };
+
+                        state.frame_buf.clear();
+                    } else {
+                        frame_sigs = color_frame_to_outputs(&frame.as_ref().view(x, y, w, h));
                     }
-                    frame_sigs = grayscale_frames_to_outputs(&state.frame_buf, gray_bits)?;
-                    state.frame_buf.clear();
-                } else {
-                    frame_sigs = color_frame_to_outputs(&img);
                 }
 
                 if frame_sigs.len() != target_outputs_len {
@@ -805,31 +813,42 @@ impl<'a> BlueprintGenerator<'a> {
     fn make_wires(&mut self, writer: &mut impl io::Write) -> Result<(), JsError> {
         let all_wires = &mut self.entity_data.wires;
 
-        if let Some(frame_info) = self.frame_info.as_ref() {
-            for cb in &frame_info.group_data_combs {
-                all_wires.extend_from_slice(cb.get_wires());
+        if let Some(frame_info) = self.frame_info.take() {
+            for cb in frame_info.group_data_combs {
+                all_wires.extend(cb.wires.into_iter());
             }
         }
-
-        let n_wires = all_wires.len();
 
         // Swap all wires if requested (default uses red wires, so swap all for green).
         // Circuit network filters are already handled.
         if !self.args.prefer_green_wires {
-            invert_wires(all_wires);
+            all_wires.swap_networks();
         }
-        for (i, wires) in all_wires.chunks(WIRE_ENCODE_CHUNK_SIZE).enumerate() {
-            let display_i = (i + 1) * WIRE_ENCODE_CHUNK_SIZE;
+
+        let n_wires = all_wires.len();
+        let mut is_first_write = true;
+        let mut buf: Vec<[u32; 4]> = Vec::with_capacity(WIRE_ENCODE_CHUNK_SIZE);
+
+        for (i, wires) in std::mem::take(all_wires).into_iter().enumerate() {
+            buf.push(wires);
+            if buf.len() < WIRE_ENCODE_CHUNK_SIZE && i < n_wires - 1 {
+                continue;
+            }
+
             set_progress(
                 0.90,
                 1.00,
-                display_i as f64 / n_wires as f64,
-                &format!("Generating wires ({display_i} / {n_wires})..."),
+                i as f64 / n_wires as f64,
+                &format!("Generating wires ({i} / {n_wires})..."),
             );
-            if i > 0 {
+
+            if !is_first_write {
                 write_to(writer, b",")?;
             }
-            write_json_trimmed_to(writer, wires)?;
+            write_json_trimmed_to(writer, &buf)?;
+
+            buf.clear();
+            is_first_write = false;
         }
         self.state = BlueprintState::Finished;
 

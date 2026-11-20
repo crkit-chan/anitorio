@@ -3,18 +3,9 @@
     "name": "Output Mode",
     "type": "select",
     "options": {
-      "full": {
-        "name": "Everything",
-        "tooltip": "(Recommended) The full package."
-      },
-      "lamps": {
-        "name": "Lamps Only",
-        "tooltip": "Generate only lamps for the blueprint, with the wires. No image data."
-      },
-      "lampGrid": {
-        "name": "Lamp Grid",
-        "tooltip": "Generate a grid of lamps, with each section internally connected by wires."
-      }
+      "full": { "name": "Everything", "tooltip": "(Recommended) The full package." },
+      "lamps": { "name": "Lamps Only", "tooltip": "Generate only lamps for the blueprint, with the wires. No image data." },
+      "lampGrid": { "name": "Lamp Grid", "tooltip": "Generate a grid of lamps, with each section internally connected by wires." }
     },
     "tooltip": "The blueprint parts to include. Changes if the input file is an image or a video.",
     "splash": "Modes other than 'Everything' will not use the input video / image."
@@ -107,22 +98,10 @@
     "name": "Signal Sorting",
     "type": "select",
     "options": {
-      "auto": {
-        "name": "Auto",
-        "tooltip": "Auto-select the best sorting method based on the output format."
-      },
-      "none": {
-        "name": "Compatibility",
-        "tooltip": "Sort signals as they appear in Factorio v2.0.77."
-      },
-      "compression": {
-        "name": "Compression",
-        "tooltip": "Minimize blueprint file size, but JSON may be larger."
-      },
-      "json": {
-        "name": "Best JSON",
-        "tooltip": "Minimizes raw JSON size, but reduces compression value."
-      }
+      "auto": { "name": "Auto", "tooltip": "Auto-select the best sorting method based on the output format." },
+      "none": { "name": "Compatibility", "tooltip": "Sort signals as they appear in Factorio v2.0.77." },
+      "compression": { "name": "Compression", "tooltip": "Minimize blueprint file size, but JSON may be larger." },
+      "json": { "name": "Best JSON", "tooltip": "Minimizes raw JSON size, but reduces compression value." }
     },
     "tooltip": "Affects ordering of lamp and data signals. Does not alter in-game performance.",
     "splash": "Determines how (and if) internal field names are sorted to reduce file size."
@@ -132,34 +111,10 @@
     "type": "select",
     "tooltip": "The color format used to store the image. Greatly affects the blueprint size.",
     "options": [
-      [
-        "0",
-        {
-          "name": "Full Color",
-          "tooltip": "Approximate the original GIF colors to RGB8."
-        }
-      ],
-      [
-        "8",
-        {
-          "name": "8-bit Grayscale",
-          "tooltip": "256 shades of gray; reduces blueprint size up to 4x."
-        }
-      ],
-      [
-        "4",
-        {
-          "name": "4-bit Grayscale",
-          "tooltip": "16 shades of gray; reduces blueprint size up to 8x."
-        }
-      ],
-      [
-        "1",
-        {
-          "name": "Black & White",
-          "tooltip": "2 shades of gray; reduces blueprint size up to 32x."
-        }
-      ]
+      ["0", { "name": "Full Color", "tooltip": "Approximate the original GIF colors to RGB8." }],
+      ["8", { "name": "8-bit Grayscale", "tooltip": "256 shades of gray; reduces blueprint size up to 4x." }],
+      ["4", { "name": "4-bit Grayscale", "tooltip": "16 shades of gray; reduces blueprint size up to 8x." }],
+      ["1", { "name": "Black & White", "tooltip": "2 shades of gray; reduces blueprint size up to 32x." }]
     ],
     "splash": "Using 'Grayscale' can reduce the blueprint size by 75-95%, but removes all color."
   },
@@ -168,30 +123,12 @@
     "type": "select",
     "tooltip": "The filter used to resample the image.",
     "options": {
-      "triangle": {
-        "name": "Triangle",
-        "tooltip": "Fast; CPU friendly; good for most videos."
-      },
-      "catrom": {
-        "name": "Catmull-Rom",
-        "tooltip": "Consistent; good sharpness and stability."
-      },
-      "gaussian": {
-        "name": "Gaussian",
-        "tooltip": "Smooth; very stable; no aliasing, but may blur pixel art."
-      },
-      "lanczos3": {
-        "name": "Lanczos3",
-        "tooltip": "Crisp detail; sharper edges; may shimmer / have aliasing."
-      },
-      "nearest": {
-        "name": "Nearest",
-        "tooltip": "Sharp and 'blocky'. Great for pixel art."
-      },
-      "thumbnail": {
-        "name": "Thumbnail",
-        "tooltip": "Fastest; optimized, but low quality."
-      }
+      "triangle": { "name": "Triangle", "tooltip": "Fast; CPU friendly; good for most videos." },
+      "catrom": { "name": "Catmull-Rom", "tooltip": "Consistent; good sharpness and stability." },
+      "gaussian": { "name": "Gaussian", "tooltip": "Smooth; very stable; no aliasing, but may blur pixel art." },
+      "lanczos3": { "name": "Lanczos3", "tooltip": "Crisp detail; sharper edges; may shimmer / have aliasing." },
+      "nearest": { "name": "Nearest", "tooltip": "Sharp and 'blocky'. Great for pixel art." },
+      "thumbnail": { "name": "Thumbnail", "tooltip": "Fastest; optimized, but low quality." }
     },
     "splash": "Only used to resize the video to the blueprint's dimensions."
   },
@@ -263,10 +200,7 @@
         "name": "Horizontal",
         "tooltip": "Recommended as they take minimal screen space, but will require vertical connections between groups that can be quite visible. Seams can be removed by setting 'Rotation' to '90° clockwise'."
       },
-      "vertical": {
-        "name": "Vertical",
-        "tooltip": "(Not recommended) Connections are much more noticeable."
-      }
+      "vertical": { "name": "Vertical", "tooltip": "(Not recommended) Connections are much more noticeable." }
     },
     "splash": "Horizontal wires are recommended for most GIFs as they are more obscure. If 'Rotation' is set, wires will still connect in the same direction relative to the original GIF's rotation."
   },
@@ -294,10 +228,8 @@
     "name": "Palette Size",
     "type": "number",
     "compact": false,
-    "min": 0,
-    "max": 256,
-    "step": 1,
-    "tooltip": "If set to a non-zero value, only uses this many shades of different colour."
+    "values": [0, 2, 4, 8, 16, 32, 64, 256],
+    "tooltip": "If set to a non-zero value, only uses this many shades of different color."
   },
   "lowMemUsage": {
     "name": "Low RAM Mode",

@@ -37,7 +37,7 @@ impl PowerPoleOccupied {
         Self {
             bounding_box,
             coverage: cov * f64::from(i32::from(args.include_power_poles)),
-            ref_entity: BlueprintEntity::new(0, Arc::from(name), start_pos).with_quality(quality),
+            ref_entity: BlueprintEntity::new(0, &Arc::from(name), start_pos).with_quality(quality),
             requests: BTreeSet::new(),
             start_pos,
         }
@@ -58,17 +58,16 @@ impl PowerPoleOccupied {
         &self,
         base_ent_n: u32,
         args: &BlueprintArgs,
-    ) -> (Vec<BlueprintEntity>, Vec<Wire>, u32) {
+    ) -> (Vec<BlueprintEntity>, Wires, u32) {
         let mut poles: Vec<BlueprintEntity> = Vec::new();
-        let mut wires: Vec<Wire> = Vec::new();
+        let mut wires = Wires::new();
         let mut curr_ent_n = base_ent_n;
         let cov = self.coverage;
 
         if cov == 0.0 {
             return (Vec::new(), wires, base_ent_n);
         }
-
-        let horiz = args.prefer_horizontal_wires ^ matches!(args.image_args.rotate, Deg90 | Deg270);
+        let horiz = args.prefer_horizontal_wires ^ args.image_args.rotate.swaps_dimensions();
         let mut pole_pos_map = BTreeMap::<(i32, i32), u32>::new();
         let n_poles = self.requests.len();
         let mut requests: Vec<_> = self.requests.iter().collect();

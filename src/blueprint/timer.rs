@@ -1,5 +1,5 @@
 use super::prelude::*;
-use crate::{arithmetic_conds, decider_cond, prelude::*};
+use crate::{arithmetic_conds, boxed_slice, decider_cond, prelude::*};
 use std::sync::Arc;
 
 /// Generates timer entities and wires for the blueprint's timing mechanism.
@@ -18,21 +18,20 @@ use std::sync::Arc;
 ///
 /// A tuple with entities, wires, and the timer reset entity (which is not included in entities)
 pub fn generate_timer(
-    stop: u32,
-    ticks_per_frame: u32,
+    stop: usize,
+    ticks_per_frame: u8,
     frames_per_comb: u32,
     args: &BlueprintArgs,
-) -> Result<(Vec<BlueprintEntity>, Vec<Wire>), JsError> {
+) -> Result<(Vec<BlueprintEntity>, Wires), JsError> {
     let (sig_f, sig_p, sig_s, sig_t) = {
         let s = &args.timing_signals;
         (&s.f, &s.p, &s.s, &s.t)
     };
 
-    let gray_bits = args.image_args.grayscale_bits;
+    let bits = args.image_args.bits();
     let mut ents: Vec<BlueprintEntity> = Vec::new();
-    let mut wires: Vec<Wire> = Vec::new();
-    let mut en =
-        BlueprintEntity::new(1, Arc::clone(&CONSTANT_COMB), TIMER1_POS).with_direction(DIR_R);
+    let mut wires = Wires::new();
+    let mut en = BlueprintEntity::new(1, &CONSTANT_COMB, TIMER1_POS).with_direction(DIR_R);
     let sections = LogisticSections {
         sections: vec![LogisticSection {
             index:   1,
@@ -43,24 +42,24 @@ pub fn generate_timer(
                 quality:    sig_t.quality.clone(),
                 comparator: Some(ComparatorString::Eq),
                 count:      1,
-            }],
-        }],
+            }]
+            .into(),
+        }]
+        .into(),
     };
     en = en.with_control_behavior(ControlBehavior::ConstantCombinator { sections });
     ents.push(en.with_tag("incrementer"));
 
-    let mut en = BlueprintEntity::new(2, Arc::clone(&DEC_CB), TIMER2_POS).with_direction(DIR_R);
+    let mut en = BlueprintEntity::new(2, &DEC_CB, TIMER2_POS).with_direction(DIR_R);
     let condition = decider_cond!(sig_t, <, i32::try_from(stop).map_js_err("Overflow when converting stop time to i32")?);
     let decider_conditions = DeciderCombinatorParameters {
-        conditions: vec![condition],
-        outputs:    vec![DeciderCombinatorOutput::new(Arc::clone(sig_t), None)],
+        conditions: boxed_slice![condition],
+        outputs:    boxed_slice![DeciderCombinatorOutput::new(sig_t, None)],
     };
-    en = en
-        .with_tag("base_timer")
-        .with_description("Increments 60 times per second up to the GIF's frame count, then resets to 0. It determines the current frame.");
+    en = en.with_tag("base_timer").with_description("Increments 60 times per second up to the GIF's frame count, then resets to 0. It determines the current frame.");
     ents.push(en.with_control_behavior(ControlBehavior::DeciderCombinator { decider_conditions }));
 
-    let en = BlueprintEntity::new(3, Arc::clone(&ARI_CB), TIMER3_POS).with_direction(DIR_R);
+    let en = BlueprintEntity::new(3, &ARI_CB, TIMER3_POS).with_direction(DIR_R);
     let conds = arithmetic_conds!(sig_t - 1 => sig_p);
     ents.push(en.with_control_behavior(ControlBehavior::arithmetic(conds)));
 
@@ -68,18 +67,17 @@ pub fn generate_timer(
     wires.push([2, WIRE_R, 2, WIRE_OUT_R]);
     wires.push([2, WIRE_R, 3, WIRE_R]);
 
-    if gray_bits > 0 {
-        let en = BlueprintEntity::new(4, Arc::clone(&ARI_CB), TIMER4_POS).with_direction(DIR_L);
-        let conds =
-            arithmetic_conds!(sig_t % (ticks_per_frame * frames_per_comb).cast_signed() => sig_s);
+    if bits > 0 {
+        let en = BlueprintEntity::new(4, &ARI_CB, TIMER4_POS).with_direction(DIR_L);
+        let conds = arithmetic_conds!(sig_t % (u32::from(ticks_per_frame) * frames_per_comb).cast_signed() => sig_s);
         ents.push(en.with_control_behavior(ControlBehavior::arithmetic(conds)));
 
-        let en = BlueprintEntity::new(5, Arc::clone(&ARI_CB), TIMER5_POS).with_direction(DIR_U);
-        let conds = arithmetic_conds!(sig_s / ticks_per_frame.cast_signed() => sig_f);
+        let en = BlueprintEntity::new(5, &ARI_CB, TIMER5_POS).with_direction(DIR_U);
+        let conds = arithmetic_conds!(sig_s / u32::from(ticks_per_frame).cast_signed() => sig_f);
         ents.push(en.with_control_behavior(ControlBehavior::arithmetic(conds)));
 
-        let mut en = BlueprintEntity::new(6, Arc::clone(&ARI_CB), TIMER6_POS).with_direction(DIR_R);
-        let conds = arithmetic_conds!(SIG_EACH * gray_bits.cast_signed() => SIG_EACH);
+        let mut en = BlueprintEntity::new(6, &ARI_CB, TIMER6_POS).with_direction(DIR_R);
+        let conds = arithmetic_conds!(SIG_EACH * bits.cast_signed() => SIG_EACH);
         en = en.with_description("Calculates the bit shift for current frame.");
         ents.push(en.with_control_behavior(ControlBehavior::arithmetic(conds)));
 

@@ -35,7 +35,7 @@ too_many_lines = "allow"
 
 
 [dependencies]
-async-channel = "2"
+async-channel = { version = "2", optional = true }
 base64 = "0.23"
 console_error_panic_hook = { version = "0.1" }
 exoquant = "0.2.0"
@@ -43,31 +43,33 @@ flate2 = { version = "1.1.10", default-features = false, features = [
     "zlib-rs",
     "runtime_detection",
 ] }
-futures-lite = "2"
+futures-lite = { version = "2", optional = true }
 glam = { version = "0.33.8", features = ["serde"] }
 image = { version = "0.24", default-features = false, features = [
     "gif",
     "webp",
 ] }
 js-sys = "0.3.77"
+ordered-float = { version = "5.0", default-features = false, features = [
+    "serde",
+] }
 paste = "1.0"
-rayon = "1.10.0"
+rayon = { version = "1.10.0", optional = true }
 serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = { version = "1.0", features = ["raw_value"] }
 serde-wasm-bindgen = "0.6"
 tsify = { version = "0.5.8", default-features = false, features = ["js"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4.77"
-wasm-bindgen-rayon = "1"
+wasm-bindgen-rayon = { version = "1", optional = true }
 wasm-tracing-allocator = { version = "0.1.1", optional = true }
 web-sys = { version = "0.3", features = ["console"] }
-zenflate = "0.4.1"
 
 
-[profile.profiling]
-inherits = "dev"
-debug = true
-strip = false
+[profile.dev]
+opt-level = 2
+debug = 0
+incremental = true
 
 
 [profile.release]
@@ -83,7 +85,6 @@ wasm-opt = [
     "-O3",
     "-g",
     "--enable-simd",
-    "--enable-threads",
     "--enable-bulk-memory",
     "--enable-nontrapping-float-to-int",
 ]
@@ -97,6 +98,9 @@ wasm-opt = [
     "--enable-nontrapping-float-to-int",
 ]
 
+[package.metadata.wasm-pack.profile.dev]
+wasm-opt = false
+
 
 [package.metadata.wasm-pack.profile.profiling.wasm-bindgen]
 debug-js-glue = true
@@ -106,3 +110,10 @@ demangle-name-section = true
 [features]
 default = []
 profiling = ["dep:wasm-tracing-allocator"]
+release = []
+threads = [
+    "dep:async-channel",
+    "dep:futures-lite",
+    "dep:rayon",
+    "dep:wasm-bindgen-rayon",
+]

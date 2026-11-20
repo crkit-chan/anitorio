@@ -162,7 +162,7 @@ export class DefaultFileDBChunkStore {
       tx.onabort = () => reject(tx.error);
     });
   }
-  async *readAllChunks() {
+  async *readAllChunks(): AsyncGenerator<Uint8Array<ArrayBuffer>> {
     const db = await fileDBPromise;
 
     for (let i = 0; ; i++) {

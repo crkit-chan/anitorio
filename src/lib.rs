@@ -8,6 +8,7 @@ mod image_util;
 mod ioutil;
 mod macros;
 mod models;
+mod palette;
 mod prelude;
 mod ts;
 mod util;
@@ -18,16 +19,23 @@ mod util;
 ///
 /// This function will return an error if rayon fails to initialize.
 #[wasm_bindgen]
-pub async fn init_rayon(n_threads: Option<usize>) -> Result<(), JsError> {
-    use crate::prelude::*;
+#[allow(
+    clippy::allow_attributes,
+    clippy::unused_async,
+    unused,
+    reason = "n_threads only used when threads feature is enabled"
+)]
+pub async fn init_rayon(n_threads: Option<usize>) -> Result<bool, JsError> {
+    #[cfg(feature = "threads")]
+    {
+        use crate::prelude::*;
+        wasm_bindgen_rayon::init_thread_pool(n_threads.unwrap_or(4))
+            .await
+            .map_js_err("Could not init thread pool")?;
 
-    let n_threads = n_threads.unwrap_or(4);
-
-    wasm_bindgen_rayon::init_thread_pool(n_threads)
-        .await
-        .map_js_err("Could not init thread pool")?;
-
-    Ok(())
+        return Ok(true);
+    }
+    Ok(false)
 }
 
 #[wasm_bindgen]
@@ -97,7 +105,6 @@ pub async fn run_blueprint(
 ) -> Result<JsValue, JsError> {
     use crate::prelude::*;
     use blueprint::{encoder::BlueprintEncoder, generator::BlueprintGenerator};
-    use image::GenericImageView;
     use image_processing::{FrameCallback, FrameData, ImageFrameData};
     use ioutil::JsFileReader;
     use js_sys as js;
@@ -115,7 +122,7 @@ pub async fn run_blueprint(
     let should_show_preview = Rc::new(cbs.should_preview);
     let yield_to_js = Rc::new(cbs.js_yield);
 
-    let mut palette: Option<Vec<[u8; 4]>> = None;
+    let mut palette: Option<ColorPalette> = None;
     let mut frame_data: Option<FrameData> = None;
     let promises = Rc::new(const { RefCell::new(Vec::<ts::TsFut>::new()) });
     let promise_q = Rc::clone(&promises);
@@ -159,7 +166,7 @@ pub async fn run_blueprint(
                     rgba.as_ptr() as u32,
                     rgba.len() as u32,
                 );
-                let dimensions = serde_wasm_bindgen::to_value(&img.dimensions())?;
+                let dimensions = serde_wasm_bindgen::to_value(&rgba.dimensions())?;
                 let js_args = js_sys::Object::new();
                 js_args.reflect_set("frame", &frame)?;
                 js_args.reflect_set("dimensions", &dimensions)?;

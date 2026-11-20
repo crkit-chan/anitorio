@@ -123,7 +123,8 @@ async function main() {
       wasm = await init();
 
       try {
-        await init_rayon();
+        const supportsThreads = await init_rayon();
+        postMessage({ supportsThreads: { supportsThreads } });
       } catch (error) {
         console.warn("Rayon unavailable:", error);
       }

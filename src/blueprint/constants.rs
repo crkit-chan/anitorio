@@ -20,9 +20,6 @@ pub const DIR_L: u32 = 12;
 /// Blueprint version constant.
 pub const BLUEPRINT_VERSION: u64 = 562_949_955_518_464;
 
-/// Threshold used for binary grayscale conversion. (out of 256).
-pub const GRAYSCALE_THRESH: u8 = 128;
-
 lazy_arc_const!(pub ARI_CB             : str      = "arithmetic-combinator"                         );
 lazy_arc_const!(pub BLUEPRINT          : str      = "blueprint"                                     );
 lazy_arc_const!(pub CONSTANT_COMB      : str      = "constant-combinator"                           );
