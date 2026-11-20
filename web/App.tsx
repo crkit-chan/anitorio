@@ -800,13 +800,11 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
                 when={isStaticImage()}
                 fallback={<FormElement key="colorFormat" value={FORM_ELEMENTS["colorFormat" as keyof typeof FORM_ELEMENTS]} />}
               >
-                <FormElement
-                  key="colorFormat"
-                  value={(() => {
-                    const target = FORM_ELEMENTS["colorFormat"];
-                    return { ...target, options: Object.entries(target.options).filter(([k]) => !k.includes("color")) };
-                  })()}
-                />
+                {(() => {
+                  const target = FORM_ELEMENTS["colorFormat"];
+                  const value = { ...target, options: Object.entries(target.options).filter(([k]) => !k.includes("color")) };
+                  return <FormElement key="colorFormat" value={value} />;
+                })()}
               </Show>
 
               <div class="mb-4" />
