@@ -19,6 +19,7 @@
   "powerPoleName": "substation",
   "powerPoleQuality": null,
   "resamplingFilter": "catrom",
+  "shadingSpeed": 4,
   "signalCompressionType": "delta",
   "signalSorting": "auto",
   "staticImageMode": "constant",

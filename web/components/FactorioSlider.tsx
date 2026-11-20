@@ -1,4 +1,4 @@
-import { createMemo, createSignal } from "solid-js";
+import { createMemo, createSignal, For, Show } from "solid-js";
 
 export interface FactorioSliderProps {
   compact?: boolean;
@@ -90,13 +90,12 @@ export default function FactorioSlider(props: FactorioSliderProps) {
           );
         })()}
         <div>
-          {hasCustomValues() && values && (
+          <Show when={hasCustomValues() && values}>
             <div class="indicators">
-              {values.map(() => (
-                <div class="indicator" />
-              ))}
+              <For each={values!}>{() => <div class="indicator" />}</For>
             </div>
-          )}
+          </Show>
+
           <input
             disabled={props.disabled}
             type="range"
@@ -122,7 +121,7 @@ export default function FactorioSlider(props: FactorioSliderProps) {
         ref={props.ref}
         disabled={props.disabled}
         type="number"
-        class="bg-gray-100 focus:bg-tan-500 w-20 px-3 py-2 border rounded focus:outline-none focus:ring"
+        class="bg-gray-100 focus:bg-tan-500 w-16 px-3 py-2 border rounded focus:outline-none focus:ring"
         value={currValue()}
         min={values ? values[0] : min}
         max={values ? values[values.length - 1] : max}

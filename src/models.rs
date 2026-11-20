@@ -14,12 +14,12 @@ use wasm_bindgen::prelude::*;
 pub struct BlueprintArgs {
     pub custom_dim:              Option<UVec2>,
     pub detailed_descriptions:   bool,
-    pub display_margin_y:        u32,
+    pub display_margin_y:        u8,
     pub dry_run:                 bool,
     pub image_args:              ImageArgs,
     pub include_power_poles:     bool,
     pub low_mem_usage:           bool,
-    pub max_group_size:          Option<u32>,
+    pub max_group_size:          Option<u8>,
     pub name:                    String,
     pub output_format:           OutputFormat,
     pub power_pole_name:         Option<String>,
@@ -48,6 +48,7 @@ pub struct ImageArgs {
     pub n_frames:           Option<u32>,
     pub resampling_filter:  ResamplingFilter,
     pub rotate:             ImageRotate,
+    pub shading_speed:      u8,
     pub target_fps:         u8,
 }
 impl ImageArgs {

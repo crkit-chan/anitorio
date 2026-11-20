@@ -143,7 +143,7 @@ impl<'a> BlueprintGenerator<'a> {
             // Constant combinators can only hold up to 1000 signals
             _ => ((signals.len() as u32).min(if use_const_cbs { 255_000 } else { u32::MAX })
                 / dim.y)
-                .min(args.max_group_size.unwrap_or(dim.x)),
+                .min(args.max_group_size.map_or(dim.x, u32::from)),
         };
         if max_lamp_cols_per_grp < 1 {
             return Err(JsError::new("Not enough signals for even one lamp column!"));

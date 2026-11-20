@@ -345,6 +345,7 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
         mode,
         powerPoleQuality,
         resamplingFilter,
+        shadingSpeed,
         signalCompressionType,
         signalSorting,
         staticImageMode,
@@ -382,6 +383,7 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
         nFrames: animationInfo()?.frames,
         resamplingFilter: `${formData.resamplingFilter}`,
         rotate: `${formData.imageRotation}` as ImageArgs["rotate"],
+        shadingSpeed: +formData.shadingSpeed,
         targetFps: +formData.targetFps,
       },
       maxGroupSize: +formData.maxGroupSize! || undefined,
@@ -529,6 +531,7 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
         else if (key === "useThreads" && !supportsThreads()) return null;
         else if (["mode", "customWidth", "customHeight"].includes(key)) return null;
         else if (key === "staticImageMode" && !props.isStaticImage) return null;
+        else if (key === "shadingSpeed" && !formData.colorFormat.includes("color")) return null;
         else if (key === "temporalCompressionWindow" && formData.signalCompressionType !== "temporal") return null;
         else if (formData.mode === "full" && (key === "customWidth" || key === "customHeight")) return null;
         else if (formData.mode !== "full") {

@@ -179,6 +179,7 @@ pub async fn run_blueprint(
         }));
 
         let palette_size = args.image_args.color_palette_size;
+        let shading_speed = i32::from(args.image_args.shading_speed);
         let data_len = cbs.get_data_len.call_n(())?.as_f64().unwrap();
         let get_next_frame = (args.image_args.mime_type)
             .starts_with("video/")
@@ -189,7 +190,9 @@ pub async fn run_blueprint(
             let decoder = ImageFrameData::new(reader, &args.image_args, get_next_frame.clone())?;
             let generator = FrameData::new(decoder, &args.image_args, on_frame.clone());
 
-            palette = Some(image_processing::build_palette(generator, palette_size).await?);
+            palette = Some(
+                image_processing::build_palette(generator, palette_size, shading_speed).await?,
+            );
             cbs.reset_generator.call_n(())?.await?;
         }
 

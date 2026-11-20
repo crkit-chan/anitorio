@@ -94,6 +94,16 @@
     "splash": "Must be a factor of '60' to match Factorio's tick-rate.",
     "values": [1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30, 60]
   },
+  "shadingSpeed": {
+    "name": "Shading Speed",
+    "type": "number",
+    "compact": true,
+    "min": 1,
+    "max": 10,
+    "step": 1,
+    "tooltip": "(1-10), faster speeds images of lower quality; lower speeds generate images of higher quality.",
+    "splash": "Only used when 'Color Format' uses Shades. Defaults to '4'."
+  },
   "signalSorting": {
     "name": "Signal Sorting",
     "type": "select",

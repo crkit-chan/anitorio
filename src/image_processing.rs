@@ -339,10 +339,11 @@ impl<'a> ImageFrameData<'a> {
 pub async fn build_palette(
     mut generator: FrameData<'_>,
     size: u32,
+    speed: i32,
 ) -> Result<ColorPalette, JsError> {
     let mut attr = imagequant::Attributes::new();
     attr.set_max_colors(size)?;
-    attr.set_speed(4)?;
+    attr.set_speed(speed)?;
 
     let mut result = {
         let mut hist = imagequant::Histogram::new(&attr);
