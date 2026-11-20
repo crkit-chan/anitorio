@@ -384,7 +384,7 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
         resamplingFilter: `${formData.resamplingFilter}`,
         rotate: `${formData.imageRotation}` as ImageArgs["rotate"],
         shadingSpeed: +formData.shadingSpeed,
-        targetFps: Math.min(+formData.targetFps, animationInfo()?.minimumFps ?? Infinity),
+        targetFps: true ? +formData.targetFps : Math.min(+formData.targetFps, animationInfo()?.minimumFps ?? Infinity),
       },
       maxGroupSize: +formData.maxGroupSize! || undefined,
       name: currFile()!.name,
