@@ -1,4 +1,5 @@
 use super::prelude::*;
+use crate::boxed_slice;
 use crate::constants;
 use crate::prelude::*;
 use std::io;
@@ -26,7 +27,7 @@ pub fn write_json_trimmed_to<T: ?Sized + serde::Serialize>(
 ///
 /// A vector of ``CombinatorOutputs`` for the frame
 #[cfg_attr(target_arch = "wasm32", target_feature(enable = "simd128"))]
-pub fn color_frame_to_outputs(rgba: &image::SubImage<&image::DynamicImage>) -> Vec<i32> {
+pub fn color_frame_to_outputs(rgba: &image::SubImage<&image::DynamicImage>) -> Box<[i32]> {
     #[cfg(target_arch = "wasm32")]
     {
         use core::arch::wasm32::{i8x16_shuffle, i8x16_splat, v128, v128_load, v128_store};
@@ -38,7 +39,9 @@ pub fn color_frame_to_outputs(rgba: &image::SubImage<&image::DynamicImage>) -> V
         let inner = rgba.inner();
         let (x, y) = rgba.offsets();
 
-        let rgba = inner.to_rgba8();
+        let Some(rgba) = inner.as_rgb8() else {
+            panic!("Expected RGBA8")
+        };
         let rgba = rgba.as_raw();
         let stride = inner.width() as usize * 4;
 
@@ -48,14 +51,13 @@ pub fn color_frame_to_outputs(rgba: &image::SubImage<&image::DynamicImage>) -> V
             let start = (y as usize + row) * stride + x as usize * 4;
             let bytes = &rgba[start..start + width * 4];
 
-            let pixel_count = width;
             let mut i = 0;
 
             #[expect(clippy::cast_ptr_alignment, reason = "v128_load uses unaligned memory")]
             #[expect(clippy::ptr_as_ptr, reason = "Cast to pass byte buf to v128_load")]
             unsafe {
                 let output_ptr = output.as_mut_ptr().add(row * width);
-                while i + 4 <= pixel_count {
+                while i + 4 <= width {
                     let input = v128_load(bytes.as_ptr().add(i * 4) as *const v128);
                     let packed =
                         i8x16_shuffle::<2, 1, 0, 16, 6, 5, 4, 16, 10, 9, 8, 16, 14, 13, 12, 16>(
@@ -64,7 +66,7 @@ pub fn color_frame_to_outputs(rgba: &image::SubImage<&image::DynamicImage>) -> V
                     v128_store(output_ptr.add(i) as *mut v128, packed);
                     i += 4;
                 }
-                while i < pixel_count {
+                while i < width {
                     let j = i * 4;
                     *output_ptr.add(i) = (i32::from(bytes[j]) << 16)
                         | (i32::from(bytes[j + 1]) << 8)
@@ -78,15 +80,13 @@ pub fn color_frame_to_outputs(rgba: &image::SubImage<&image::DynamicImage>) -> V
             } // Mark this row's output as initialized.
         }
 
-        output
+        output.into_boxed_slice()
     }
 
     #[cfg(not(target_arch = "wasm32"))] // scalar fallback
     {
-        use crate::image_processing::rgb_to_int;
-        (rgba.as_raw().as_chunks::<4>().0)
-            .iter()
-            .map(|&[r, g, b, ..]| rgb_to_int(r, g, b).cast_signed())
+        (rgba.as_raw().as_chunks::<4>().0.iter())
+            .map(|&[r, g, b, ..]| crate::image_processing::rgb_to_int(r, g, b).cast_signed())
             .collect()
     }
 }
@@ -107,7 +107,7 @@ pub fn color_frame_to_outputs(rgba: &image::SubImage<&image::DynamicImage>) -> V
 pub fn grayscale_frames_to_outputs(
     frames: &[image::SubImage<&image::DynamicImage>],
     grayscale_bits: u8,
-) -> Result<Vec<i32>, JsError> {
+) -> Box<[i32]> {
     use image::GenericImageView;
 
     assert!(!frames.is_empty(), "No frames provided for packing");
@@ -119,7 +119,7 @@ pub fn grayscale_frames_to_outputs(
     );
 
     let num_pixels = (width * height) as usize;
-    let mut outputs = vec![0i32; num_pixels];
+    let mut outputs = boxed_slice![0i32; num_pixels];
 
     let frames = frames.iter().map(|frame| {
         let image::DynamicImage::ImageLuma8(img) = frame.inner() else {
@@ -133,7 +133,7 @@ pub fn grayscale_frames_to_outputs(
             y as usize,
         )
     });
-    let frames = frames.collect::<Vec<_>>();
+    let frames = frames.collect::<Box<_>>();
 
     match grayscale_bits {
         1 => pack_grayscale_frames(&frames, &mut outputs, 1, |pixel| {
@@ -141,10 +141,10 @@ pub fn grayscale_frames_to_outputs(
         }),
         4 => pack_grayscale_frames(&frames, &mut outputs, 4, |pixel| u32::from(pixel >> 4)),
         8 => pack_grayscale_frames(&frames, &mut outputs, 8, u32::from),
-        _ => return Err(JsError::new("Unsupported grayscale bit depth")),
+        _ => panic!("Unsupported grayscale bit depth"),
     }
 
-    Ok(outputs)
+    outputs
 }
 
 fn pack_grayscale_frames<F: Fn(u8) -> u32>(
@@ -185,30 +185,26 @@ fn pack_grayscale_frames<F: Fn(u8) -> u32>(
 pub fn palette_frames_to_outputs(
     frames: &[image::SubImage<&image::DynamicImage>],
     palette: &ColorPalette,
-) -> Result<Vec<i32>, JsError> {
+) -> std::boxed::Box<[i32]> {
     use image::GenericImageView;
 
-    if frames.is_empty() {
-        return Err(JsError::new("No frames provided for packing"));
-    } else if palette.colors.is_empty() {
-        return Err(JsError::new("Palette cannot be empty"));
-    }
+    assert!(!frames.is_empty(), "No frames provided for packing");
+    assert!(!palette.colors.is_empty(), "Palette cannot be empty");
 
     let (width, height) = frames[0].dimensions();
-    if frames.iter().any(|f| f.dimensions() != (width, height)) {
-        return Err(JsError::new("All frames must have identical dimensions"));
-    }
+    assert!(
+        !frames.iter().any(|f| f.dimensions() != (width, height)),
+        "All frames must have identical dimensions"
+    );
 
     let bits_per_index = (usize::BITS - (palette.colors.len() - 1).leading_zeros()).max(1);
-    if bits_per_index > 32 {
-        return Err(JsError::new("Palette is too large to pack into i32"));
-    }
+    assert!(bits_per_index <= 32, "Palette too large to pack into i32");
 
     let frames_per_output = 32 / bits_per_index;
     let num_pixels = (width * height) as usize;
     let num_groups = frames.len().div_ceil(frames_per_output as usize);
 
-    let mut outputs = vec![0i32; num_pixels * num_groups];
+    let mut outputs = boxed_slice![0i32; num_pixels * num_groups];
 
     for (group_idx, frame_group) in frames.chunks(frames_per_output as usize).enumerate() {
         let group_offset = group_idx * num_pixels;
@@ -223,5 +219,5 @@ pub fn palette_frames_to_outputs(
         }
     }
 
-    Ok(outputs)
+    outputs
 }

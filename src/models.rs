@@ -96,6 +96,8 @@ pub enum ImageRotate {
 }
 impl ImageRotate {
     /// Returns `true` if `self` is `90` or `270`, otherwise `false`.
+    #[must_use]
+    #[inline]
     pub const fn swaps_dimensions(self) -> bool {
         matches!(self, Self::Deg90 | Self::Deg270)
     }
@@ -111,9 +113,14 @@ pub enum ImageFlip {
     Both = 3,
 }
 impl ImageFlip {
+    #[must_use]
+    #[inline]
     pub const fn x(self) -> bool {
         matches!(self, Self::X | Self::Both)
     }
+
+    #[must_use]
+    #[inline]
     pub const fn y(self) -> bool {
         matches!(self, Self::Y | Self::Both)
     }
@@ -158,6 +165,8 @@ pub enum ResamplingFilter {
     Triangle,
 }
 impl ResamplingFilter {
+    #[must_use]
+    #[inline]
     pub const fn to_image_filter(self) -> Option<image::imageops::FilterType> {
         match self {
             Self::Catrom => Some(image::imageops::FilterType::CatmullRom),

@@ -26,16 +26,19 @@ mod util;
     reason = "n_threads only used when threads feature is enabled"
 )]
 pub async fn init_rayon(n_threads: Option<usize>) -> Result<bool, JsError> {
+    #[cfg(not(feature = "threads"))]
+    {
+        Ok(false)
+    }
+
     #[cfg(feature = "threads")]
     {
         use crate::prelude::*;
         wasm_bindgen_rayon::init_thread_pool(n_threads.unwrap_or(4))
             .await
             .map_js_err("Could not init thread pool")?;
-
-        return Ok(true);
+        Ok(true)
     }
-    Ok(false)
 }
 
 #[wasm_bindgen]

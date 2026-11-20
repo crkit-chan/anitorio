@@ -97,7 +97,7 @@ struct EntityData {
 struct GroupPatchState {
     chunk_i:   u32, // which *chunk* we’re patching (not frame)
     frame_buf: Vec<image::SubImage<Arc<image::DynamicImage>>>,
-    sig_buf:   Vec<Vec<i32>>,
+    sig_buf:   Vec<Box<[i32]>>,
 }
 
 impl<'a> BlueprintGenerator<'a> {
@@ -145,9 +145,10 @@ impl<'a> BlueprintGenerator<'a> {
                 / dim.y)
                 .min(args.max_group_size.map_or(dim.x, u32::from)),
         };
-        if max_lamp_cols_per_grp < 1 {
-            return Err(JsError::new("Not enough signals for even one lamp column!"));
-        }
+        assert!(
+            max_lamp_cols_per_grp >= 1,
+            "Not enough signals for even one lamp column!"
+        );
         let n_groups = dim.x.div_ceil(max_lamp_cols_per_grp);
 
         if let Some(frame_info) = frame_info.as_mut() {
@@ -648,7 +649,7 @@ impl<'a> BlueprintGenerator<'a> {
                 }
                 let state = &mut info.patch_states[group_i as usize]; // Individual state for each group of lamps
                 let data_combs = &mut group_data_combs[group_i as usize];
-                let frame_sigs: Vec<i32>;
+                let frame_sigs: Box<[i32]>;
 
                 let target_outputs_len: usize;
 
@@ -668,11 +669,10 @@ impl<'a> BlueprintGenerator<'a> {
                             .map(|f| f.inner().view(x, y, w, h))
                             .collect::<Box<_>>();
 
-                        frame_sigs = if let Some(palette) = &self.palette {
-                            palette_frames_to_outputs(&frames, palette)?
-                        } else {
-                            grayscale_frames_to_outputs(&frames, gray_bits)?
-                        };
+                        frame_sigs = self.palette.as_ref().map_or_else(
+                            || grayscale_frames_to_outputs(&frames, gray_bits),
+                            |palette| palette_frames_to_outputs(&frames, palette),
+                        );
 
                         state.frame_buf.clear();
                     } else {
@@ -680,15 +680,14 @@ impl<'a> BlueprintGenerator<'a> {
                     }
                 }
 
-                if frame_sigs.len() != target_outputs_len {
-                    return Err(JsError::new(&format!(
-                        "Outputs length ({}) does not match frame size ({target_outputs_len}).",
-                        frame_sigs.len(),
-                    )));
-                }
+                assert!(
+                    frame_sigs.len() == target_outputs_len,
+                    "Outputs length ({}) does not match frame size ({target_outputs_len}).",
+                    frame_sigs.len(),
+                );
 
                 if use_delta_comp && state.sig_buf.is_empty() {
-                    state.sig_buf.push(vec![0i32; target_outputs_len]); // Populate first frame with zeros
+                    state.sig_buf.push(boxed_slice![0i32; target_outputs_len]); // Populate first frame with zeros
                 } else if !use_delta_comp {
                     state.sig_buf.push(frame_sigs.clone()); // If we're using delta compression we only compare aginst the previous frame
                 }
@@ -699,12 +698,11 @@ impl<'a> BlueprintGenerator<'a> {
 
                 if use_delta_comp {
                     let prev_outputs = &state.sig_buf[0];
-                    let target_outputs = (frame_sigs.iter().enumerate())
-                        .filter_map(|(i, &v)| {
-                            let v = v.wrapping_sub(prev_outputs[i]);
-                            (v != 0).then_some((i, v))
-                        })
-                        .collect::<Box<_>>();
+                    let target_outputs = frame_sigs.iter().enumerate().filter_map(|(i, &v)| {
+                        let v = v.wrapping_sub(prev_outputs[i]);
+                        (v != 0).then_some((i, v))
+                    });
+                    let target_outputs = target_outputs.collect::<Box<_>>();
                     if !target_outputs.is_empty() {
                         let (next_ent_n, en) =
                             data_combs.next(self.entity_data.next_ent_n, &self.occupied);
@@ -756,7 +754,7 @@ impl<'a> BlueprintGenerator<'a> {
                     // Handle unchanged pixels
                     if state.sig_buf.len() > 1
                         && let target_outputs = (changed_mask.iter().enumerate())
-                            .filter_map(|(i, &changed)| (!changed).then_some((i, outputs_0[i])))
+                            .filter_map(|(i, &c)| (!c).then_some((i, outputs_0[i])))
                             .collect::<Box<_>>()
                         && !target_outputs.is_empty()
                     {
@@ -775,8 +773,8 @@ impl<'a> BlueprintGenerator<'a> {
             }
 
             // Note: Always advance before checking if we have max entities
-            if info.next_frame.is_some() {
-                info.curr_frame = info.next_frame.take().unwrap();
+            if let Some(next_frame) = info.next_frame.take() {
+                info.curr_frame = next_frame;
             } else {
                 self.state = BlueprintState::Wires;
                 break;
@@ -790,7 +788,7 @@ impl<'a> BlueprintGenerator<'a> {
             self.occupied.request(en.position); // Request powerage for generated combinators
             Self::transform_entity(self.args, en); // Translate positions
 
-            if en.name.as_ref() == CONSTANT_COMB.as_ref() {
+            if *en.name == **CONSTANT_COMB {
                 en.player_description = Some(self.get_description());
             }
         }

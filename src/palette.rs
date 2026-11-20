@@ -20,10 +20,7 @@ impl ColorPalette {
     pub fn new(colors: &[[u8; 3]]) -> Result<Self, JsError> {
         Ok(Self {
             #[cfg(feature = "kiddo")]
-            tree: Arc::new(
-                ImmutableKdTree::new_from_slice(&colors)
-                    .map_err(|e| JsError::new(&e.to_string()))?,
-            ),
+            tree: Arc::new(ImmutableKdTree::new_from_slice(colors)?),
             colors: colors.into(),
         })
     }

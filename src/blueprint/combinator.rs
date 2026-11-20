@@ -29,19 +29,19 @@ pub fn load_comb_pos_json(data_json_reader: impl std::io::Read) -> Result<(), Js
         blueprint: String,
     }
 
-    fn get_bounding_box(en: &BlueprintEntity) -> Result<core::ops::Range<DVec2>, JsError> {
+    fn get_bounding_box(en: &BlueprintEntity) -> std::ops::Range<DVec2> {
         let offset = DVec2::from(match en.name.as_ref() {
             name if name == &**constants::ARI_CB || name == &**constants::DEC_CB => {
                 match en.direction.unwrap_or(0) {
                     constants::DIR_U | constants::DIR_D => (1.0, 2.0),
                     constants::DIR_L | constants::DIR_R => (2.0, 1.0),
-                    _ => return Err(JsError::new("Unsupported entity direction")),
+                    _ => panic!("Unsupported entity direction"),
                 }
             }
             name if name == &**constants::CONSTANT_COMB => (1.0, 1.0),
-            _ => return Err(JsError::new("Unsupported entity type")),
+            _ => panic!("Unsupported entity type"),
         });
-        Ok((en.position - offset / 2.0)..(en.position + offset / 2.0))
+        (en.position - offset / 2.0)..(en.position + offset / 2.0)
     }
 
     let parsed: Box<[CombinatorPositionJson]> = serde_json::from_reader(data_json_reader)?;
@@ -52,7 +52,7 @@ pub fn load_comb_pos_json(data_json_reader: impl std::io::Read) -> Result<(), Js
 
             // Extend bounds to fit all entities
             for en in &blueprint.blueprint.entities {
-                let en_bounds = get_bounding_box(en)?;
+                let en_bounds = get_bounding_box(en);
                 bounds.start = bounds.start.min(en_bounds.start);
                 bounds.end = bounds.end.max(en_bounds.end);
             }
@@ -111,7 +111,7 @@ pub fn generate_combinators(
     // Positions for combinators, for different widths.
     // TODO: Don't recalculate this for every group
     let mut best_pos_data: Option<CombinatorPositionData> = None;
-    let mut pos_dict: BTreeMap<&str, &BlueprintEntity> = BTreeMap::new();
+    let mut pos_dict = BTreeMap::<&str, &BlueprintEntity>::new();
     let use_compact_layout = max_cols_per_grp < 2;
     let use_delta_comp = args.signal_compression == Some(SignalCompression::Delta);
     let bits = args.image_args.bits();
@@ -240,7 +240,7 @@ pub fn generate_combinators(
             curr_ent_n = next_ent_n;
         }
 
-        // Offset the height by the number of palette combinators
+        // Offset the height by the size of the generated palette combinators
         height -= 2.0 * f64::from(1 + data_cbs.grid_pos.y) * cb_midpoint.y;
 
         data_cbs.reset();
@@ -263,6 +263,21 @@ pub fn generate_combinators(
         pos
     };
     let get_dir = |tag: &str| -> u32 { pos_dict.get(tag).unwrap().direction.unwrap_or(0) };
+
+    {
+        let mut used_tags: Vec<&str> = Vec::new();
+        if use_delta_comp {
+            used_tags.extend(["delay", "memory"]);
+        }
+        if bits > 0 {
+            used_tags.extend([">>", "AND"]);
+            if palette.is_none() && matches!(bits, 1 | 4) {
+                used_tags.push("*");
+            }
+        }
+
+        for tag in used_tags {}
+    }
 
     // Note: signal compression is auto-disabled if generating a static image
     if use_delta_comp {
@@ -358,7 +373,7 @@ pub fn generate_combinators(
             curr_ent_n += 1;
         }
 
-        if matches!(bits, 1 | 4) {
+        if palette.is_none() && matches!(bits, 1 | 4) {
             let mut en = BlueprintEntity::new(curr_ent_n, &ARI_CB, get_pos("*"));
             en = en.with_tag("* comb").with_direction(get_dir("*"));
             other_ents.push(en.with_control_behavior(ControlBehavior::arithmetic(
@@ -367,8 +382,6 @@ pub fn generate_combinators(
             wires.push(mkwires!(G other_ents; OUT "AND comb" => IN "* comb"));
             curr_ent_n += 1;
         }
-
-        // out_ent_n.get_or_insert(curr_ent_n);
     }
 
     if let Some((a, b)) = palette_in_ent_n.zip(ent_to_palette_ent_n) {

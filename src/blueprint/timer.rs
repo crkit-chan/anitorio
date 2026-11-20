@@ -52,7 +52,7 @@ pub fn generate_timer(
     }
     {
         let mut en = BlueprintEntity::new(2, &DEC_CB, TIMER2_POS).with_direction(DIR_R);
-        let condition = decider_cond!(sig_t, <, i32::try_from(stop).map_js_err("Overflow when converting stop time to i32")?);
+        let condition = decider_cond!(sig_t, <, i32::try_from(stop)?);
         let decider_conditions = DeciderCombinatorParameters {
             conditions: boxed_slice![condition],
             outputs:    boxed_slice![DeciderCombinatorOutput::new(sig_t, None)],

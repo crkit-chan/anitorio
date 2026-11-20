@@ -30,6 +30,8 @@ impl FrameData<'_> {
     /// Returns the dimensions of the output frames.
     ///
     /// Note: This is truncated from the raw dimensions instead of rounded.
+    #[must_use]
+    #[inline]
     pub const fn out_dim(&self) -> UVec2 {
         let dim = self.out_dim_raw();
         if self.args.rotate.swaps_dimensions() {
@@ -38,6 +40,9 @@ impl FrameData<'_> {
             dim
         }
     }
+
+    #[must_use]
+    #[inline]
     const fn out_dim_raw(&self) -> UVec2 {
         let (w, h) = crate::image_util::resize_dimensions(
             self.in_dim.x,
@@ -48,9 +53,15 @@ impl FrameData<'_> {
         );
         uvec2(w, h)
     }
+
+    #[must_use]
+    #[inline]
     pub const fn curr_total_frames(&self) -> usize {
         self.in_frame_i
     }
+
+    #[must_use]
+    #[inline]
     pub const fn total_frames(&self) -> usize {
         self.out_n_frames
     }
@@ -172,12 +183,15 @@ impl<'a> FrameData<'a> {
         }
     }
 
+    #[must_use]
     pub fn with_palette(mut self, palette: Option<ColorPalette>) -> Self {
         self.palette = palette;
         self
     }
 
     //// Returns the current output time in microseconds.
+    #[must_use]
+    #[inline]
     fn out_t_us(&self) -> u64 {
         (self.out_frame_i as u64 * 1000 * 1000) / u64::from(self.args.target_fps)
     }
@@ -266,6 +280,8 @@ pub struct ImageFrameData<'a> {
     info:    ImageArgs,
 }
 impl<'a> ImageFrameData<'a> {
+    #[must_use]
+    #[inline]
     pub const fn dimensions(&self) -> UVec2 {
         self.info.dimensions.unwrap()
     }
@@ -306,7 +322,7 @@ impl<'a> ImageFrameData<'a> {
                 let mut data = Vec::new();
                 reader.read_to_end(&mut data)?;
 
-                let frames = image::Frames::new(Box::new(core::iter::once(Ok(image::Frame::new(
+                let frames = image::Frames::new(Box::new(std::iter::once(Ok(image::Frame::new(
                     image::RgbaImage::from_raw(dim.x, dim.y, data)
                         .expect("buffer length must be width * height * 4"),
                 ))))); // bruh
@@ -317,7 +333,7 @@ impl<'a> ImageFrameData<'a> {
                 let get_frame = js_next_frame.expect("JS next frame must be provided for videos");
                 FrameDecoderState::JsFrames(get_frame)
             }
-            t => return Err(JsError::new(&format!("Unsupported image type: '{t}'"))),
+            t => panic!("Unsupported image type: '{t}'"),
         };
 
         let decoder = FrameDecoder::new(state, info.dimensions.unwrap());
@@ -445,6 +461,8 @@ impl<'a> FrameDecoder<'a> {
         FrameDecoder { curr_n_us: 0, dim, finished: false, state }
     }
 
+    #[must_use]
+    #[inline]
     const fn is_finished(&self) -> bool {
         self.finished
     }

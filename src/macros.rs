@@ -2,7 +2,7 @@
 #[allow(
     clippy::allow_attributes,
     unused_macros,
-    reason = "May not be used anywhere"
+    reason = "Might not necessarily be used"
 )]
 #[macro_export]
 macro_rules! log {
@@ -40,6 +40,6 @@ pub use lazy_arc_const;
 #[allow(
     clippy::allow_attributes,
     unused_imports,
-    reason = "May not be used anywhere"
+    reason = "Might not necessarily be used"
 )]
 pub use log;

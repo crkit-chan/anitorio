@@ -300,7 +300,7 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
 
     setIsGenerating(true);
     setBlueprintDownloadStartTime(performance.now());
-    setLampProgressPercentage(0);
+    setLampProgressPercentage(100);
 
     formRefs.submitButton.disabled = true;
 

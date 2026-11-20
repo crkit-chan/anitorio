@@ -165,12 +165,12 @@ impl<W: Write> OutputWriter<'_, W> {
     }
     pub fn finish(self) -> Result<W, JsError> {
         Ok(match self {
-            Self::Blueprint(z) => z.finish()?.finish().map_js_err("Could not finish b64 writer")?,
+            Self::Blueprint(z) => z.finish()?.finish()?,
             Self::Json(mut w) => {
                 w.flush()?;
                 w
             }
-            Self::RawCompressed(z) => z.finish().map_js_err("Could not finish zlib writer")?,
+            Self::RawCompressed(z) => z.finish()?,
             #[cfg(feature = "threads")]
             Self::ThreadedCompressed { compressor, writer } => {
                 drop(compressor);

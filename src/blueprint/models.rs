@@ -94,13 +94,12 @@ pub struct Blueprint {
 }
 impl Blueprint {
     pub fn from_blueprint<T: AsRef<[u8]>>(src: T) -> Result<Self, JsError> {
-        use crate::util::ResultJsExt;
         use base64::{Engine as _, engine::general_purpose::STANDARD};
 
         // Remove the leading "0" prefix
-        let b64 = (STANDARD.decode(&src.as_ref()[1..])).map_js_err("base64 error")?;
+        let b64 = (STANDARD.decode(&src.as_ref()[1..]))?;
         let zlib = flate2::read::ZlibDecoder::new(&*b64);
-        Self::from_json_writer(zlib).map_js_err("Could not parse JSON")
+        Ok(Self::from_json_writer(zlib)?)
     }
     pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
         serde_json::from_str::<Self>(json)
@@ -180,30 +179,42 @@ impl BlueprintEntity {
         }
     }
 
+    #[must_use]
     pub fn has_tag(&self, tag: &str) -> bool {
         self.custom_tag.as_deref() == Some(tag)
     }
 
+    #[must_use]
     pub const fn with_always_on(mut self, always_on: bool) -> Self {
         self.always_on = Some(always_on);
         self
     }
+
+    #[must_use]
     pub const fn with_color(mut self, color: Color) -> Self {
         self.color = Some(color);
         self
     }
+
+    #[must_use]
     pub fn with_control_behavior(mut self, behavior: ControlBehavior) -> Self {
         self.control_behavior = Some(behavior);
         self
     }
+
+    #[must_use]
     pub fn with_description(mut self, desc: &str) -> Self {
         self.player_description = Some(desc.to_owned());
         self
     }
+
+    #[must_use]
     pub const fn with_direction(mut self, direction: u32) -> Self {
         self.direction = Some(direction);
         self
     }
+
+    #[must_use]
     pub fn with_quality(mut self, quality: Option<Arc<str>>) -> Self {
         self.quality = quality;
         self
@@ -212,6 +223,7 @@ impl BlueprintEntity {
     /// Custom tag for the entity. This does not get serialized.
     ///
     /// Utility to help identify entities for wire connections.
+    #[must_use]
     pub fn with_tag(mut self, tag: &str) -> Self {
         self.custom_tag = Some(tag.to_owned());
         self
@@ -291,6 +303,7 @@ impl Color {
         (*a - const { Self::default_a() }).abs() < 0.0001
     }
 
+    #[must_use]
     pub fn from_hex(hex: &str) -> Option<Self> {
         let hex = hex.strip_prefix('#').unwrap_or(hex);
         if hex.len() != 6 {
@@ -375,9 +388,12 @@ pub enum ControlBehavior {
     },
 }
 impl ControlBehavior {
+    #[must_use]
     pub const fn arithmetic(arithmetic_conditions: ArithmeticCombinatorParameters) -> Self {
         Self::ArithmeticCombinator { arithmetic_conditions }
     }
+
+    #[must_use]
     pub const fn decider(decider_conditions: DeciderCombinatorParameters) -> Self {
         Self::DeciderCombinator { decider_conditions }
     }
@@ -432,15 +448,24 @@ impl From<&str> for CircuitNetworkSelection {
     }
 }
 impl CircuitNetworkSelection {
+    #[inline]
+    #[must_use]
     pub const fn red(self) -> bool {
         self.0 & 1 != 0
     }
+
+    #[inline]
+    #[must_use]
     pub const fn green(self) -> bool {
         self.0 & 2 != 0
     }
+
+    #[inline]
     pub const fn set_red(&mut self, value: bool) {
         self.0 = (self.0 & !1) | (value as u8);
     }
+
+    #[inline]
     pub const fn set_green(&mut self, value: bool) {
         self.0 = (self.0 & !2) | ((value as u8) << 1);
     }
@@ -450,6 +475,7 @@ impl CircuitNetworkSelection {
     pub const NONE: Self = Self(0);
     pub const RED: Self = Self(1 << 0);
 
+    #[inline]
     pub const fn swap(&mut self) {
         if self.0 & 1 != self.0 & 2 {
             self.0 ^= Self::BOTH.0;
@@ -516,10 +542,13 @@ impl DeciderCombinatorCondition {
         }
     }
 
+    #[must_use]
     pub fn with_compare_type(mut self, compare_type: impl Into<CompareTypeString>) -> Self {
         self.compare_type = compare_type.into();
         self
     }
+
+    #[must_use]
     pub fn with_first_signal_networks(
         mut self,
         networks: impl Into<CircuitNetworkSelection>,
@@ -528,6 +557,7 @@ impl DeciderCombinatorCondition {
         self
     }
 
+    #[inline]
     pub const fn swap_networks(&mut self) {
         self.first_signal_networks.swap();
     }
@@ -585,11 +615,13 @@ impl DeciderCombinatorOutput {
         *copy_count_from_input == const { Self::default_copy_count_from_input() }
     }
 
+    #[must_use]
     pub fn with_networks(mut self, networks: impl Into<CircuitNetworkSelection>) -> Self {
         self.networks = networks.into();
         self
     }
 
+    #[inline]
     pub const fn swap_networks(&mut self) {
         self.networks.swap();
     }
@@ -748,11 +780,28 @@ impl WireConnectorId {
     pub const WIRE_OUT_G: Self = Self(4);
     pub const WIRE_C: Self = Self(5);
 
+    #[must_use]
+    #[inline]
     pub const fn pack(a: u8, b: u8) -> u8 {
         debug_assert!(a >= 1 && a <= 9);
         debug_assert!(b >= 1 && b <= 9);
         (a << 4) | b
     }
+
+    #[must_use]
+    #[inline]
+    const fn swap_raw(wire_id: u8) -> u8 {
+        match wire_id {
+            1 => 2,
+            2 => 1,
+            3 => 4,
+            4 => 3,
+            _ => wire_id,
+        }
+    }
+
+    #[must_use]
+    #[inline]
     pub const fn unpack(value: u8) -> (u8, u8) {
         (value >> 4, value & 0x0F)
     }
@@ -760,8 +809,9 @@ impl WireConnectorId {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Wires {
-    entity_ids: Vec<[u32; 2]>,
-    wire_ids:   Vec<u8>,
+    entity_ids:  Vec<[u32; 2]>,
+    should_swap: bool, // We use a flag to determine if we should swap the wires when serializing / converting to iterator
+    wire_ids:    Vec<u8>,
 }
 impl Wires {
     pub fn new() -> Self {
@@ -778,30 +828,24 @@ impl Wires {
         self.entity_ids.push([wire[0], wire[2]]);
         self.wire_ids.push(WireConnectorId::pack(wire[1] as u8, wire[3] as u8));
     }
+
+    #[inline]
     pub fn len(&self) -> usize {
         debug_assert!(self.entity_ids.len() == self.wire_ids.len());
         self.wire_ids.len()
     }
 
-    pub fn swap_networks(&mut self) {
-        #[inline]
-        const fn swap(wire_id: u8) -> u8 {
-            match wire_id {
-                1 => 2,
-                2 => 1,
-                3 => 4,
-                4 => 3,
-                _ => wire_id,
-            }
-        }
-        for wire in &mut self.wire_ids {
-            let (w1, w2) = WireConnectorId::unpack(*wire);
-            *wire = WireConnectorId::pack(swap(w1), swap(w2));
-        }
+    pub const fn swap_networks(&mut self) {
+        self.should_swap ^= true;
     }
 
-    pub const fn unpack_item((ents, wires): ([u32; 2], u8)) -> [u32; 4] {
-        let (w1, w2) = WireConnectorId::unpack(wires);
+    #[inline]
+    #[must_use]
+    pub const fn unpack_item((ents, wires): ([u32; 2], u8), invert: bool) -> [u32; 4] {
+        let (mut w1, mut w2) = WireConnectorId::unpack(wires);
+        if invert {
+            (w1, w2) = (WireConnectorId::swap_raw(w1), WireConnectorId::swap_raw(w2));
+        }
         [ents[0], w1 as u32, ents[1], w2 as u32]
     }
 }
@@ -813,14 +857,19 @@ impl IntoIterator for Wires {
     >;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.entity_ids.into_iter().zip(self.wire_ids).map(Self::unpack_item)
+        let iter = self.entity_ids.into_iter().zip(self.wire_ids);
+        if self.should_swap {
+            iter.map(|v| Self::unpack_item(v, true))
+        } else {
+            iter.map(|v| Self::unpack_item(v, false))
+        }
     }
 }
 impl Serialize for Wires {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let mut seq = serializer.serialize_seq(Some(self.entity_ids.len()))?;
         for entry in self.entity_ids.iter().copied().zip(self.wire_ids.iter().copied()) {
-            seq.serialize_element(&Self::unpack_item(entry))?;
+            seq.serialize_element(&Self::unpack_item(entry, self.should_swap))?;
         }
         seq.end()
     }

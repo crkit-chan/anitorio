@@ -1,5 +1,6 @@
 use wasm_bindgen::prelude::*;
 
+#[must_use]
 pub fn format_duration<T: Into<u128>>(ms: T) -> String {
     let ms = ms.into();
     let total_seconds = ms / 1000;
@@ -16,16 +17,20 @@ pub fn format_duration<T: Into<u128>>(ms: T) -> String {
 }
 
 /// Checks if the value is the default value for the type.
+#[must_use]
 pub fn is_default<T: Default + PartialEq>(value: &T) -> bool {
     value == &T::default()
 }
 
 /// Checks if an Option is None or the default value for the type.
+#[must_use]
 #[expect(clippy::ref_option, reason = "Use with serde")]
 pub fn is_none_or_default<T: Default + PartialEq>(value: &Option<T>) -> bool {
     value.as_ref().is_none_or(|v| v == &T::default())
 }
 
+#[must_use]
+#[inline]
 pub fn now_ms() -> f64 {
     js_sys::Date::now()
 }
