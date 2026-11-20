@@ -340,38 +340,45 @@ pub async fn build_palette(
     mut generator: FrameData<'_>,
     size: u32,
 ) -> Result<ColorPalette, JsError> {
-    let mut hist = exoquant::Histogram::new();
+    let mut attr = imagequant::Attributes::new();
+    attr.set_max_colors(size)?;
+    attr.set_speed(4)?;
 
-    while let Some(frame) = generator.next().await? {
-        match Arc::unwrap_or_clone(frame) {
-            image::DynamicImage::ImageRgba8(rgba) => {
-                hist.extend(
-                    (rgba.as_raw().as_chunks::<4>().0.iter())
-                        .map(|&[r, g, b, ..]| exoquant::Color::new(r, g, b, 255)),
-                );
-            }
-            image::DynamicImage::ImageLuma8(luma) => {
-                hist.extend(luma.as_raw().iter().map(|&l| exoquant::Color::new(l, l, l, 255)));
-            }
-            _ => unreachable!("Expected RGBA8 or LumaA8"),
+    let mut result = {
+        let mut hist = imagequant::Histogram::new(&attr);
+        while let Some(frame) = generator.next().await? {
+            let (w, h) = (frame.width() as usize, frame.height() as usize);
+            let mut qimg = match Arc::unwrap_or_clone(frame) {
+                image::DynamicImage::ImageRgba8(rgba) => {
+                    attr.new_image(bytemuck::cast_slice(&rgba.into_raw()), w, h, 0.0)?
+                }
+                image::DynamicImage::ImageLuma8(luma) => unsafe {
+                    let pixels = luma.into_raw();
+                    let f = move |row: &mut [std::mem::MaybeUninit<imagequant::RGBA>], y: usize| {
+                        let start = y * w;
+                        for (x, pixel) in row.iter_mut().enumerate() {
+                            let l = pixels[start + x];
+                            pixel.write(imagequant::RGBA::new(l, l, l, 255));
+                        }
+                    };
+                    imagequant::Image::new_fn(&attr, f, w, h, 0.0)?
+                },
+                _ => unreachable!("Expected RGBA8 or LumaA8"),
+            };
+            hist.add_image(&attr, &mut qimg)?;
         }
+        hist.quantize(&attr)?
+    };
+    let mut colors = result.palette_vec().into_iter().map(|c| [c.r, c.g, c.b]).collect::<Box<_>>();
+
+    if let Some(darkest) = (0..colors.len()).min_by_key(|&i| {
+        let c = colors[i];
+        c[0].saturating_add(c[1]).saturating_add(c[2])
+    }) {
+        colors.swap(0, darkest);
     }
 
-    let mut palette = exoquant::generate_palette(
-        &hist,
-        &exoquant::SimpleColorSpace::default(),
-        &exoquant::optimizer::KMeans,
-        size as usize,
-    );
-    let darkest = (0..palette.len()).min_by_key(|&i| {
-        let c = palette[i];
-        c.r.saturating_add(c.g).saturating_add(c.b)
-    });
-
-    palette.swap(0, darkest.unwrap());
-    palette[0] = exoquant::Color::new(0, 0, 0, 0);
-
-    ColorPalette::new(palette.into_iter().map(|v| [v.r, v.g, v.b]).collect())
+    ColorPalette::new(&colors)
 }
 
 /// Finds the palette entry closest to a color.9

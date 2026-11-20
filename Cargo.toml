@@ -37,8 +37,8 @@ too_many_lines = "allow"
 [dependencies]
 async-channel = { version = "2", optional = true }
 base64 = "0.23"
+bytemuck = "1.25.2"
 console_error_panic_hook = { version = "0.1" }
-exoquant = "0.2.0"
 flate2 = { version = "1.1.10", default-features = false, features = [
     "zlib-rs",
     "runtime_detection",
@@ -49,6 +49,7 @@ image = { version = "0.24", default-features = false, features = [
     "gif",
     "webp",
 ] }
+imagequant = { version = "4.4.1", default-features = false }
 js-sys = "0.3.77"
 kiddo = { version = "6.3.1", optional = true }
 ordered-float = { version = "5.0", default-features = false, features = [
@@ -117,4 +118,5 @@ threads = [
     "dep:futures-lite",
     "dep:rayon",
     "dep:wasm-bindgen-rayon",
+    "imagequant/threads",
 ]

@@ -17,7 +17,7 @@ impl ColorPalette {
         clippy::unnecessary_wraps,
         reason = "Result<> used for 'kiddo'"
     )]
-    pub fn new(colors: Vec<[u8; 3]>) -> Result<Self, JsError> {
+    pub fn new(colors: &[[u8; 3]]) -> Result<Self, JsError> {
         Ok(Self {
             #[cfg(feature = "kiddo")]
             tree: Arc::new(
