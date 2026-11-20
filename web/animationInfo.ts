@@ -15,24 +15,53 @@ export async function getRawImageData(file: File): Promise<ImageData> {
 }
 
 export class AnimationInfo {
-  /** Number of frames in the animation. */
-  frames: number;
+  frameTimesDivisibleBy60?: boolean;
+  maxFrameTimeDiscrepancyUs?: number;
+  maxCumulativeDiscrepancyUs?: number;
+  minimumFps?: number;
 
-  /** Duration of the animation in milliseconds. */
-  duration: number;
+  constructor(
+    public frames: number,
+    public duration: number,
+    public width: number,
+    public height: number,
+    public frameDurations?: number[],
+  ) {
+    if (!frameDurations) return;
 
-  /** Width of the animation in pixels. */
-  width: number;
+    const FRAME_TICKS = 1_000_000;
 
-  /** Height of the animation in pixels. */
-  height: number;
+    let cumulativeUs = 0;
+    let maxFrameDiscrepancy = 0;
+    let maxCumulativeDiscrepancy = 0;
+    let divisible = true;
+    let durationGcd = 0;
 
-  constructor(frames: number, duration: number, width: number, height: number) {
-    this.frames = frames;
-    this.duration = duration; // milliseconds
-    this.width = width;
-    this.height = height;
+    for (const durationMs of frameDurations) {
+      const durationUs = durationMs * 1000;
+
+      // Error from the nearest 60 FPS timestamp, in microseconds.
+      const discrepancy = Math.abs(durationUs * 60 - Math.round((durationUs * 60) / FRAME_TICKS) * FRAME_TICKS) / 60;
+
+      if (discrepancy !== 0) divisible = false;
+      maxFrameDiscrepancy = Math.max(maxFrameDiscrepancy, discrepancy);
+
+      cumulativeUs += durationUs;
+
+      const cumulativeDiscrepancy = Math.abs(cumulativeUs * 60 - Math.round((cumulativeUs * 60) / FRAME_TICKS) * FRAME_TICKS) / 60;
+
+      maxCumulativeDiscrepancy = Math.max(maxCumulativeDiscrepancy, cumulativeDiscrepancy);
+      durationGcd = gcd(durationGcd, durationMs);
+    }
+
+    this.minimumFps = durationGcd === 0 ? 0 : 1000 / durationGcd;
   }
+}
+function gcd(a: number, b: number): number {
+  while (b !== 0) {
+    [a, b] = [b, a % b];
+  }
+  return a;
 }
 function gifInfo(data: Uint8Array): AnimationInfo {
   if (data.length < 13) throw new Error("GIF data is too short");
@@ -40,6 +69,7 @@ function gifInfo(data: Uint8Array): AnimationInfo {
   const header = new TextDecoder().decode(data.subarray(0, 6));
   if (header !== "GIF87a" && header !== "GIF89a") throw new Error("Invalid GIF header");
 
+  const frameDurations: number[] = [];
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   const [width, height] = [view.getUint16(6, true), view.getUint16(8, true)];
 
@@ -91,6 +121,7 @@ function gifInfo(data: Uint8Array): AnimationInfo {
 
         pos++;
         skipSubBlocks(); // LZW data sub-blocks
+        frameDurations.push(pendingDelayCs * 10);
         durationCs += pendingDelayCs;
         pendingDelayCs = 0;
         break;
@@ -115,7 +146,7 @@ function gifInfo(data: Uint8Array): AnimationInfo {
         break;
       }
       case 0x3b:
-        return new AnimationInfo(frames, durationCs * 10, width, height);
+        return new AnimationInfo(frames, durationCs * 10, width, height, frameDurations);
       default:
         throw new Error("Invalid GIF block introducer");
     }
@@ -130,6 +161,7 @@ function webpInfo(data: Uint8Array): AnimationInfo {
 
   if (header !== "RIFF" || format !== "WEBP") throw new Error("Invalid WebP header");
 
+  const frameDurations: number[] = [];
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   const riffSize = view.getUint32(4, true);
   const end = 8 + riffSize;
@@ -161,14 +193,15 @@ function webpInfo(data: Uint8Array): AnimationInfo {
       //   bytes 6..9   width
       //   bytes 9..12  height
       //   bytes 12..15 duration (24-bit little endian)
-      const frameDurationMs = data[pos + 12] | (data[pos + 13] << 8) | (data[pos + 14] << 16);
+      const frameDurationMs = view.getUint32(pos + 12, true) & 0x00ffffff;
+      frameDurations.push(frameDurationMs);
       durationMs += frameDurationMs;
     }
     pos += chunkSize;
     if (chunkSize & 1) pos++; // RIFF chunks are padded to an even size.
   }
   if (width === undefined || height === undefined) throw new Error("Invalid WebP dimensions");
-  return new AnimationInfo(frames, durationMs, width, height);
+  return new AnimationInfo(frames, durationMs, width, height, frameDurations);
 }
 
 /**

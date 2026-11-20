@@ -248,9 +248,7 @@ impl<'a> BlueprintGenerator<'a> {
             // Only sort by name (compressor really likes this)
             SignalSorting::Compression => {
                 signals.sort_by(|a, b| a.type_.cmp(&b.type_).then_with(|| a.name.cmp(&b.name)));
-                signals.sort_by(|a, b| {
-                    a.type_.len().cmp(&b.type_.len()).then_with(|| a.name.len().cmp(&b.name.len()))
-                });
+                signals.sort_by(|a, b| a.type_.len().cmp(&b.type_.len()));
             }
             // Sort by total length of the type + name + quality (actual smallest JSON)
             SignalSorting::Json => signals.sort_by_key(|s| {
