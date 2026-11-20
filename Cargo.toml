@@ -50,6 +50,7 @@ image = { version = "0.24", default-features = false, features = [
     "webp",
 ] }
 js-sys = "0.3.77"
+kiddo = { version = "6.3.1", optional = true }
 ordered-float = { version = "5.0", default-features = false, features = [
     "serde",
 ] }
@@ -109,6 +110,7 @@ demangle-name-section = true
 
 [features]
 default = []
+kiddo = ["dep:kiddo"]
 profiling = ["dep:wasm-tracing-allocator"]
 release = []
 threads = [

@@ -409,13 +409,13 @@ async function main() {
 
               const sample = currVideoSample;
               const [width, height] = dimensions;
-              const { canvas, ctx } = state;
-              if (!canvas || !ctx) throw new Error("Canvas is not initialized");
-              (canvas.width !== width || canvas.height !== height) && Object.assign(canvas, { width, height });
+              const { sourceCanvas, sourceCtx } = state;
+              if (!sourceCanvas || !sourceCtx) throw new Error("Canvas is not initialized");
+              (sourceCanvas.width !== width || sourceCanvas.height !== height) && Object.assign(sourceCanvas, { width, height });
 
-              sample.draw(ctx, 0, 0, width, height);
+              sample.draw(sourceCtx, 0, 0, width, height);
 
-              const pixels = ctx.getImageData(0, 0, width, height).data;
+              const pixels = sourceCtx.getImageData(0, 0, width, height).data;
               const dest = new Uint8Array(inBuffer.memory.buffer, inBuffer.ptr, inBuffer.len);
               if (pixels.byteLength > dest.byteLength) throw new Error("Video frame exceeds WASM buffer capacity");
 
@@ -468,74 +468,6 @@ async function main() {
     } else if (evt.data.type === "writerReady") {
       writerReadyResolve?.();
       writerReadyResolve = null;
-    } else if (evt.data.encodeToGif) {
-      const { ALL_FORMATS, BlobSource, Input, VideoSampleSink } = await import("mediabunny");
-
-      const { imageData } = evt.data.encodeToGif;
-      const videoInput = new Input({ source: new BlobSource(new Blob([imageData])), formats: ALL_FORMATS });
-      const videoTrack = await videoInput.getPrimaryVideoTrack();
-      if (!videoTrack) throw new Error("No video track found");
-      if (!(await videoTrack.canDecode())) throw new Error("This browser cannot decode this video");
-
-      const [width, height] = [await videoTrack.getDisplayWidth(), await videoTrack.getDisplayHeight()];
-
-      const videoSink = new VideoSampleSink(videoTrack);
-      const videoSamples = videoSink.samples();
-
-      const args = { dim: [width, height], speed: 10 };
-
-      postMessage({ writerArgs: { type: "start", filename: `image.gif` } });
-
-      await encode_gif(args, {
-        async get_next_frame({ inBuffer }: { inBuffer: WasmSharedMemory }) {
-          try {
-            const nextSample = await videoSamples!.next();
-            if (nextSample.done) return { isFinished: true };
-
-            const sample = nextSample.value;
-
-            try {
-              const { canvas, ctx } = state;
-              if (!canvas || !ctx) throw new Error("Canvas is not initialized");
-              if (canvas.width !== width || canvas.height !== height) {
-                canvas.width = width;
-                canvas.height = height;
-              }
-              const { duration, timestamp } = sample;
-
-              // Mediabunny handles the sample's rotation and flip metadata.
-              sample.draw(ctx, 0, 0, width, height);
-
-              const pixels = ctx.getImageData(0, 0, width, height).data;
-              const dest = new Uint8Array(inBuffer.memory.buffer, inBuffer.ptr, inBuffer.len);
-
-              if (pixels.byteLength > dest.byteLength) throw new Error("Video frame exceeds WASM buffer capacity");
-
-              dest.set(pixels);
-
-              return { isFinished: false, duration, timestamp };
-            } finally {
-              sample.close();
-            }
-          } catch (e) {
-            console.error(e);
-            throw e;
-          }
-        },
-        async onChunk(data: Uint8Array) {
-          return new Promise<void>((resolve, reject) => {
-            try {
-              const id = nextWriteId++;
-              pendingWrites.set(id, { resolve, reject });
-              postMessage({ writerArgs: { chunk: { id, data } } }, { targetOrigin: "*", transfer: [data.buffer] });
-            } catch (e) {
-              console.error(e);
-              reject(e);
-            }
-          });
-        },
-      });
-      postMessage({ writerArgs: { type: "done" } });
     } else if (evt.data.wasmMemoryUsage) {
     } else {
       console.error("Worker: Unhandled message", evt.data);

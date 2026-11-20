@@ -1,12 +1,12 @@
 {
   "connectionDirection": "horizontal",
+  "colorFormat": "full",
   "colorPaletteSize": 0,
   "customHeight": 100,
   "customWidth": 100,
   "displayMarginY": 2,
   "dryRun": false,
   "flippedAxes": "none",
-  "grayscaleBits": 0,
   "imageFilters": [],
   "imageRotation": "deg270",
   "includePowerPoles": true,

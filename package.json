@@ -11,7 +11,7 @@
     "build:start": "node scripts/run.mjs build:wasm && npm start",
     "build:vite": "vite build",
     "build:wasm-pack": "sh scripts/build-wasm.sh",
-    "build:wasm:opt": "node scripts/run.mjs build:wasm-pack --release --features threads",
+    "build:wasm:opt": "node scripts/run.mjs build:wasm-pack --release --features threads,kiddo",
     "build:wasm": "cross-env CARGO_TARGET_DIR=target-dev CARGO_PROFILE_DEV_OPT_LEVEL=2 CARGO_PROFILE_DEV_DEBUG=0 CARGO_ENCODED_RUSTFLAGS=-Ctarget-feature=+simd128,+bulk-memory,+mutable-globals,+nontrapping-fptoint node scripts/run.mjs build:wasm-pack --dev",
     "serve": "vite preview"
   },

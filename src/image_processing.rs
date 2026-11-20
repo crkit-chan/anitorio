@@ -121,7 +121,7 @@ impl<'a> FrameData<'a> {
 
             // Flush any remaining frames
             if let Some(frame) = img {
-                if !use_js_decode && let Some(callback) = &self.on_frame {
+                if let Some(callback) = &self.on_frame {
                     callback(frame.as_ref()).await?;
                 }
                 return Ok(Some(frame));
@@ -371,9 +371,7 @@ pub async fn build_palette(
     palette.swap(0, darkest.unwrap());
     palette[0] = exoquant::Color::new(0, 0, 0, 0);
 
-    Ok(ColorPalette::new(
-        palette.into_iter().map(|v| [v.r, v.g, v.b]).collect(),
-    ))
+    ColorPalette::new(palette.into_iter().map(|v| [v.r, v.g, v.b]).collect())
 }
 
 /// Finds the palette entry closest to a color.9
@@ -389,7 +387,7 @@ pub async fn build_palette(
 pub fn quantized_frame_to_outputs(
     frame: &image::SubImage<&image::DynamicImage>,
     palette: &ColorPalette,
-) -> Vec<u8> {
+) -> Vec<u32> {
     let (x, y) = frame.offsets();
     let (width, height) = (frame.width() as usize, frame.height() as usize);
     let inner = frame.inner();

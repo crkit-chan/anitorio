@@ -123,7 +123,7 @@ render(() => {
       fallback={(err) => {
         console.error(err);
         return (
-          <div class="w-screen h-screen bg-gray-800">
+          <div class="min-w-screen min-h-screen bg-gray-800">
             <pre class="whitespace-pre-wrap text-red-300 p-4 rounded">
               <h2>Error:</h2>
               <div>{String(err)}</div>

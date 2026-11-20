@@ -217,8 +217,7 @@ pub fn palette_frames_to_outputs(
             let mut packed = 0u32;
             for (frame_idx, frame) in frame_group.iter().enumerate() {
                 let [r, g, b, ..] = frame.get_pixel(x, y).0;
-                packed |= u32::from(palette.nearest_index([r, g, b]))
-                    << (frame_idx as u32 * bits_per_index);
+                packed |= palette.nearest_index([r, g, b]) << (frame_idx as u32 * bits_per_index);
             }
             outputs[group_offset + pixel_idx] = packed.cast_signed();
         }

@@ -333,12 +333,13 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
 
     const inputArgs = (() => {
       const {
+        colorFormat,
         connectionDirection,
-        colorPaletteSize,
+        customHeight,
+        customWidth,
+        flippedAxes,
         imageFilters,
         imageRotation,
-        flippedAxes,
-        grayscaleBits,
         maxGroupSize,
         maxSize,
         mode,
@@ -357,8 +358,9 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
 
     const args = {
       ...inputArgs,
+      customDim: [+formData.customWidth, +formData.customHeight],
       imageArgs: {
-        colorPaletteSize: formData.colorPaletteSize,
+        colorPaletteSize: isStaticImage() ? 0 : +(formData.colorFormat.match(/color-(\d+)/)?.[1] ?? 0),
         dimensions: [animationInfo()!.width!, animationInfo()!.height!],
         duration: currFile()!.type.startsWith("video")
           ? refVideo.duration
@@ -367,7 +369,7 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
             : undefined,
         filters: [],
         flip: `${formData.flippedAxes}` as ImageArgs["flip"],
-        grayscaleBits: +formData.grayscaleBits,
+        grayscaleBits: +(formData.colorFormat.match(/gray-(\d+)/)?.[1] ?? 0),
         maxSize: +formData.maxSize,
         mimeType: currFile()!.type,
         mode: ((!currFile() || !isStaticImage()) && formData.mode) || {
@@ -520,7 +522,7 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
     );
   }
   function FormElementsDisplay(props: { isStaticImage: boolean }) {
-    const disallowedKeys = ["includePowerPoles", "grayscaleBits", "outputFormat"];
+    const disallowedKeys = ["includePowerPoles", "colorFormat", "outputFormat"];
     const visibleFormElements = createMemo(() =>
       Object.entries(FORM_ELEMENTS).map(([key, value]) => {
         if (disallowedKeys.includes(key)) return null;
@@ -533,7 +535,7 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
           const allowed = [
             "connectionDirection",
             "flippedAxes",
-            "grayscaleBits",
+            "colorFormat",
             "imageRotation",
             "maxGroupSize",
             "outputFormat",
@@ -556,8 +558,8 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
             "targetFps",
           ]; // Remove booleans / falsey values
           const disabledKeys = [
+            mode === "lamps" && "colorFormat",
             mode === "lamps" && "connectionDirection",
-            mode === "lamps" && "grayscaleBits",
             mode === "lamps" && "maxGroupSize",
             mode === "lamps" && "signalSorting",
             mode === "lamps" && "wireColor",
@@ -792,9 +794,20 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
               )}
 
               <SignalPresetSelect setSignalPreset={setSignalPreset} setSignalPresetRaw={setSignalPresetRaw} showToast={showToast} />
-              <For each={["grayscaleBits", "outputFormat"]}>
-                {(k) => <FormElement key={k} value={FORM_ELEMENTS[k as keyof typeof FORM_ELEMENTS]} />}
-              </For>
+              <For each={["outputFormat"]}>{(k) => <FormElement key={k} value={FORM_ELEMENTS[k as keyof typeof FORM_ELEMENTS]} />}</For>
+
+              <Show
+                when={isStaticImage()}
+                fallback={<FormElement key="colorFormat" value={FORM_ELEMENTS["colorFormat" as keyof typeof FORM_ELEMENTS]} />}
+              >
+                <FormElement
+                  key="colorFormat"
+                  value={(() => {
+                    const target = FORM_ELEMENTS["colorFormat"];
+                    return { ...target, options: Object.entries(target.options).filter(([k]) => !k.includes("color")) };
+                  })()}
+                />
+              </Show>
 
               <div class="mb-4" />
 
