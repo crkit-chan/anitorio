@@ -1,4 +1,5 @@
 use super::prelude::*;
+use crate::constants;
 use crate::prelude::*;
 use std::io;
 
@@ -13,22 +14,6 @@ pub fn write_json_trimmed_to<T: ?Sized + serde::Serialize>(
     write_to(writer, &json_bytes[1..json_bytes.len() - 1]) // Remove braces
 }
 
-pub fn invert_wires(wires: &mut [Wire]) {
-    const fn get_swap(wire_id: u32) -> u32 {
-        match wire_id {
-            1 => 2,
-            2 => 1,
-            3 => 4,
-            4 => 3,
-            _ => wire_id,
-        }
-    }
-    for wire in wires.iter_mut() {
-        wire[1] = get_swap(wire[1]);
-        wire[3] = get_swap(wire[3]);
-    }
-}
-
 /// Converts an RGB pixel to an integer using a utility function.
 ///
 /// # Arguments
@@ -41,44 +26,56 @@ pub fn invert_wires(wires: &mut [Wire]) {
 ///
 /// A vector of ``CombinatorOutputs`` for the frame
 #[cfg_attr(target_arch = "wasm32", target_feature(enable = "simd128"))]
-pub fn color_frame_to_outputs(frame: &image::DynamicImage) -> Vec<i32> {
+pub fn color_frame_to_outputs(rgba: &image::SubImage<&image::DynamicImage>) -> Vec<i32> {
     #[cfg(target_arch = "wasm32")]
     {
         use core::arch::wasm32::{i8x16_shuffle, i8x16_splat, v128, v128_load, v128_store};
+        use image::GenericImageView;
 
-        let rgba = frame.to_rgba8();
-        let rgba: &[u8] = rgba.as_raw();
+        let (width, height) = (rgba.width() as usize, rgba.height() as usize);
+        let mut output: Vec<i32> = Vec::with_capacity(width * height);
 
-        debug_assert_eq!(rgba.len() % 4, 0);
+        let inner = rgba.inner();
+        let (x, y) = rgba.offsets();
 
-        let pixel_count = rgba.len() / 4;
+        let rgba = inner.to_rgba8();
+        let rgba = rgba.as_raw();
+        let stride = inner.width() as usize * 4;
+
         let zero = i8x16_splat(0);
-        let mut output = Vec::<i32>::with_capacity(pixel_count);
-        let mut i = 0;
 
-        while i + 16 <= rgba.len() {
+        for row in 0..height {
+            let start = (y as usize + row) * stride + x as usize * 4;
+            let bytes = &rgba[start..start + width * 4];
+
+            let pixel_count = width;
+            let mut i = 0;
+
             #[expect(clippy::cast_ptr_alignment, reason = "v128_load uses unaligned memory")]
             #[expect(clippy::ptr_as_ptr, reason = "Cast to pass byte buf to v128_load")]
             unsafe {
-                let input = v128_load(rgba.as_ptr().add(i) as *const v128); // Load 4 RGBA pixels: [R0 G0 B0 A0 R1 G1 B1 A1 R2 G2 B2 A2 R3 G3 B3 A3]
-                let packed = i8x16_shuffle::<2, 1, 0, 16, 6, 5, 4, 16, 10, 9, 8, 16, 14, 13, 12, 16>(
-                    input, zero, // Indices 0..15 = input. Indices 16..31 = zero
-                ); // Little-endian output needs: [B0 G0 R0 00 B1 G1 R1 00 B2 G2 R2 00 B3 G3 R3 00]
-                v128_store(output.as_mut_ptr().add(i / 4) as *mut v128, packed); // Write the 4 resulting i32s directly.
+                let output_ptr = output.as_mut_ptr().add(row * width);
+                while i + 4 <= pixel_count {
+                    let input = v128_load(bytes.as_ptr().add(i * 4) as *const v128);
+                    let packed =
+                        i8x16_shuffle::<2, 1, 0, 16, 6, 5, 4, 16, 10, 9, 8, 16, 14, 13, 12, 16>(
+                            input, zero,
+                        );
+                    v128_store(output_ptr.add(i) as *mut v128, packed);
+                    i += 4;
+                }
+                while i < pixel_count {
+                    let j = i * 4;
+                    *output_ptr.add(i) = (i32::from(bytes[j]) << 16)
+                        | (i32::from(bytes[j + 1]) << 8)
+                        | i32::from(bytes[j + 2]);
+                    i += 1;
+                }
             }
-            i += 16;
-        }
 
-        unsafe { output.set_len(pixel_count) };
-
-        // Handle remaining pixels.
-        while i < rgba.len() {
-            let r = rgba[i];
-            let g = rgba[i + 1];
-            let b = rgba[i + 2];
-
-            output[i / 4] = (i32::from(r) << 16) | (i32::from(g) << 8) | i32::from(b);
-            i += 4;
+            unsafe {
+                output.set_len((row + 1) * width);
+            } // Mark this row's output as initialized.
         }
 
         output
@@ -87,9 +84,9 @@ pub fn color_frame_to_outputs(frame: &image::DynamicImage) -> Vec<i32> {
     #[cfg(not(target_arch = "wasm32"))] // scalar fallback
     {
         use crate::image_processing::rgb_to_int;
-        (frame.to_rgb8().as_raw().as_chunks::<3>().0)
+        (rgba.as_raw().as_chunks::<4>().0)
             .iter()
-            .map(|&[r, g, b]| rgb_to_int(r, g, b).cast_signed())
+            .map(|&[r, g, b, ..]| rgb_to_int(r, g, b).cast_signed())
             .collect()
     }
 }
@@ -108,45 +105,123 @@ pub fn color_frame_to_outputs(frame: &image::DynamicImage) -> Vec<i32> {
 ///
 /// A vector of JSON objects representing output filters.
 pub fn grayscale_frames_to_outputs(
-    frames: &[image::DynamicImage],
-    grayscale_bits: u32,
+    frames: &[image::SubImage<&image::DynamicImage>],
+    grayscale_bits: u8,
 ) -> Result<Vec<i32>, JsError> {
-    if frames.is_empty() {
-        return Err(JsError::new("No frames provided for packing"));
-    }
-    let num_pixels = (frames[0].width() * frames[0].height()) as usize;
-    let luma_images: Vec<_> = frames.iter().map(image::DynamicImage::to_luma8).collect();
-    let mut outputs: Vec<i32> = vec![0i32; num_pixels];
+    use image::GenericImageView;
+
+    assert!(!frames.is_empty(), "No frames provided for packing");
+
+    let (width, height) = frames[0].dimensions();
+    assert!(
+        frames.iter().all(|f| f.dimensions() == (width, height)),
+        "All frames must have identical dimensions"
+    );
+
+    let num_pixels = (width * height) as usize;
+    let mut outputs = vec![0i32; num_pixels];
+
+    let frames = frames.iter().map(|frame| {
+        let image::DynamicImage::ImageLuma8(img) = frame.inner() else {
+            unreachable!("Expected Luma8")
+        };
+        let (x, y) = frame.offsets();
+        (
+            &**img.as_raw(),
+            img.width() as usize,
+            x as usize,
+            y as usize,
+        )
+    });
+    let frames = frames.collect::<Vec<_>>();
 
     match grayscale_bits {
-        1 => {
-            for (i, output) in outputs.iter_mut().enumerate() {
-                let mut packed: u32 = 0;
-                for (j, img) in luma_images.iter().enumerate() {
-                    packed |= u32::from(img.as_raw()[i] >= constants::GRAYSCALE_THRESH) << j;
-                }
-                *output = packed.cast_signed();
-            }
-        }
-        4 => {
-            for (i, output) in outputs.iter_mut().enumerate() {
-                let mut packed: u32 = 0;
-                for (j, img) in luma_images.iter().enumerate() {
-                    packed |= u32::from(img.as_raw()[i] >> 4) << (j * 4);
-                }
-                *output = packed.cast_signed();
-            }
-        }
-        8 => {
-            for (i, output) in outputs.iter_mut().enumerate() {
-                let mut packed: u32 = 0;
-                for (j, img) in luma_images.iter().enumerate() {
-                    packed |= u32::from(img.as_raw()[i]) << (j * 8);
-                }
-                *output = packed.cast_signed();
-            }
-        }
+        1 => pack_grayscale_frames(&frames, &mut outputs, 1, |pixel| {
+            u32::from(pixel >= constants::GRAYSCALE_THRESH)
+        }),
+        4 => pack_grayscale_frames(&frames, &mut outputs, 4, |pixel| u32::from(pixel >> 4)),
+        8 => pack_grayscale_frames(&frames, &mut outputs, 8, u32::from),
         _ => return Err(JsError::new("Unsupported grayscale bit depth")),
     }
+
+    Ok(outputs)
+}
+
+fn pack_grayscale_frames<F: Fn(u8) -> u32>(
+    luma_images: &[(&[u8], usize, usize, usize)],
+    outputs: &mut [i32],
+    shift: usize,
+    pack_pixel: F,
+) {
+    let n_outputs = outputs.len();
+    for (i, output) in outputs.iter_mut().enumerate() {
+        let mut packed = 0u32;
+        for (j, &(data, stride, x, y)) in luma_images.iter().enumerate() {
+            let row = i / (n_outputs / (stride)); // See note below
+            let col = i % (n_outputs / (stride));
+            packed |= pack_pixel(data[(y + row) * stride + x + col]) << (j * shift);
+        }
+        *output = packed.cast_signed();
+    }
+}
+
+/// Packs palette frames into output signals by bit-packing palette indices.
+///
+/// A single output represents the palette indices of a single pixel across
+/// multiple frames.
+///
+/// Each palette index uses the minimum number of bits required to represent
+/// the palette.
+///
+/// # Arguments
+///
+/// * `frames` - A slice of image frames.
+/// * `palette` - The RGBA palette used to identify pixel indices.
+///
+/// # Returns
+///
+/// A vector of packed palette indices. Each group of frames produces
+/// `width * height` outputs, in row-major order.
+pub fn palette_frames_to_outputs(
+    frames: &[image::SubImage<&image::DynamicImage>],
+    palette: &ColorPalette,
+) -> Result<Vec<i32>, JsError> {
+    use image::GenericImageView;
+
+    if frames.is_empty() {
+        return Err(JsError::new("No frames provided for packing"));
+    } else if palette.colors.is_empty() {
+        return Err(JsError::new("Palette cannot be empty"));
+    }
+
+    let (width, height) = frames[0].dimensions();
+    if frames.iter().any(|f| f.dimensions() != (width, height)) {
+        return Err(JsError::new("All frames must have identical dimensions"));
+    }
+
+    let bits_per_index = (usize::BITS - (palette.colors.len() - 1).leading_zeros()).max(1);
+    if bits_per_index > 32 {
+        return Err(JsError::new("Palette is too large to pack into i32"));
+    }
+
+    let frames_per_output = 32 / bits_per_index;
+    let num_pixels = (width * height) as usize;
+    let num_groups = frames.len().div_ceil(frames_per_output as usize);
+
+    let mut outputs = vec![0i32; num_pixels * num_groups];
+
+    for (group_idx, frame_group) in frames.chunks(frames_per_output as usize).enumerate() {
+        let group_offset = group_idx * num_pixels;
+        for (y, x) in (0..height).flat_map(|y| (0..width).map(move |x| (y, x))) {
+            let pixel_idx = (y * width + x) as usize;
+            let mut packed = 0u32;
+            for (frame_idx, frame) in frame_group.iter().enumerate() {
+                let [r, g, b, ..] = frame.get_pixel(x, y).0;
+                packed |= palette.nearest_index([r, g, b]) << (frame_idx as u32 * bits_per_index);
+            }
+            outputs[group_offset + pixel_idx] = packed.cast_signed();
+        }
+    }
+
     Ok(outputs)
 }

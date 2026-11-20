@@ -1,4 +1,5 @@
-use super::{power_pole::PowerPoleOccupied, prelude::*};
+use super::power_pole::PowerPoleOccupied;
+use super::prelude::*;
 use crate::prelude::*;
 use glam::{DVec2, UVec2, dvec2};
 use std::{ops::Not, sync::Arc};
@@ -18,10 +19,11 @@ use std::{ops::Not, sync::Arc};
 /// # Returns
 ///
 /// A tuple with lamp entities, lamp wires, the next entity number, and the top-right lamp entity.
+#[expect(clippy::needless_pass_by_value, reason = "Arc")]
 pub fn generate_lamps(
     signals: &[Arc<SignalID>],
     grid_dim: UVec2,
-    curr_frame: Option<&Arc<image::DynamicImage>>,
+    curr_frame: Option<Arc<image::DynamicImage>>,
     occupied: &mut PowerPoleOccupied,
     base_ent_n: u32,
     start_pos: DVec2,
@@ -32,13 +34,13 @@ pub fn generate_lamps(
     (Option<u32>, Option<u32>),
 ) {
     let mut ents = Vec::new();
-    let mut wires = Vec::new();
+    let mut wires = Wires::new();
     let mut top_left_ent_n: Option<u32> = None;
     let mut top_right_ent_n: Option<u32> = None;
 
     // Auto-rotate wires based on image rotation
     let prefer_horizontal_wires =
-        args.prefer_horizontal_wires ^ matches!(args.image_args.rotate, Deg90 | Deg270);
+        args.prefer_horizontal_wires ^ args.image_args.rotate.swaps_dimensions();
     let base_pos = start_pos + const { dvec2(0.5, 0.5) }; // Lamps are centered on the middle of a tile
     let mode = args.image_args.mode;
     let get_ent_num = |r: u32, c: u32| -> u32 { base_ent_n + r * grid_dim.x + c };
@@ -56,8 +58,8 @@ pub fn generate_lamps(
                 continue;
             }
             let curr_ent_n = get_ent_num(r as u32, c as u32);
-            let mut lamp = BlueprintEntity::new(curr_ent_n, Arc::clone(&constants::LAMP), pos)
-                .with_always_on(true);
+            let mut lamp =
+                BlueprintEntity::new(curr_ent_n, &constants::LAMP, pos).with_always_on(true);
             let index = r * grid_dim.x as usize + c;
 
             if top_right_ent_n.is_none() {

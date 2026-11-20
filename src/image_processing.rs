@@ -1,8 +1,9 @@
+use crate::constants;
 use crate::util::wasm_shared_memory;
 use crate::{constants::DEFAULT_FRAME_DELAY, util::format_duration};
 use crate::{prelude::*, ts};
 use glam::{DVec2, UVec2, uvec2};
-use image::{AnimationDecoder, imageops};
+use image::{AnimationDecoder, GenericImageView, imageops};
 use std::{pin::Pin, rc::Rc, sync::Arc, time::Duration};
 use wasm_bindgen::JsValue;
 
@@ -16,13 +17,13 @@ pub struct FrameData<'a> {
     decoder:      FrameDecoder<'a>,
     fps_timer:    f64,
     in_dim:       UVec2,
-    in_frame_i:   u32,
+    in_frame_i:   usize,
     is_first:     bool,
     on_frame:     Option<Rc<FrameCallback>>,
     out_dim_raw:  DVec2,
     out_frame_i:  usize,
-    out_n_frames: u32,
-    palette:      Option<Vec<[u8; 4]>>,
+    out_n_frames: usize,
+    palette:      Option<ColorPalette>,
     prev_img:     Option<(Arc<image::DynamicImage>, u64)>,
 }
 impl FrameData<'_> {
@@ -31,9 +32,10 @@ impl FrameData<'_> {
     /// Note: This is truncated from the raw dimensions instead of rounded.
     pub const fn out_dim(&self) -> UVec2 {
         let dim = self.out_dim_raw();
-        match self.args.rotate {
-            Deg90 | Deg270 => uvec2(dim.y, dim.x),
-            _ => dim,
+        if self.args.rotate.swaps_dimensions() {
+            uvec2(dim.y, dim.x)
+        } else {
+            dim
         }
     }
     const fn out_dim_raw(&self) -> UVec2 {
@@ -46,13 +48,10 @@ impl FrameData<'_> {
         );
         uvec2(w, h)
     }
-    pub const fn curr_duration_us(&self) -> u64 {
-        self.decoder.curr_n_us
-    }
-    pub const fn curr_total_frames(&self) -> u32 {
+    pub const fn curr_total_frames(&self) -> usize {
         self.in_frame_i
     }
-    pub const fn total_frames(&self) -> u32 {
+    pub const fn total_frames(&self) -> usize {
         self.out_n_frames
     }
 }
@@ -62,8 +61,8 @@ impl<'a> FrameData<'a> {
         image_args: &'a ImageArgs,
         on_frame: Option<Rc<FrameCallback>>,
     ) -> Self {
-        const fn expected_output_frames(n_ms: u64, fps: u32) -> u32 {
-            1 + ((n_ms * fps as u64) / 1000) as u32
+        const fn expected_output_frames(n_ms: u64, fps: u32) -> usize {
+            1 + ((n_ms * fps as u64) / 1000) as usize
         }
 
         let in_dim = frame_data.dimensions();
@@ -77,7 +76,7 @@ impl<'a> FrameData<'a> {
                     Mode::Static { .. } => 1,
                     _ => expected_output_frames(
                         (frame_data.info.duration.unwrap() * 1000.0) as u64,
-                        image_args.target_fps.max(1),
+                        u32::from(image_args.target_fps.max(1)),
                     ),
                 },
                 args: image_args,
@@ -122,7 +121,7 @@ impl<'a> FrameData<'a> {
 
             // Flush any remaining frames
             if let Some(frame) = img {
-                if !use_js_decode && let Some(callback) = &self.on_frame {
+                if let Some(callback) = &self.on_frame {
                     callback(frame.as_ref()).await?;
                 }
                 return Ok(Some(frame));
@@ -153,8 +152,8 @@ impl<'a> FrameData<'a> {
                     duration = args.duration.unwrap();
                     progress = (self.out_frame_i as f64 / f64::from(args.target_fps)) / duration;
                 } else {
-                    duration = f64::from(self.out_n_frames) / f64::from(args.target_fps);
-                    progress = self.out_frame_i as f64 / f64::from(self.out_n_frames);
+                    duration = self.out_n_frames as f64 / f64::from(args.target_fps);
+                    progress = self.out_frame_i as f64 / self.out_n_frames as f64;
                 }
 
                 set_progress(
@@ -173,7 +172,7 @@ impl<'a> FrameData<'a> {
         }
     }
 
-    pub fn with_palette(mut self, palette: Option<Vec<[u8; 4]>>) -> Self {
+    pub fn with_palette(mut self, palette: Option<ColorPalette>) -> Self {
         self.palette = palette;
         self
     }
@@ -184,19 +183,11 @@ impl<'a> FrameData<'a> {
     }
 
     /// Converts the input frame to the target output using the specified settings.
-    pub fn convert_frame(&self, mut buf: image::RgbaImage) -> image::DynamicImage {
-        if let Some(palette) = self.palette.as_ref() {
-            let outputs = quantised_frame_to_outputs(&buf, palette)
-                .iter()
-                .flat_map(|&v| palette[v as usize])
-                .collect::<Vec<_>>();
-            buf = image::RgbaImage::from_raw(buf.width(), buf.height(), outputs).unwrap();
-        }
-
+    pub fn convert_frame(&self, buf: image::RgbaImage) -> image::DynamicImage {
         let mut img = image::DynamicImage::ImageRgba8(buf);
         let out_dim = self.out_dim_raw.round().as_uvec2();
 
-        // Apply filters
+        // 1. Apply custom filters.
         for f in &self.args.filters {
             img = match *f {
                 ImageFilter::Blur(sigma) => img.blur(sigma),
@@ -207,36 +198,65 @@ impl<'a> FrameData<'a> {
             };
         }
 
-        if self.args.grayscale_bits > 0 {
-            img = image::DynamicImage::ImageLuma8(img.to_luma8());
-        }
+        // 2. Resample after filters, but before grayscale to preserve detail.
         img = match self.args.resampling_filter {
             ResamplingFilter::Thumbnail => img.thumbnail(out_dim.x, out_dim.y),
-            filter => img.resize(
-                out_dim.x,
-                out_dim.y,
-                match filter {
-                    ResamplingFilter::Catrom => imageops::FilterType::CatmullRom,
-                    ResamplingFilter::Gaussian => imageops::FilterType::Gaussian,
-                    ResamplingFilter::Lanczos3 => imageops::FilterType::Lanczos3,
-                    ResamplingFilter::Nearest => imageops::FilterType::Nearest,
-                    ResamplingFilter::Triangle => imageops::FilterType::Triangle,
-                    _ => unreachable!(),
-                },
-            ),
+            filter => img.resize(out_dim.x, out_dim.y, filter.to_image_filter().unwrap()),
         };
-        if matches!(self.args.flip, ImageFlip::X | ImageFlip::Both) {
+
+        // 3. Grayscale after resampling
+        if self.args.grayscale_bits > 0 {
+            let mut luma = img.into_luma8(); // Luma after resize
+            match self.args.grayscale_bits {
+                1 => {
+                    for p in luma.as_mut() {
+                        *p = 255 * u8::from(*p >= constants::GRAYSCALE_THRESH);
+                    }
+                }
+                4 => {
+                    for p in luma.as_mut() {
+                        *p &= 0xF0;
+                    }
+                }
+                8 => {}
+                _ => unreachable!(),
+            }
+            img = image::DynamicImage::ImageLuma8(luma);
+        }
+
+        // 4. Lossless operations
+        if self.args.flip.x() {
             imageops::flip_horizontal_in_place(&mut img);
         }
-        if matches!(self.args.flip, ImageFlip::Y | ImageFlip::Both) {
+        if self.args.flip.y() {
             imageops::flip_vertical_in_place(&mut img);
         }
-        img = match self.args.rotate {
-            Deg90 => img.rotate90(),
-            Deg180 => img.rotate180(),
-            Deg270 => img.rotate270(),
-            Deg0 => img,
-        };
+        match self.args.rotate as u16 {
+            90 => img = img.rotate90(),
+            180 => imageops::rotate180_in_place(&mut img),
+            270 => img = img.rotate270(),
+            _ => (),
+        }
+
+        // 5. Palette at the very end
+        if let Some(palette) = self.palette.as_ref() {
+            let indexes =
+                quantized_frame_to_outputs(&img.view(0, 0, img.width(), img.height()), palette);
+            match &mut img {
+                image::DynamicImage::ImageRgba8(inner) => {
+                    for (pixel, v) in inner.pixels_mut().zip(indexes) {
+                        let [r, g, b] = palette.colors[v as usize];
+                        *pixel = image::Rgba([r, g, b, 255]);
+                    }
+                }
+                image::DynamicImage::ImageLuma8(inner) => {
+                    for (pixel, v) in inner.iter_mut().zip(indexes) {
+                        *pixel = palette.colors[v as usize][0];
+                    }
+                }
+                _ => unimplemented!(),
+            }
+        }
         img
     }
 }
@@ -318,33 +338,40 @@ impl<'a> ImageFrameData<'a> {
 /// The palette colors as RGB triples.
 pub async fn build_palette(
     mut generator: FrameData<'_>,
-    size: usize,
-) -> Result<Vec<[u8; 4]>, JsError> {
+    size: u32,
+) -> Result<ColorPalette, JsError> {
     let mut hist = exoquant::Histogram::new();
 
     while let Some(frame) = generator.next().await? {
-        let frame = Arc::unwrap_or_clone(frame);
-        hist.extend(
-            (frame.to_rgba8().as_chunks::<4>().0)
-                .iter()
-                .map(|&[r, g, b, a]| exoquant::Color::new(r, g, b, a)),
-        );
+        match Arc::unwrap_or_clone(frame) {
+            image::DynamicImage::ImageRgba8(rgba) => {
+                hist.extend(
+                    (rgba.as_raw().as_chunks::<4>().0.iter())
+                        .map(|&[r, g, b, ..]| exoquant::Color::new(r, g, b, 255)),
+                );
+            }
+            image::DynamicImage::ImageLuma8(luma) => {
+                hist.extend(luma.as_raw().iter().map(|&l| exoquant::Color::new(l, l, l, 255)));
+            }
+            _ => unreachable!("Expected RGBA8 or LumaA8"),
+        }
     }
 
     let mut palette = exoquant::generate_palette(
         &hist,
         &exoquant::SimpleColorSpace::default(),
         &exoquant::optimizer::KMeans,
-        size,
+        size as usize,
     );
     let darkest = (0..palette.len()).min_by_key(|&i| {
         let c = palette[i];
-        c.r + c.g + c.b
+        c.r.saturating_add(c.g).saturating_add(c.b)
     });
+
     palette.swap(0, darkest.unwrap());
     palette[0] = exoquant::Color::new(0, 0, 0, 0);
 
-    Ok(palette.iter().map(|v| [v.r, v.g, v.b, v.a]).collect())
+    ColorPalette::new(palette.into_iter().map(|v| [v.r, v.g, v.b]).collect())
 }
 
 /// Finds the palette entry closest to a color.9
@@ -357,22 +384,41 @@ pub async fn build_palette(
 /// # Returns
 ///
 /// The index of the closest palette entry.
-pub fn quantised_frame_to_outputs(frame: &image::RgbaImage, palette: &[[u8; 4]]) -> Vec<u32> {
-    (frame.as_raw().as_chunks::<4>().0)
-        .iter()
-        .map(|entry| nearest_palette_index(palette, entry))
-        .collect()
-}
+pub fn quantized_frame_to_outputs(
+    frame: &image::SubImage<&image::DynamicImage>,
+    palette: &ColorPalette,
+) -> Vec<u32> {
+    let (x, y) = frame.offsets();
+    let (width, height) = (frame.width() as usize, frame.height() as usize);
+    let inner = frame.inner();
+    let mut outputs = Vec::with_capacity(width * height);
+    let stride = frame.width() as usize;
 
-pub fn nearest_palette_index(palette: &[[u8; 4]], color: &[u8]) -> u32 {
-    let distance = |entry: &[u8; 4]| -> i32 {
-        (entry.iter().zip(color))
-            .map(|(&a, &b)| (i32::from(a) - i32::from(b)).pow(2))
-            .sum()
-    };
-    (0..palette.len()).min_by_key(|&i| distance(&palette[i])).unwrap() as u32
-}
+    match inner {
+        image::DynamicImage::ImageRgba8(img) => {
+            let rgba = img.as_raw();
+            for row in 0..height {
+                let start = ((y as usize + row) * stride + x as usize) * 4;
+                let end = start + width * 4;
+                outputs.extend(
+                    (rgba[start..end].as_chunks::<4>().0.iter())
+                        .map(|&[r, g, b, ..]| palette.nearest_index([r, g, b])),
+                );
+            }
+        }
+        image::DynamicImage::ImageLuma8(img) => {
+            let luma = img.as_raw();
+            for row in 0..height {
+                let start = (y as usize + row) * stride + x as usize;
+                let end = start + width;
+                outputs.extend(luma[start..end].iter().map(|&l| palette.nearest_index([l, l, l])));
+            }
+        }
+        _ => unreachable!("Expected RGBA8 or Luma8"),
+    }
 
+    outputs
+}
 enum FrameDecoderState<'a> {
     NativeFrames(image::Frames<'a>),
     JsFrames(JsVideoFrameCallback),
@@ -495,4 +541,8 @@ pub async fn encode_gif(
     }
 
     Ok(())
+}
+
+pub const fn rgb_to_int(r: u8, g: u8, b: u8) -> u32 {
+    ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
 }

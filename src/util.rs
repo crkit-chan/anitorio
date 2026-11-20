@@ -7,9 +7,10 @@ pub fn format_duration<T: Into<u128>>(ms: T) -> String {
     let hours = total_seconds / 3600;
     let minutes = (total_seconds % 3600) / 60;
     let seconds = total_seconds % 60;
+    let milliseconds = ms % 1000;
 
     match hours {
-        0 => format!("{minutes:02}:{seconds:02}"),
+        0 => format!("{minutes:02}:{seconds:02}:{milliseconds:03}"),
         _ => format!("{hours:02}:{minutes:02}:{seconds:02}"),
     }
 }

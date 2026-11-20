@@ -2,11 +2,13 @@
 macro_rules! arithmetic_conds {
     ($in_sig:ident $op:tt $second:expr => $out_sig:ident) => {
         $crate::blueprint::models::ArithmeticCombinatorParameters {
-            first_signal:    Some(std::sync::Arc::clone(&$in_sig)),
-            second_signal:   None,
-            second_constant: $second,
-            operation:       $crate::blueprint::macros::arithmetic_cond_op!($op),
-            output_signal:   Some(std::sync::Arc::clone(&$out_sig)),
+            first_signal:           Some(std::sync::Arc::clone(&$in_sig)),
+            first_signal_networks:  "both".into(),
+            second_signal:          None,
+            second_signal_networks: "both".into(),
+            second_constant:        $second,
+            operation:              $crate::blueprint::macros::arithmetic_cond_op!($op),
+            output_signal:          Some(std::sync::Arc::clone(&$out_sig)),
         }
     };
 }
@@ -52,7 +54,7 @@ macro_rules! arithmetic_cond_op {
 macro_rules! decider_cond {
     ($sig_a:expr, $op:tt, $sig_b:expr) => {
         $crate::blueprint::models::DeciderCombinatorCondition::new(
-            std::sync::Arc::clone(&$sig_a),
+            &$sig_a,
             $sig_b,
             $crate::blueprint::macros::decider_cond_op!($op),
         )

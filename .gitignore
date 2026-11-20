@@ -1,6 +1,8 @@
 .venv/
 .idea/
 /target
+/target-dev
+/target-profiling
 dist
 node_modules
 

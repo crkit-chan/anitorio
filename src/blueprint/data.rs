@@ -1,3 +1,5 @@
+use crate::boxed_slice;
+
 use super::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{cell::RefCell, sync::Arc};
@@ -39,9 +41,13 @@ pub struct PrototypeData {
 pub fn load_data(data_json_reader: impl std::io::Read) -> Result<(), JsError> {
     let mut data: PrototypeData = serde_json::from_reader(data_json_reader)?;
     let mut sig_types: Vec<Arc<str>> = Vec::new(); // Allow "type" field to reference the same strings
-    let qualities: Vec<Option<Arc<str>>> = {
-        let quals = (data.qualities.iter()).map(|v| Some(Arc::clone(v))).collect::<Vec<_>>();
-        if quals.is_empty() { vec![None] } else { quals }
+    let qualities: Box<[Option<Arc<str>>]> = {
+        let quals = (data.qualities.iter()).map(|v| Some(Arc::clone(v))).collect::<Box<_>>();
+        if quals.is_empty() {
+            boxed_slice![None]
+        } else {
+            quals
+        }
     };
     let mut signals: Vec<Arc<SignalID>> = Vec::with_capacity(data.signals.len() * qualities.len());
 

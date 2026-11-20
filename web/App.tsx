@@ -49,6 +49,7 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
   const [wasmMemoryUsage, setWasmMemoryUsage] = createSignal({ bytes: 0, commited: 0 });
   const [blueprintDownloadStartTime, setBlueprintDownloadStartTime] = createSignal(performance.now());
   const [lampProgressPercentage, setLampProgressPercentage] = createSignal(0);
+  const [supportsThreads, setSupportsThreads] = createSignal(false);
 
   let refBackground!: BackgroundApi;
   let refDialogLargeFile!: FactorioDialogDeleteApi;
@@ -118,6 +119,9 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
     } else if (data.lampProgress) {
       const { percentage } = data.lampProgress;
       setLampProgressPercentage(percentage);
+    } else if (data.supportsThreads) {
+      const { supportsThreads } = data.supportsThreads;
+      setSupportsThreads(supportsThreads);
     } else if (data.error) {
       showToast(data.error, { isError: true });
       setIsGenerating(false);
@@ -289,18 +293,9 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
       async function requestPersistentStorage(): Promise<boolean> {
         const alreadyPersistent = await navigator.storage.persisted();
         if (alreadyPersistent) return true;
-
-        const accepted = confirm(
-          "Anitorio would like permission to buffer the streamed blueprint using browser storage. " +
-            "Without persistent storage, you can still use the 'Streaming Download' option to " +
-            "stream directly to your file system (instead of using browser storage). Allow persistent storage?",
-        );
-        if (!accepted) return false;
-
         return await navigator.storage.persist();
       }
-
-      if (!(await requestPersistentStorage())) return;
+      await requestPersistentStorage();
     }
 
     setIsGenerating(true);
@@ -338,12 +333,13 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
 
     const inputArgs = (() => {
       const {
+        colorFormat,
         connectionDirection,
-        colorPaletteSize,
+        customHeight,
+        customWidth,
+        flippedAxes,
         imageFilters,
         imageRotation,
-        flippedAxes,
-        grayscaleBits,
         maxGroupSize,
         maxSize,
         mode,
@@ -362,8 +358,9 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
 
     const args = {
       ...inputArgs,
+      customDim: [+formData.customWidth, +formData.customHeight],
       imageArgs: {
-        colorPaletteSize: formData.colorPaletteSize,
+        colorPaletteSize: isStaticImage() ? 0 : +(formData.colorFormat.match(/color-(\d+)/)?.[1] ?? 0),
         dimensions: [animationInfo()!.width!, animationInfo()!.height!],
         duration: currFile()!.type.startsWith("video")
           ? refVideo.duration
@@ -372,7 +369,7 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
             : undefined,
         filters: [],
         flip: `${formData.flippedAxes}` as ImageArgs["flip"],
-        grayscaleBits: +formData.grayscaleBits,
+        grayscaleBits: +(formData.colorFormat.match(/gray-(\d+)/)?.[1] ?? 0),
         maxSize: +formData.maxSize,
         mimeType: currFile()!.type,
         mode: ((!currFile() || !isStaticImage()) && formData.mode) || {
@@ -525,10 +522,11 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
     );
   }
   function FormElementsDisplay(props: { isStaticImage: boolean }) {
-    const disallowedKeys = ["includePowerPoles", "grayscaleBits", "outputFormat"];
+    const disallowedKeys = ["includePowerPoles", "colorFormat", "outputFormat"];
     const visibleFormElements = createMemo(() =>
       Object.entries(FORM_ELEMENTS).map(([key, value]) => {
         if (disallowedKeys.includes(key)) return null;
+        else if (key === "useThreads" && !supportsThreads()) return null;
         else if (["mode", "customWidth", "customHeight"].includes(key)) return null;
         else if (key === "staticImageMode" && !props.isStaticImage) return null;
         else if (key === "temporalCompressionWindow" && formData.signalCompressionType !== "temporal") return null;
@@ -537,7 +535,7 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
           const allowed = [
             "connectionDirection",
             "flippedAxes",
-            "grayscaleBits",
+            "colorFormat",
             "imageRotation",
             "maxGroupSize",
             "outputFormat",
@@ -560,8 +558,8 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
             "targetFps",
           ]; // Remove booleans / falsey values
           const disabledKeys = [
+            mode === "lamps" && "colorFormat",
             mode === "lamps" && "connectionDirection",
-            mode === "lamps" && "grayscaleBits",
             mode === "lamps" && "maxGroupSize",
             mode === "lamps" && "signalSorting",
             mode === "lamps" && "wireColor",
@@ -796,9 +794,18 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
               )}
 
               <SignalPresetSelect setSignalPreset={setSignalPreset} setSignalPresetRaw={setSignalPresetRaw} showToast={showToast} />
-              <For each={["grayscaleBits", "outputFormat"]}>
-                {(k) => <FormElement key={k} value={FORM_ELEMENTS[k as keyof typeof FORM_ELEMENTS]} />}
-              </For>
+              <For each={["outputFormat"]}>{(k) => <FormElement key={k} value={FORM_ELEMENTS[k as keyof typeof FORM_ELEMENTS]} />}</For>
+
+              <Show
+                when={isStaticImage()}
+                fallback={<FormElement key="colorFormat" value={FORM_ELEMENTS["colorFormat" as keyof typeof FORM_ELEMENTS]} />}
+              >
+                {(() => {
+                  const target = FORM_ELEMENTS["colorFormat"];
+                  const value = { ...target, options: Object.entries(target.options).filter(([k]) => !k.includes("color")) };
+                  return <FormElement key="colorFormat" value={value} />;
+                })()}
+              </Show>
 
               <div class="mb-4" />
 
@@ -949,6 +956,7 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
                 id="responseText"
                 class="panel-inset-light text-gray-100 p-3 border rounded mb-6 overflow-y-auto overflow-x-hidden whitespace-pre-wrap break-all h-32"
               ></div>
+
               <div class="flex items-center justify-between">
                 <button onClick={() => setIsGenerating(false)} id="backButton" class="button">
                   Back

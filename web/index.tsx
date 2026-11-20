@@ -20,7 +20,6 @@ const INITIAL_STATE = Object.freeze({
   dbStore: nullify<DefaultFileDBChunkStore>(),
   deleteAllChunksPromise: Promise.resolve(),
   dryRun: false,
-  filename: nullify<string>(),
   lastFlushPromise: Promise.resolve(),
   streamWriter: nullify<WritableStreamDefaultWriter<Uint8Array<ArrayBufferLike>>>(),
 });
@@ -84,6 +83,9 @@ worker.addEventListener("message", async (evt) => {
       if (state.chunkWriter) {
         await state.chunkWriter.flush();
         await state.lastFlushPromise;
+
+        postMessage({ type: "finished" });
+
         for await (const chunk of state.dbStore!.readAllChunks()) {
           try {
             !state.dryRun && (await state.streamWriter!.write(chunk)); // Safe to await now
@@ -121,7 +123,7 @@ render(() => {
       fallback={(err) => {
         console.error(err);
         return (
-          <div class="w-screen h-screen bg-gray-800">
+          <div class="min-w-screen min-h-screen bg-gray-800">
             <pre class="whitespace-pre-wrap text-red-300 p-4 rounded">
               <h2>Error:</h2>
               <div>{String(err)}</div>
