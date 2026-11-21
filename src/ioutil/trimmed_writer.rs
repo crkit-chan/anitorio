@@ -1,3 +1,4 @@
+use crate::prelude::*;
 use std::io;
 
 pub struct TrimmedWriter<'a, W: io::Write> {
@@ -21,7 +22,7 @@ impl<W: io::Write> io::Write for TrimmedWriter<'_, W> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         if !buf.is_empty() {
             let trimmed = if self.is_first { &buf[1..] } else { buf };
-            if !trimmed.is_empty() {
+            if likely(!trimmed.is_empty()) {
                 if let Some(prev_last) = self.last.replace(*trimmed.last().unwrap()) {
                     self.writer.write_all(&[prev_last])?;
                 }

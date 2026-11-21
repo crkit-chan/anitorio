@@ -57,12 +57,13 @@ pub fn generate_lamps(
             if !occupied.request(pos) {
                 continue;
             }
+
             let curr_ent_n = get_ent_num(r as u32, c as u32);
             let mut lamp =
                 BlueprintEntity::new(curr_ent_n, &constants::LAMP, pos).with_always_on(true);
             let index = r * grid_dim.x as usize + c;
 
-            if top_right_ent_n.is_none() {
+            if unlikely(top_right_ent_n.is_none()) {
                 top_right_ent_n = Some(curr_ent_n); // Handle case of only one column
             }
 
@@ -90,7 +91,7 @@ pub fn generate_lamps(
             }
 
             if !matches!(mode, Mode::Static { combs: false, .. }) {
-                let is_top = prev_ent_ns[c].is_none();
+                let is_top = unlikely(prev_ent_ns[c].is_none());
 
                 // prev_ents_n tracks the entity numbers for the rows above
                 // if it's none then we never connected the top row
@@ -100,7 +101,7 @@ pub fn generate_lamps(
                 {
                     wires.push([curr_ent_n, WIRE_R, prev, WIRE_R]); // horizontal timing wire
                 }
-                if (is_top || prefer_horizontal_wires || was_top)
+                if (is_top || prefer_horizontal_wires || unlikely(was_top))
                     && let Some(prev) = prev_ent_n
                 {
                     wires.push([curr_ent_n, WIRE_G, prev, WIRE_G]); // horizontal data wire
@@ -119,7 +120,7 @@ pub fn generate_lamps(
             prev_ent_ns[c] = prev_ent_n;
         }
 
-        if top_left_ent_n.is_none() {
+        if unlikely(top_left_ent_n.is_none()) {
             top_left_ent_n = prev_ent_n;
         }
     }

@@ -2,6 +2,7 @@
 
 use super::{constants, dvec2_xy};
 use crate::models::RawJsonString;
+use crate::prelude::*;
 use crate::util::{is_default, is_none_or_default};
 use glam::DVec2;
 use serde::{
@@ -663,12 +664,12 @@ impl Eq for DeciderCombinatorCustomParameters {}
 impl Serialize for DeciderCombinatorCustomParameters {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let mut state = serializer.serialize_struct("DeciderCombinatorParameters", 2)?;
-        if self.conditions.is_empty() {
+        if unlikely(self.conditions.is_empty()) {
             state.skip_field("conditions")
         } else {
             state.serialize_field("conditions", &self.conditions)
         }?;
-        if self.indices.is_empty() {
+        if unlikely(self.indices.is_empty()) {
             state.skip_field("outputs")
         } else {
             let outputs = IndexedDeciderCombinatorOutputs {
@@ -829,12 +830,14 @@ impl Wires {
         self.wire_ids.push(WireConnectorId::pack(wire[1] as u8, wire[3] as u8));
     }
 
+    #[must_use]
     #[inline]
     pub fn len(&self) -> usize {
         debug_assert!(self.entity_ids.len() == self.wire_ids.len());
         self.wire_ids.len()
     }
 
+    #[inline]
     pub const fn swap_networks(&mut self) {
         self.should_swap ^= true;
     }

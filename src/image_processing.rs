@@ -154,7 +154,6 @@ impl<'a> FrameData<'a> {
             }
 
             if unlikely(self.is_first) {
-                cold_path();
                 self.is_first = false;
             } else {
                 let (duration, progress): (f64, f64);

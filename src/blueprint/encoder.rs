@@ -243,7 +243,6 @@ impl<'a, W: Write> BlueprintEncoder<'a, W> {
         unused_mut,
         reason = "Only enabled with threads"
     )]
-    #[inline]
     pub async fn finish(mut self) -> Result<W, JsError> {
         report_progress(1.0, "Finishing...");
 

@@ -1,3 +1,4 @@
+use crate::prelude::*;
 use crate::{ts, util::JsCall};
 use std::io;
 
@@ -87,7 +88,8 @@ impl io::Seek for JsFileReader {
             io::SeekFrom::End(n) => i128::from(self.size) + i128::from(n),
             io::SeekFrom::Current(n) => i128::from(self.pos) + i128::from(n),
         };
-        if new_position < 0 || new_position > i128::from(u64::MAX) {
+        if unlikely(new_position < 0 || new_position > i128::from(u64::MAX)) {
+            cold_path();
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "Invalid seek position",

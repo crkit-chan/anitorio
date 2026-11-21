@@ -16,11 +16,13 @@ impl<F: FnMut(Vec<u8>) -> Result<(), JsValue>> StreamingWriter<F> {
         }
     }
 
+    #[inline]
     fn call_on_chunk(&mut self, chunk: Vec<u8>) -> io::Result<()> {
         (self.on_chunk)(chunk)
             .map_err(|e| io::Error::other(e.as_string().unwrap_or_else(|| format!("{e:?}"))))
     }
 
+    #[inline]
     fn emit(&mut self) -> io::Result<()> {
         while self.buffer.len() >= self.threshold {
             let remainder = self.buffer.split_off(self.threshold);
@@ -40,6 +42,7 @@ impl<F: FnMut(Vec<u8>) -> Result<(), JsValue>> StreamingWriter<F> {
 }
 
 impl<F: FnMut(Vec<u8>) -> Result<(), JsValue>> Write for StreamingWriter<F> {
+    #[inline]
     fn write(&mut self, data: &[u8]) -> io::Result<usize> {
         self.buffer.extend_from_slice(data);
         self.emit()?;

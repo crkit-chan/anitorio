@@ -63,10 +63,10 @@ impl PowerPoleOccupied {
         let mut wires = Wires::new();
         let mut curr_ent_n = base_ent_n;
         let cov = self.coverage;
-
         if cov == 0.0 {
             return (Vec::new(), wires, base_ent_n);
         }
+
         let horiz = args.prefer_horizontal_wires ^ args.image_args.rotate.swaps_dimensions();
         let mut pole_pos_map = BTreeMap::<(i32, i32), u32>::new();
         let n_poles = self.requests.len();
@@ -74,7 +74,7 @@ impl PowerPoleOccupied {
         requests.sort_by(|&a, &b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
 
         for (i, &&req) in requests.iter().enumerate() {
-            if matches!(args.image_args.mode, Mode::Static { .. }) && i % 100 == 0 {
+            if unlikely(matches!(args.image_args.mode, Mode::Static { .. }) && i % 100 == 0) {
                 set_progress(
                     0.70,
                     0.85,
@@ -91,7 +91,7 @@ impl PowerPoleOccupied {
         let offset_left = ivec2(-cov as i32, 0);
 
         for (i, (&pos, &ent_n)) in pole_pos_map.iter().enumerate() {
-            if matches!(args.image_args.mode, Mode::Static { .. }) && i % 100 == 0 {
+            if unlikely(matches!(args.image_args.mode, Mode::Static { .. }) && i % 100 == 0) {
                 set_progress(
                     0.85,
                     0.90,
@@ -133,9 +133,10 @@ impl PowerPoleOccupied {
     }
 
     fn test_center(&self, mut point: DVec2) -> (bool, DVec2) {
-        if self.coverage == 0.0 {
+        if unlikely(self.coverage == 0.0) {
             return (true, DVec2::ZERO);
         }
+
         point -= self.start_pos;
 
         let center = (point / self.coverage).round() * self.coverage;
