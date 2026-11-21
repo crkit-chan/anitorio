@@ -52,6 +52,7 @@ pub struct ImageArgs {
     pub target_fps:         u8,
 }
 impl ImageArgs {
+    #[must_use]
     pub const fn bits(&self) -> u32 {
         if self.grayscale_bits > 0 {
             self.grayscale_bits as u32

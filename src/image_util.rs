@@ -1,4 +1,5 @@
 /// Copied from image crate
+#[must_use]
 pub const fn resize_dimensions(
     width: u32,
     height: u32,
@@ -29,9 +30,14 @@ pub const fn resize_dimensions(
     }
 }
 
+#[must_use]
+#[inline]
 const fn u64_max(a: u64, b: u64) -> u64 {
     if a > b { a } else { b }
 }
+
+#[must_use]
+#[inline]
 const fn u32_max(a: u32, b: u32) -> u32 {
     if a > b { a } else { b }
 }

@@ -6,3 +6,5 @@ pub use wasm_bindgen::JsError;
 
 #[allow(unused, clippy::allow_attributes, reason = "Log may not be used")]
 pub use crate::macros::log;
+
+pub use std::hint::{cold_path, likely, unlikely};

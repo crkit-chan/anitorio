@@ -1,6 +1,6 @@
-use crate::boxed_slice;
-
 use super::prelude::*;
+use crate::boxed_slice;
+use crate::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{cell::RefCell, sync::Arc};
 
@@ -52,16 +52,18 @@ pub fn load_data(data_json_reader: impl std::io::Read) -> Result<(), JsError> {
     let mut signals: Vec<Arc<SignalID>> = Vec::with_capacity(data.signals.len() * qualities.len());
 
     for sig in data.signals {
+        let type_ = sig_types.iter().rfind(|&x| *x == sig.type_);
+        let type_ = if unlikely(type_.is_none()) {
+            sig_types.push(Arc::clone(&sig.type_));
+            Arc::clone(&sig.type_)
+        } else {
+            Arc::clone(type_.unwrap())
+        };
+
         for qual in &qualities {
             signals.push(Arc::from(SignalID {
-                #[expect(clippy::option_if_let_else, reason = "Mutability access")]
-                type_: if let Some(type_) = sig_types.iter().rfind(|&x| *x == sig.type_) {
-                    Arc::clone(type_)
-                } else {
-                    sig_types.push(Arc::clone(&sig.type_));
-                    Arc::clone(&sig.type_)
-                },
-                name: Arc::clone(&sig.name),
+                type_:   type_.clone(),
+                name:    Arc::clone(&sig.name),
                 quality: qual.clone(),
             }));
         }

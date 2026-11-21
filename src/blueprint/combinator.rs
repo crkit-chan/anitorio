@@ -1,6 +1,6 @@
 use super::{power_pole::PowerPoleOccupied, prelude::*};
 use crate::image_processing::rgb_to_int;
-use crate::{arithmetic_conds, decider_cond, entity_idx_by_tag, mkwires};
+use crate::{arithmetic_conds, decider_cond, mkwires};
 use crate::{boxed_slice, prelude::*};
 use glam::{DVec2, IVec2, dvec2};
 use std::{cell::RefCell, collections::BTreeMap, sync::Arc};
@@ -265,6 +265,7 @@ pub fn generate_combinators(
     let get_dir = |tag: &str| -> u32 { pos_dict.get(tag).unwrap().direction.unwrap_or(0) };
 
     {
+        // Find the used entities so we can jiggle around the positions until they fit in between the power poles
         let mut used_tags: Vec<&str> = Vec::new();
         if use_delta_comp {
             used_tags.extend(["delay", "memory"]);

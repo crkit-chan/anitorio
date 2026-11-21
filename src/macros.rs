@@ -8,8 +8,7 @@
 macro_rules! log {
     ($($arg:tt)*) => {{
         let value = format!($($arg)*);
-        web_sys::console::log_1(&value.clone().into());
-        value
+        ::web_sys::console::log_1(&value.clone().into());
     }};
 }
 
@@ -17,12 +16,12 @@ macro_rules! log {
 #[macro_export]
 macro_rules! lazy_arc_const {
     (pub $name:ident: $type:ident = $value:expr) => {
-        pub static $name: std::sync::LazyLock<std::sync::Arc<$type>> =
-            std::sync::LazyLock::new(|| std::sync::Arc::from($value));
+        pub static $name: ::std::sync::LazyLock<::std::sync::Arc<$type>> =
+            ::std::sync::LazyLock::new(|| ::std::sync::Arc::from($value));
     };
     ($name:ident: $type:ident = $value:expr) => {
-        static $name: std::sync::LazyLock<std::sync::Arc<$type>> =
-            std::sync::LazyLock::new(|| std::sync::Arc::from($value));
+        static $name: ::std::sync::LazyLock<::std::sync::Arc<$type>> =
+            ::std::sync::LazyLock::new(|| ::std::sync::Arc::from($value));
     };
 }
 

@@ -12,7 +12,7 @@ use crate::image_processing::FrameData;
 use crate::models::RawJsonString;
 use crate::{boxed_slice, prelude::*};
 use crate::{decider_cond, util::format_duration};
-use glam::{UVec2, dvec2, uvec2};
+use glam::{DVec2, UVec2, dvec2, uvec2};
 use image::GenericImageView;
 use std::{io, sync::Arc};
 
@@ -25,6 +25,43 @@ const ENCODE_CHUNK_SIZE: usize = 100;
 const WIRE_ENCODE_CHUNK_SIZE: usize = 5000;
 
 type SignalDataResult = (Box<[Arc<SignalID>]>, Arc<[RawJsonString]>);
+
+/// Precomputed transformation for flipping entities.
+#[derive(Clone, Copy)]
+struct PositionTransform {
+    swap:   bool,
+    x_sign: f64,
+    y_sign: f64,
+}
+impl PositionTransform {
+    const fn new(args: &BlueprintArgs) -> Self {
+        let (mut x_sign, mut y_sign, swap) = match args.image_args.rotate {
+            ImageRotate::Deg90 => (1.0, -1.0, true),
+            ImageRotate::Deg180 => (-1.0, -1.0, false),
+            ImageRotate::Deg270 => (-1.0, 1.0, true),
+            _ => (1.0, 1.0, false),
+        };
+
+        if args.image_args.flip.x() {
+            x_sign = -x_sign;
+        }
+        if args.image_args.flip.y() {
+            y_sign = -y_sign;
+        }
+
+        Self { swap, x_sign, y_sign }
+    }
+
+    #[must_use]
+    #[inline]
+    const fn apply(self, pos: DVec2) -> DVec2 {
+        if self.swap {
+            dvec2(pos.y * self.x_sign, pos.x * self.y_sign)
+        } else {
+            dvec2(pos.x * self.x_sign, pos.y * self.y_sign)
+        }
+    }
+}
 
 /// Data for blueprint generation.
 pub struct BlueprintGenerator<'a> {
@@ -55,8 +92,9 @@ pub struct BlueprintGenerator<'a> {
 
     /// Keeps track of positions currently occupied by power poles, and used to request powerage
     /// for generated entities.
-    occupied: PowerPoleOccupied,
-    palette:  Option<ColorPalette>,
+    occupied:           PowerPoleOccupied,
+    palette:            Option<ColorPalette>,
+    position_transform: PositionTransform,
 
     /// List of unique signals to use for the blueprint.
     signals: Box<[Arc<SignalID>]>,
@@ -174,6 +212,7 @@ impl<'a> BlueprintGenerator<'a> {
             n_groups,
             occupied: PowerPoleOccupied::new(dvec2(0.0, -f64::from(args.display_margin_y)), args),
             palette: None,
+            position_transform: PositionTransform::new(args),
             signals,
             signals_json,
             state: BlueprintState::Start,
@@ -185,9 +224,52 @@ impl<'a> BlueprintGenerator<'a> {
         self
     }
 
-    /// Calculates the required position for the given entity to counteract the rotation of the
-    /// image.
-    fn transform_entity(args: &BlueprintArgs, en: &mut BlueprintEntity) {
+    // /// Calculates the required position for the given entity to counteract the rotation of the
+    // /// image.
+    // fn transform_entity(args: &BlueprintArgs, en: &mut BlueprintEntity) {
+    //     if !args.prefer_green_wires
+    //         && let Some(ControlBehavior::DeciderCombinator { decider_conditions }) =
+    //             en.control_behavior.as_mut()
+    //     {
+    //         decider_conditions.swap_networks();
+    //     }
+
+    //     let mut pos = en.position;
+    //     match args.image_args.flip {
+    //         ImageFlip::X => pos.x *= -1.0,
+    //         ImageFlip::Y => pos.y *= -1.0,
+    //         ImageFlip::Both => pos *= -1.0,
+    //         _ => (),
+    //     }
+    //     match args.image_args.rotate {
+    //         ImageRotate::Deg90 => pos = dvec2(pos.y, -pos.x),
+    //         ImageRotate::Deg180 => pos *= -1.0,
+    //         ImageRotate::Deg270 => pos = dvec2(-pos.y, pos.x),
+    //         _ => (),
+    //     }
+
+    //     en.position = pos;
+    //     en.direction = en.direction.map(|mut v| {
+    //         match args.image_args.rotate {
+    //             ImageRotate::Deg90 => v += 12,
+    //             ImageRotate::Deg180 => v += 8,
+    //             ImageRotate::Deg270 => v += 4,
+    //             _ => (),
+    //         }
+    //         match args.image_args.flip {
+    //             ImageFlip::X if (v + 4) % 8 == 0 => v += 8,
+    //             ImageFlip::Y if v % 8 == 0 => v += 8,
+    //             ImageFlip::Both => v += 8,
+    //             _ => (),
+    //         }
+    //         v % 16
+    //     });
+    // }
+    fn transform_entity(
+        args: &BlueprintArgs,
+        position_transform: &PositionTransform,
+        en: &mut BlueprintEntity,
+    ) {
         if !args.prefer_green_wires
             && let Some(ControlBehavior::DeciderCombinator { decider_conditions }) =
                 en.control_behavior.as_mut()
@@ -195,21 +277,7 @@ impl<'a> BlueprintGenerator<'a> {
             decider_conditions.swap_networks();
         }
 
-        let mut pos = en.position;
-        match args.image_args.flip {
-            ImageFlip::X => pos.x *= -1.0,
-            ImageFlip::Y => pos.y *= -1.0,
-            ImageFlip::Both => pos *= -1.0,
-            _ => (),
-        }
-        match args.image_args.rotate {
-            ImageRotate::Deg90 => pos = dvec2(pos.y, -pos.x),
-            ImageRotate::Deg180 => pos *= -1.0,
-            ImageRotate::Deg270 => pos = dvec2(-pos.y, pos.x),
-            _ => (),
-        }
-
-        en.position = pos;
+        en.position = position_transform.apply(en.position);
         en.direction = en.direction.map(|mut v| {
             match args.image_args.rotate {
                 ImageRotate::Deg90 => v += 12,
@@ -217,12 +285,14 @@ impl<'a> BlueprintGenerator<'a> {
                 ImageRotate::Deg270 => v += 4,
                 _ => (),
             }
+
             match args.image_args.flip {
                 ImageFlip::X if (v + 4) % 8 == 0 => v += 8,
                 ImageFlip::Y if v % 8 == 0 => v += 8,
                 ImageFlip::Both => v += 8,
                 _ => (),
             }
+
             v % 16
         });
     }
@@ -349,7 +419,7 @@ impl<'a> BlueprintGenerator<'a> {
                     self.entity_data.wires.extend(wires);
 
                     for en in &mut self.entity_data.ents {
-                        Self::transform_entity(self.args, en);
+                        Self::transform_entity(self.args, &self.position_transform, en);
                     }
 
                     // Write remaining entities. Data combinators were NOT included in
@@ -563,7 +633,7 @@ impl<'a> BlueprintGenerator<'a> {
             }
 
             for en in &mut grp_lamps {
-                Self::transform_entity(self.args, en);
+                Self::transform_entity(self.args, &self.position_transform, en);
             }
 
             write_json_trimmed_to(writer, &grp_lamps)?;
@@ -786,7 +856,7 @@ impl<'a> BlueprintGenerator<'a> {
 
         for en in &mut output_data {
             self.occupied.request(en.position); // Request powerage for generated combinators
-            Self::transform_entity(self.args, en); // Translate positions
+            Self::transform_entity(self.args, &self.position_transform, en); // Translate positions
 
             if *en.name == **CONSTANT_COMB {
                 en.player_description = Some(self.get_description());

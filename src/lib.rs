@@ -1,3 +1,5 @@
+#![feature(cold_path, likely_unlikely)]
+
 use wasm_bindgen::prelude::*;
 
 mod blueprint;

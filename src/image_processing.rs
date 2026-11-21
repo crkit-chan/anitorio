@@ -72,6 +72,8 @@ impl<'a> FrameData<'a> {
         image_args: &'a ImageArgs,
         on_frame: Option<Rc<FrameCallback>>,
     ) -> Self {
+        #[must_use]
+        #[inline]
         const fn expected_output_frames(n_ms: u64, fps: u32) -> usize {
             1 + ((n_ms * fps as u64) / 1000) as usize
         }
@@ -81,44 +83,42 @@ impl<'a> FrameData<'a> {
             .min(f64::from(image_args.max_size) / f64::from(in_dim.y))
             .min(1.0);
 
-        {
-            let mut obj = Self {
-                out_n_frames: match image_args.mode {
-                    Mode::Static { .. } => 1,
-                    _ => expected_output_frames(
-                        (frame_data.info.duration.unwrap() * 1000.0) as u64,
-                        u32::from(image_args.target_fps.max(1)),
-                    ),
-                },
-                args: image_args,
-                curr_n_us: 0,
-                fps_timer: now_ms(),
-                decoder: frame_data.decoder,
-                in_dim,
-                in_frame_i: 0,
-                is_first: true,
-                on_frame,
-                out_dim_raw: scale_factor * DVec2::from(in_dim),
-                out_frame_i: 0,
-                palette: None,
-                prev_img: None,
-            };
-            obj.decoder.dim = obj.out_dim_raw();
-            obj
-        }
+        let mut obj = Self {
+            out_n_frames: match image_args.mode {
+                Mode::Static { .. } => 1,
+                _ => expected_output_frames(
+                    (frame_data.info.duration.unwrap() * 1000.0) as u64,
+                    u32::from(image_args.target_fps.max(1)),
+                ),
+            },
+            args: image_args,
+            curr_n_us: 0,
+            fps_timer: now_ms(),
+            decoder: frame_data.decoder,
+            in_dim,
+            in_frame_i: 0,
+            is_first: true,
+            on_frame,
+            out_dim_raw: scale_factor * DVec2::from(in_dim),
+            out_frame_i: 0,
+            palette: None,
+            prev_img: None,
+        };
+        obj.decoder.dim = obj.out_dim_raw();
+        obj
     }
 
     pub async fn next(&mut self) -> Result<Option<Arc<image::DynamicImage>>, JsError> {
         let mut img: Option<Arc<image::DynamicImage>> = None;
         let use_js_decode = matches!(self.decoder.state, FrameDecoderState::JsFrames { .. });
 
-        if matches!(self.args.mode, Mode::Static { .. }) {
+        if unlikely(matches!(self.args.mode, Mode::Static { .. })) {
             let Some(FrameWithTime(f, timestamp)) = self.decoder.next_frame().await? else {
                 return Ok(None);
             };
             img = Some(Arc::new(self.convert_frame(f.into_buffer())));
             self.curr_n_us = timestamp;
-        } else if self.out_frame_i == 0 {
+        } else if unlikely(self.out_frame_i == 0) {
             self.fps_timer = now_ms();
         }
 
@@ -138,7 +138,7 @@ impl<'a> FrameData<'a> {
                 return Ok(Some(frame));
             } else if self.out_t_us() >= self.curr_n_us {
                 // If decoder is finished, we're done
-                if self.decoder.is_finished() {
+                if unlikely(self.decoder.is_finished()) {
                     return Ok(None);
                 }
                 // On last input frame, continue in case there are remaining output frames
@@ -153,7 +153,8 @@ impl<'a> FrameData<'a> {
                 self.in_frame_i += 1;
             }
 
-            if self.is_first {
+            if unlikely(self.is_first) {
+                cold_path();
                 self.is_first = false;
             } else {
                 let (duration, progress): (f64, f64);
@@ -197,6 +198,7 @@ impl<'a> FrameData<'a> {
     }
 
     /// Converts the input frame to the target output using the specified settings.
+    #[must_use]
     pub fn convert_frame(&self, buf: image::RgbaImage) -> image::DynamicImage {
         let mut img = image::DynamicImage::ImageRgba8(buf);
         let out_dim = self.out_dim_raw.round().as_uvec2();
@@ -256,6 +258,7 @@ impl<'a> FrameData<'a> {
         if let Some(palette) = self.palette.as_ref() {
             let indexes =
                 quantized_frame_to_outputs(&img.view(0, 0, img.width(), img.height()), palette);
+
             match &mut img {
                 image::DynamicImage::ImageRgba8(inner) => {
                     for (pixel, v) in inner.pixels_mut().zip(indexes) {
@@ -363,6 +366,7 @@ pub async fn build_palette(
 
     let mut result = {
         let mut hist = imagequant::Histogram::new(&attr);
+
         while let Some(frame) = generator.next().await? {
             let (w, h) = (frame.width() as usize, frame.height() as usize);
             let mut qimg = match Arc::unwrap_or_clone(frame) {
@@ -473,7 +477,7 @@ impl<'a> FrameDecoder<'a> {
                 let frame = frames.next().transpose()?.map(|f| {
                     let delay = f.delay();
                     let output = FrameWithTime(f, self.curr_n_us);
-                    let delay: core::time::Duration = if delay.numer_denom_ms().0 == 0 {
+                    let delay: core::time::Duration = if unlikely(delay.numer_denom_ms().0 == 0) {
                         DEFAULT_FRAME_DELAY
                     } else {
                         delay.into()
@@ -493,7 +497,7 @@ impl<'a> FrameDecoder<'a> {
                 let result = get_next_frame.call_n((&args_obj.into(),))?.await?;
                 let info: JsVideoFrameData = serde_wasm_bindgen::from_value(result)?;
 
-                if info.is_finished {
+                if unlikely(info.is_finished) {
                     self.finished = true;
                     return Ok(None);
                 }
@@ -552,7 +556,7 @@ pub async fn encode_gif(
             js_args.reflect_set("inBuffer", wasm_shared_memory(&in_buf)?)?;
             get_next_frame.call_n((&js_args.into(),))?.await?
         })?;
-        if info.is_finished {
+        if unlikely(info.is_finished) {
             break;
         }
 
@@ -569,6 +573,8 @@ pub async fn encode_gif(
     Ok(())
 }
 
+#[must_use]
+#[inline]
 pub const fn rgb_to_int(r: u8, g: u8, b: u8) -> u32 {
     ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
 }

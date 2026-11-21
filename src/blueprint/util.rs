@@ -39,8 +39,8 @@ pub fn color_frame_to_outputs(rgba: &image::SubImage<&image::DynamicImage>) -> B
         let inner = rgba.inner();
         let (x, y) = rgba.offsets();
 
-        let Some(rgba) = inner.as_rgb8() else {
-            panic!("Expected RGBA8")
+        let Some(rgba) = inner.as_rgba8() else {
+            panic!("Expected RGBA8, got '{:?}'", inner.color())
         };
         let rgba = rgba.as_raw();
         let stride = inner.width() as usize * 4;

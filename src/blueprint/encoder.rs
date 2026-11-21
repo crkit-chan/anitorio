@@ -28,7 +28,7 @@ impl Write for ChannelWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         if !buf.is_empty() {
             futures_lite::future::block_on(self.tx.send(Ok(buf.to_vec())))
-                .map_err(|e| io::Error::new(io::ErrorKind::BrokenPipe, e.to_string()))?;
+                .map_err(|e| io::Error::new(io::ErrorKind::BrokenPipe, e))?;
         }
         Ok(buf.len())
     }
@@ -44,6 +44,7 @@ fn compress(
     output: &Sender<Result<Vec<u8>, String>>,
 ) -> io::Result<()> {
     let writer = ChannelWriter { tx: output.clone() };
+    let writer = io::BufWriter::with_capacity(64 * 1024, writer);
     match mode {
         CompressionMode::Blueprint => {
             let base64 = EncoderWriter::new(writer, &STANDARD);
@@ -81,12 +82,15 @@ impl Compressor {
         });
         Self { input: Some(input_tx), output: output_rx }
     }
+    #[inline]
     pub async fn next_chunk(&self) -> Option<Result<Vec<u8>, String>> {
         self.output.recv().await.ok()
     }
+    #[inline]
     pub fn try_next_chunk(&self) -> Option<Result<Vec<u8>, String>> {
         self.output.try_recv().ok()
     }
+    #[inline]
     pub fn finish(&mut self) {
         self.input.take();
     }
@@ -104,6 +108,7 @@ impl Write for Compressor {
         }
         Ok(buf.len())
     }
+    #[inline]
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
     }
@@ -120,6 +125,7 @@ enum OutputWriter<'a, W: Write> {
     Json(W),
 }
 impl<W: Write> io::Write for OutputWriter<'_, W> {
+    #[inline]
     fn flush(&mut self) -> io::Result<()> {
         match self {
             Self::Blueprint(w) => w.flush(),
@@ -129,6 +135,7 @@ impl<W: Write> io::Write for OutputWriter<'_, W> {
             Self::ThreadedCompressed { compressor: w, .. } => w.flush(),
         }
     }
+    #[inline]
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         match self {
             Self::Blueprint(w) => w.write(buf),
@@ -215,8 +222,9 @@ impl<'a, W: Write> BlueprintEncoder<'a, W> {
         Ok(Self { generator, writer })
     }
 
+    #[inline]
     pub async fn next(&mut self) -> Result<Option<()>, JsError> {
-        if self.generator.done() {
+        if unlikely(self.generator.done()) {
             return Ok(None);
         }
         self.generator.next_chunk(&mut self.writer).await?;
@@ -235,6 +243,7 @@ impl<'a, W: Write> BlueprintEncoder<'a, W> {
         unused_mut,
         reason = "Only enabled with threads"
     )]
+    #[inline]
     pub async fn finish(mut self) -> Result<W, JsError> {
         report_progress(1.0, "Finishing...");
 
@@ -245,6 +254,7 @@ impl<'a, W: Write> BlueprintEncoder<'a, W> {
             }
             self.writer.drain().await?;
         }
+
         self.writer.finish()
     }
 }

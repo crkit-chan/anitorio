@@ -2,13 +2,15 @@
 macro_rules! arithmetic_conds {
     ($in_sig:ident $op:tt $second:expr => $out_sig:ident) => {
         $crate::blueprint::models::ArithmeticCombinatorParameters {
-            first_signal:           Some(std::sync::Arc::clone(&$in_sig)),
+            first_signal:           ::core::option::Option::Some(::std::sync::Arc::clone(&$in_sig)),
             first_signal_networks:  "both".into(),
-            second_signal:          None,
+            second_signal:          ::core::option::Option::None,
             second_signal_networks: "both".into(),
             second_constant:        $second,
             operation:              $crate::blueprint::macros::arithmetic_cond_op!($op),
-            output_signal:          Some(std::sync::Arc::clone(&$out_sig)),
+            output_signal:          ::core::option::Option::Some(::std::sync::Arc::clone(
+                &$out_sig,
+            )),
         }
     };
 }
@@ -88,10 +90,10 @@ macro_rules! decider_cond_op {
 macro_rules! mkwires {
     ($wire_type:ident $ents:ident; $src_type:ident $src_name:expr => $dst_type:ident $dst_name:expr) => {
         [
-            entity_idx_by_tag!($ents, $src_name).expect("No entity found with tag"),
-            mkwires!(@wire_type $wire_type, $src_type),
-            entity_idx_by_tag!($ents, $dst_name).expect("No entity found with tag"),
-            mkwires!(@wire_type $wire_type, $dst_type),
+            $crate::blueprint::macros::entity_idx_by_tag!($ents, $src_name).expect("No entity found with tag"),
+            $crate::blueprint::macros::mkwires!(@wire_type $wire_type, $src_type),
+            $crate::blueprint::macros::entity_idx_by_tag!($ents, $dst_name).expect("No entity found with tag"),
+            $crate::blueprint::macros::mkwires!(@wire_type $wire_type, $dst_type),
         ]
     };
 
@@ -113,3 +115,5 @@ macro_rules! entity_idx_by_tag {
 
 pub use arithmetic_cond_op;
 pub use decider_cond_op;
+pub use entity_idx_by_tag;
+pub use mkwires;
