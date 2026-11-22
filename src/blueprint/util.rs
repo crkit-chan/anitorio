@@ -108,26 +108,24 @@ pub fn color_frame_to_outputs(rgba: &image::SubImage<&image::DynamicImage>) -> B
 /// A vector of JSON objects representing output filters.
 pub fn grayscale_frames_to_outputs(
     frames: &[image::SubImage<&image::DynamicImage>],
-    grayscale_bits: u32,
+    bits: u32,
 ) -> Box<[i32]> {
     assert!(!frames.is_empty(), "No frames provided for packing");
 
-    let num_pixels = (frames[0].width() * frames[0].height()) as usize;
+    let (width, height) = frames[0].dimensions();
+    let num_pixels = (width * height) as usize;
     let mut outputs = boxed_slice![0i32; num_pixels];
 
-    match grayscale_bits {
+    match bits {
         1 | 4 | 8 => {
-            let bits = grayscale_bits;
-
             for (i, output) in outputs.iter_mut().enumerate() {
                 let mut packed = 0u32;
 
                 for (j, img) in frames.iter().enumerate() {
-                    let x = (i as u32) % frames[0].width();
-                    let y = (i as u32) / frames[0].width();
+                    let x = (i as u32) % width;
+                    let y = (i as u32) / width;
 
                     let pixel = img.get_pixel(x, y)[0];
-
                     let value = match bits {
                         1 => u32::from(pixel >= constants::GRAYSCALE_THRESH),
                         4 => u32::from(pixel >> 4),
@@ -141,8 +139,9 @@ pub fn grayscale_frames_to_outputs(
                 *output = packed.cast_signed();
             }
         }
-        _ => panic!("Unsupported grayscale bit depth '{grayscale_bits}'"),
+        _ => panic!("Unsupported grayscale bit depth '{bits}'"),
     }
+
     outputs
 }
 
