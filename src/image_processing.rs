@@ -1,30 +1,34 @@
+use crate::callbacks::perf_now;
 use crate::constants;
 use crate::util::wasm_shared_memory;
 use crate::{constants::DEFAULT_FRAME_DELAY, util::format_duration};
 use crate::{prelude::*, ts};
 use glam::{DVec2, UVec2, uvec2};
 use image::{AnimationDecoder, GenericImageView, imageops};
-use std::{pin::Pin, rc::Rc, sync::Arc, time::Duration};
+use std::{cell::Cell, pin::Pin, rc::Rc, sync::Arc, time::Duration};
 use wasm_bindgen::JsValue;
+
+const MAX_CALLBACKS: usize = 4;
 
 pub type FrameCallback = dyn for<'a> Fn(
     &'a image::DynamicImage,
 ) -> Pin<Box<dyn Future<Output = Result<(), JsError>> + 'a>>;
 
 pub struct FrameData<'a> {
-    args:         &'a ImageArgs,
-    curr_n_us:    u64,
-    decoder:      FrameDecoder<'a>,
-    fps_timer:    f64,
-    in_dim:       UVec2,
-    in_frame_i:   usize,
-    is_first:     bool,
-    on_frame:     Option<Rc<FrameCallback>>,
-    out_dim_raw:  DVec2,
-    out_frame_i:  usize,
-    out_n_frames: usize,
-    palette:      Option<ColorPalette>,
-    prev_img:     Option<(Arc<image::DynamicImage>, u64)>,
+    active_callbacks: Rc<Cell<usize>>,
+    args:             &'a ImageArgs,
+    curr_n_us:        u64,
+    decoder:          FrameDecoder<'a>,
+    fps_timer:        f64,
+    in_dim:           UVec2,
+    in_frame_i:       usize,
+    is_first:         bool,
+    on_frame:         Option<Rc<FrameCallback>>,
+    out_dim_raw:      DVec2,
+    out_frame_i:      usize,
+    out_n_frames:     usize,
+    palette:          Option<ColorPalette>,
+    prev_img:         Option<(Arc<image::DynamicImage>, u64)>,
 }
 impl FrameData<'_> {
     /// Returns the dimensions of the output frames.
@@ -91,6 +95,7 @@ impl<'a> FrameData<'a> {
                     u32::from(image_args.target_fps.max(1)),
                 ),
             },
+            active_callbacks: Rc::new(Cell::new(0)),
             args: image_args,
             curr_n_us: 0,
             fps_timer: now_ms(),
@@ -132,8 +137,18 @@ impl<'a> FrameData<'a> {
 
             // Flush any remaining frames
             if let Some(frame) = img {
-                if let Some(callback) = &self.on_frame {
-                    callback(frame.as_ref()).await?;
+                if let Some(callback) = self.on_frame.clone() {
+                    let active = Rc::clone(&self.active_callbacks);
+                    if active.get() < MAX_CALLBACKS {
+                        active.set(active.get() + 1);
+
+                        let frame = Arc::clone(&frame);
+                        wasm_bindgen_futures::spawn_local(async move {
+                            let result = callback(frame.as_ref()).await;
+                            active.set(active.get() - 1);
+                            result.unwrap();
+                        });
+                    }
                 }
                 return Ok(Some(frame));
             } else if self.out_t_us() >= self.curr_n_us {
@@ -141,11 +156,10 @@ impl<'a> FrameData<'a> {
                 if unlikely(self.decoder.is_finished()) {
                     return Ok(None);
                 }
-                // On last input frame, continue in case there are remaining output frames
-                let Some(FrameWithTime(frame, timestamp)) = self.decoder.next_frame().await? else {
-                    continue;
-                };
 
+                let Some(FrameWithTime(frame, timestamp)) = self.decoder.next_frame().await? else {
+                    continue; // On last input frame, continue in case there are remaining output frames
+                };
                 self.curr_n_us = timestamp + Duration::from(frame.delay()).as_micros() as u64;
 
                 let img = self.convert_frame(frame.into_buffer());

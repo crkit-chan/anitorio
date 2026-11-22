@@ -1,4 +1,9 @@
 #![allow(dead_code, reason = "Satisfy Factorio Lua API")]
+#![allow(
+    clippy::allow_attributes,
+    clippy::struct_field_names,
+    reason = "Factorio Lua API"
+)]
 
 use super::{constants, dvec2_xy};
 use crate::models::RawJsonString;

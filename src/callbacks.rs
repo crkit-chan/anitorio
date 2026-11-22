@@ -1,5 +1,5 @@
 use crate::{prelude::*, ts};
-use std::cell::RefCell;
+use std::{cell::RefCell, sync::LazyLock};
 use wasm_bindgen::prelude::*;
 
 #[derive(tsify::Tsify, serde::Deserialize)]
@@ -18,6 +18,9 @@ pub struct Callbacks {
 
 thread_local! {
     static CALLBACKS: RefCell<Option<Callbacks>> = const { RefCell::new(None) };
+    pub static JS_SYS_GLOBAL: LazyLock<web_sys::Performance> = const {
+        LazyLock::new(|| js_sys::global().dyn_into::<web_sys::WorkerGlobalScope>().unwrap().performance().unwrap())
+    };
 }
 
 /// Sets the static callbacks to be used during blueprint generation.
@@ -58,8 +61,7 @@ pub fn set_progress(start: f64, end: f64, progress: f64, msg: &str) {
 }
 
 #[allow(clippy::allow_attributes, dead_code, reason = "api")]
+#[inline]
 pub fn perf_now() -> f64 {
-    CALLBACKS
-        .with_borrow(|cbs| -> Option<f64> { cbs.as_ref()?.perf_now.call_n(()).ok()?.as_f64() })
-        .unwrap_or_else(crate::util::now_ms)
+    JS_SYS_GLOBAL.with(|obj| obj.now())
 }
