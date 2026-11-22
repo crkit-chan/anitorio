@@ -1,4 +1,3 @@
-use crate::callbacks::perf_now;
 use crate::constants;
 use crate::util::wasm_shared_memory;
 use crate::{constants::DEFAULT_FRAME_DELAY, util::format_duration};

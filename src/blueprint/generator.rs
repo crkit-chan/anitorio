@@ -740,7 +740,7 @@ impl<'a> BlueprintGenerator<'a> {
                             .collect::<Box<_>>();
 
                         frame_sigs = self.palette.as_ref().map_or_else(
-                            || grayscale_frames_to_outputs(&frames, gray_bits),
+                            || grayscale_frames_to_outputs(&frames, gray_bits.into()),
                             |palette| palette_frames_to_outputs(&frames, palette),
                         );
 
