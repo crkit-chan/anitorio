@@ -256,7 +256,7 @@ pub fn generate_combinators(
         }
     }
 
-    {
+    if false {
         const SEARCH_RADIUS: i32 = 10;
 
         let layout_height = {
