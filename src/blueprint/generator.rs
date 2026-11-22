@@ -117,7 +117,7 @@ struct FrameInfo<'a> {
     use_delta_comp:   bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum BlueprintState {
     Start,
     Entities,

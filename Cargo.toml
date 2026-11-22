@@ -67,11 +67,7 @@ wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4.77"
 wasm-bindgen-rayon = { version = "1", optional = true }
 wasm-tracing-allocator = { version = "0.1.1", optional = true }
-web-sys = { version = "0.3", features = [
-    "console",
-    "WorkerGlobalScope",
-    "Performance",
-] }
+web-sys = { version = "0.3", features = ["console"] }
 
 
 [profile.dev]
@@ -118,6 +114,7 @@ demangle-name-section = true
 [features]
 default = []
 kiddo = ["dep:kiddo"]
+perf_timing = ["web-sys/WorkerGlobalScope", "web-sys/Performance"]
 profiling = ["dep:wasm-tracing-allocator"]
 release = []
 threads = [

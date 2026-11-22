@@ -1,5 +1,5 @@
 use crate::{prelude::*, ts};
-use std::{cell::RefCell, sync::LazyLock};
+use std::cell::RefCell;
 use wasm_bindgen::prelude::*;
 
 #[derive(tsify::Tsify, serde::Deserialize)]
@@ -18,9 +18,15 @@ pub struct Callbacks {
 
 thread_local! {
     static CALLBACKS: RefCell<Option<Callbacks>> = const { RefCell::new(None) };
-    pub static JS_SYS_GLOBAL: LazyLock<web_sys::Performance> = const {
-        LazyLock::new(|| js_sys::global().dyn_into::<web_sys::WorkerGlobalScope>().unwrap().performance().unwrap())
+
+    #[cfg(feature = "perf_timing")]
+    static WEB_SYS_PERFORMANCE: std::sync::LazyLock<web_sys::Performance> = const {
+        std::sync::LazyLock::new(|| {
+            let js_global = js_sys::global().dyn_into::<web_sys::WorkerGlobalScope>().unwrap();
+            js_global.performance().unwrap()
+        })
     };
+
 }
 
 /// Sets the static callbacks to be used during blueprint generation.
@@ -63,5 +69,13 @@ pub fn set_progress(start: f64, end: f64, progress: f64, msg: &str) {
 #[allow(clippy::allow_attributes, dead_code, reason = "api")]
 #[inline]
 pub fn perf_now() -> f64 {
-    JS_SYS_GLOBAL.with(|obj| obj.now())
+    #[cfg(feature = "perf_timing")]
+    {
+        WEB_SYS_PERFORMANCE.with(|obj| obj.now())
+    }
+
+    #[cfg(not(feature = "perf_timing"))]
+    {
+        js_sys::Date::now()
+    }
 }

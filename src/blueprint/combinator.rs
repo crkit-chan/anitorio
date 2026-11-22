@@ -1,8 +1,10 @@
 use super::{power_pole::PowerPoleOccupied, prelude::*};
 use crate::image_processing::rgb_to_int;
+use crate::util::bounding_box_midpoints;
 use crate::{arithmetic_conds, decider_cond, mkwires};
 use crate::{boxed_slice, prelude::*};
 use glam::{DVec2, IVec2, dvec2};
+use std::collections::HashSet;
 use std::{cell::RefCell, collections::BTreeMap, sync::Arc};
 
 thread_local! {
@@ -18,15 +20,16 @@ struct CombinatorPositionData {
 }
 
 #[must_use]
+#[inline]
 pub fn get_bounding_box(en: &BlueprintEntity) -> std::ops::Range<DVec2> {
     use super::constants::{ARI_CB, CONSTANT_COMB, DEC_CB, DIR_D, DIR_L, DIR_R, DIR_U};
     let offset = DVec2::from(match en.name.as_ref() {
-        name if name == &**ARI_CB || name == &**DEC_CB => match en.direction().unwrap_or(0) {
-            DIR_U | DIR_D => (1.0, 2.0),
-            DIR_L | DIR_R => (2.0, 1.0),
+        name if name == &**ARI_CB || name == &**DEC_CB => match en.direction() {
+            None | Some(DIR_U | DIR_D) => const { (1.0, 2.0) },
+            Some(DIR_L | DIR_R) => const { (2.0, 1.0) },
             _ => panic!("Unsupported entity direction"),
         },
-        name if name == &**CONSTANT_COMB => (1.0, 1.0),
+        name if name == &**CONSTANT_COMB => const { (1.0, 1.0) },
         _ => panic!("Unsupported entity type"),
     });
     (en.position - offset / 2.0)..(en.position + offset / 2.0)
@@ -110,7 +113,7 @@ pub fn generate_combinators(
     // Positions for combinators, for different widths.
     // TODO: Don't recalculate this for every group
     let mut best_pos_data: Option<CombinatorPositionData> = None;
-    let mut pos_dict = BTreeMap::<String, &BlueprintEntity>::new();
+    let mut pos_dict = BTreeMap::<String, BlueprintEntity>::new();
     let use_compact_layout = max_cols_per_grp < 2;
     let use_delta_comp = args.signal_compression == Some(SignalCompression::Delta);
     let bits = args.image_args.bits();
@@ -130,10 +133,10 @@ pub fn generate_combinators(
         best_pos_data = best_data.cloned();
     });
 
-    if let Some(d) = best_pos_data.as_ref() {
-        for en in &d.blueprint.blueprint.entities {
+    if let Some(d) = best_pos_data {
+        for en in d.blueprint.blueprint.entities {
             if let Some(tag) = en.player_description() {
-                pos_dict.insert(tag, en);
+                pos_dict.insert(tag.to_owned(), en);
             }
         }
     }
@@ -144,7 +147,6 @@ pub fn generate_combinators(
     let mut out_ent_n: Option<u32> = None;
 
     let use_const_cbs = matches!(args.image_args.mode, Mode::Static { const_cb: true, .. });
-    let mut height = best_pos_data.as_ref().map_or(0.0, |v| v.dim.y);
     let base_offset = start_pos; // Add a constant offset on dimensions
     let cb_midpoint = if use_const_cbs {
         const { dvec2(0.5, -0.5) }
@@ -154,6 +156,7 @@ pub fn generate_combinators(
         const { dvec2(1.0, -0.5) } // Base position for horizontal layout
     };
 
+    let mut palette_cb_height_diff: f64 = 0.0;
     let mut palette_in_ent_n: Option<u32> = None;
     let mut ent_to_palette_ent_n: Option<u32> = None;
     let mut data_cbs = LazyCombinators {
@@ -240,7 +243,7 @@ pub fn generate_combinators(
         }
 
         // Offset the height by the size of the generated palette combinators
-        height -= 2.0 * f64::from(1 + data_cbs.grid_pos.y) * cb_midpoint.y;
+        palette_cb_height_diff -= 2.0 * f64::from(1 + data_cbs.grid_pos.y) * cb_midpoint.y;
 
         data_cbs.reset();
         data_cbs.grid_pos.x = 0;
@@ -253,19 +256,25 @@ pub fn generate_combinators(
         }
     }
 
-    // Finds the position for the combinator with the given tag, based off the blueprint string we
-    // decoded earlier
-    let get_pos = |tag: &str| -> DVec2 {
-        let entry = pos_dict.get(tag).unwrap_or_else(|| panic!("No '{tag}'! ({bits} bits)"));
-        let mut pos = entry.position + base_offset;
-        pos.y -= height;
-        pos
-    };
-    let get_dir = |tag: &str| -> u8 { pos_dict.get(tag).unwrap().direction().unwrap_or(0) };
-
     {
+        const SEARCH_RADIUS: i32 = 10;
+
+        let layout_height = {
+            let mut bounds = DVec2::INFINITY..DVec2::NEG_INFINITY;
+
+            for en in pos_dict.values() {
+                let en_bounds = get_bounding_box(en);
+                bounds.start = bounds.start.min(en_bounds.start);
+                bounds.end = bounds.end.max(en_bounds.end);
+            }
+
+            (bounds.end - bounds.start).y + palette_cb_height_diff
+        };
+
+        let placement_origin = start_pos - dvec2(0.0, layout_height);
+
         // Find the used entities so we can jiggle around the positions until they fit in between the power poles
-        let mut used_tags: Vec<&str> = Vec::new();
+        let mut used_tags = Vec::new();
         if use_delta_comp {
             used_tags.extend(["delay", "memory"]);
         }
@@ -276,8 +285,106 @@ pub fn generate_combinators(
             }
         }
 
-        for tag in used_tags {}
+        let used_tags_iter = used_tags.iter().map(|&tag| {
+            assert!(pos_dict.contains_key(tag), "No '{tag}'! ({bits} bits)");
+            tag.to_owned()
+        });
+        let used_tags = used_tags_iter.collect::<Vec<_>>();
+        let original_positions: Vec<_> =
+            used_tags.iter().map(|tag| (tag, pos_dict[tag].position)).collect();
+
+        // The leftmost boundary of the original combinator group.
+        let (original_left, original_right) = (used_tags.iter())
+            .map(|tag| {
+                let bounds = get_bounding_box(&pos_dict[tag]);
+                (bounds.start.x, bounds.end.x)
+            })
+            .fold(
+                (f64::INFINITY, f64::NEG_INFINITY),
+                |(l, r), (new_l, new_r)| (l.min(new_l), r.max(new_r)),
+            );
+
+        let fits = |offset: DVec2| {
+            // Never shift the group further left than its original bounding box.
+            if offset.x < 0.0 {
+                return false;
+            }
+
+            used_tags.iter().all(|tag| {
+                let bounds = get_bounding_box(&pos_dict[tag]);
+                bounding_box_midpoints(bounds.start + offset, bounds.end + offset)
+                    .all(|pos| occupied.test(placement_origin + pos))
+            })
+        };
+
+        // Individual placement fallback.
+        let mut placed = HashSet::<(i32, i32)>::new();
+
+        for (tag, original_pos) in &original_positions {
+            let en = &pos_dict[*tag];
+            let bounds = get_bounding_box(en);
+            let new_positions = (-SEARCH_RADIUS..=SEARCH_RADIUS).flat_map(|y| {
+                (-SEARCH_RADIUS..=SEARCH_RADIUS)
+                    .map(move |x| *original_pos + dvec2(f64::from(x), f64::from(y)))
+            });
+            let new_positions = new_positions.filter(|&pos| {
+                let offset = pos - *original_pos;
+
+                // Do not allow any combinator to extend left of the original group boundary.
+                let new_left = bounds.start.x + offset.x;
+                let new_right = bounds.end.x + offset.x;
+
+                // Keep every combinator within the original group's horizontal bounds.
+                if new_left < original_left || new_right > original_right {
+                    return false;
+                }
+
+                bounding_box_midpoints(bounds.start + offset, bounds.end + offset).all(|p| {
+                    let tile = (p.x.floor() as i32, p.y.floor() as i32);
+                    occupied.test(placement_origin + p) && !placed.contains(&tile)
+                })
+            });
+            let new_pos = new_positions.min_by(|a, b| {
+                a.distance_squared(*original_pos).total_cmp(&b.distance_squared(*original_pos))
+            });
+
+            if let Some(new_pos) = new_pos {
+                let offset = new_pos - *original_pos;
+                let new_bounds = get_bounding_box(en);
+
+                for p in bounding_box_midpoints(new_bounds.start + offset, new_bounds.end + offset)
+                {
+                    placed.insert((p.x as i32, p.y as i32));
+                }
+
+                pos_dict.get_mut(*tag).unwrap().position = new_pos;
+            } else {
+                // No valid position found for this combinator.
+                // Handle this case rather than silently accepting an overlap.
+
+                log!("NO PLACE FOUND FOR");
+            }
+        }
     }
+
+    let height = {
+        let mut bounds = DVec2::INFINITY..DVec2::NEG_INFINITY;
+
+        // Extend bounds to fit all entities
+        for en in pos_dict.values() {
+            let en_bounds = get_bounding_box(en);
+            bounds.start = bounds.start.min(en_bounds.start);
+            bounds.end = bounds.end.max(en_bounds.end);
+        }
+
+        (bounds.end - bounds.start).y
+    } + palette_cb_height_diff;
+
+    // Finds the position for the combinator with the given tag, based off the blueprint string we
+    // decoded earlier
+    let get_pos =
+        |tag: &str| -> DVec2 { pos_dict[tag].position + base_offset - dvec2(0.0, height) };
+    let get_dir = |tag: &str| -> u8 { pos_dict[tag].direction().unwrap_or_default() };
 
     // Note: signal compression is auto-disabled if generating a static image
     if use_delta_comp {

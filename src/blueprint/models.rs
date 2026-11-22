@@ -141,10 +141,10 @@ macro_rules! blueprint_entity_property {
     ($name:ident, &str) => {
         paste::paste! {
             #[must_use]
-            pub fn [<$name:snake>](&self) -> Option<String> {
+            pub fn [<$name:snake>](&self) -> Option<&str> {
                 for p in &self.properties {
                     if let BlueprintEntityProperty::$name(v) = p {
-                        return Some(v).cloned();
+                        return Some(v);
                     }
                 }
                 None

@@ -7,8 +7,6 @@ use image::{AnimationDecoder, GenericImageView, imageops};
 use std::{pin::Pin, rc::Rc, sync::Arc, time::Duration};
 use wasm_bindgen::JsValue;
 
-const MAX_CALLBACKS: usize = 4;
-
 pub type FrameCallback = dyn for<'a> Fn(
     &'a image::DynamicImage,
 ) -> Pin<Box<dyn Future<Output = Result<(), JsError>> + 'a>>;
@@ -26,6 +24,7 @@ pub struct FrameData<'a> {
     out_frame_i:  usize,
     out_n_frames: usize,
     palette:      Option<ColorPalette>,
+    progress_msg: String,
     prev_img:     Option<(Arc<image::DynamicImage>, u64)>,
 }
 impl FrameData<'_> {
@@ -105,9 +104,15 @@ impl<'a> FrameData<'a> {
             out_frame_i: 0,
             palette: None,
             prev_img: None,
+            progress_msg: String::new(),
         };
         obj.decoder.dim = obj.out_dim_raw();
         obj
+    }
+
+    pub fn with_progress_message(mut self, msg: impl Into<String>) -> Self {
+        self.progress_msg = msg.into();
+        self
     }
 
     pub async fn next(&mut self) -> Result<Option<Arc<image::DynamicImage>>, JsError> {
@@ -168,18 +173,21 @@ impl<'a> FrameData<'a> {
                     progress = self.out_frame_i as f64 / self.out_n_frames as f64;
                 }
 
-                set_progress(
-                    0.10,
-                    0.90,
-                    progress,
-                    &format!(
-                        "Processing frame {}, {} / {}  ({:.1} FPS)",
-                        self.out_frame_i,
-                        format_duration((progress * duration * 1000.0) as u128),
-                        format_duration((duration * 1000.0) as u128),
-                        1000.0 * self.out_frame_i as f64 / (now_ms() - self.fps_timer)
-                    ),
-                );
+                if !self.progress_msg.is_empty() {
+                    set_progress(
+                        0.10,
+                        0.90,
+                        progress,
+                        &format!(
+                            "{} {}, {} / {}  ({:.1} FPS)",
+                            self.progress_msg,
+                            self.out_frame_i,
+                            format_duration((progress * duration * 1000.0) as u128),
+                            format_duration((duration * 1000.0) as u128),
+                            1000.0 * self.out_frame_i as f64 / (now_ms() - self.fps_timer)
+                        ),
+                    );
+                }
             }
         }
     }

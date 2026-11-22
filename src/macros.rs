@@ -6,10 +6,9 @@
 )]
 #[macro_export]
 macro_rules! log {
-    ($($arg:tt)*) => {{
-        let value = format!($($arg)*);
-        ::web_sys::console::log_1(&value.clone().into());
-    }};
+    ($($arg:tt)*) => {
+        ::web_sys::console::log_1(&format!($($arg)*).into());
+    };
 }
 
 /// Creates a constant value that is lazily evaluated once.

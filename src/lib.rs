@@ -193,7 +193,8 @@ pub async fn run_blueprint(
         if palette_size > 0 {
             let reader = JsFileReader::new(cbs.get_data.clone(), data_len as u64, 1024 * 1024);
             let decoder = ImageFrameData::new(reader, &args.image_args, get_next_frame.clone())?;
-            let generator = FrameData::new(decoder, &args.image_args, on_frame.clone());
+            let generator = FrameData::new(decoder, &args.image_args, on_frame.clone())
+                .with_progress_message("Scanning colors");
 
             palette = Some(
                 image_processing::build_palette(generator, palette_size, shading_speed).await?,
@@ -203,7 +204,8 @@ pub async fn run_blueprint(
 
         let reader = JsFileReader::new(cbs.get_data.clone(), data_len as u64, 1024 * 1024);
         let decoder = ImageFrameData::new(reader, &args.image_args, get_next_frame.clone())?;
-        let generator = FrameData::new(decoder, &args.image_args, on_frame.clone());
+        let generator = FrameData::new(decoder, &args.image_args, on_frame.clone())
+            .with_progress_message("Processing Frame");
 
         frame_data = Some(generator.with_palette(palette.clone()));
     }

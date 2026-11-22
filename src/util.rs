@@ -1,4 +1,11 @@
+use glam::{DVec2, dvec2};
 use wasm_bindgen::prelude::*;
+
+pub fn bounding_box_midpoints(min: DVec2, max: DVec2) -> impl Iterator<Item = DVec2> {
+    (min.y as i32..max.y as i32).flat_map(move |y| {
+        (min.x as i32..max.x as i32).map(move |x| dvec2(x.into(), y.into()) + DVec2::splat(0.5))
+    })
+}
 
 #[must_use]
 pub fn format_duration<T: Into<u128>>(ms: T) -> String {
@@ -18,12 +25,14 @@ pub fn format_duration<T: Into<u128>>(ms: T) -> String {
 
 /// Checks if the value is the default value for the type.
 #[must_use]
+#[inline]
 pub fn is_default<T: Default + PartialEq>(value: &T) -> bool {
     value == &T::default()
 }
 
 /// Checks if an Option is None or the default value for the type.
 #[must_use]
+#[inline]
 #[expect(clippy::ref_option, reason = "Use with serde")]
 pub fn is_none_or_default<T: Default + PartialEq>(value: &Option<T>) -> bool {
     value.as_ref().is_none_or(|v| v == &T::default())
@@ -52,6 +61,8 @@ pub enum OneOrMany<T> {
     Many(Vec<T>),
 }
 impl<T> OneOrMany<T> {
+    #[must_use]
+    #[inline]
     pub fn into_vec(self) -> Vec<T> {
         match self {
             Self::One(v) => vec![v],
@@ -60,6 +71,8 @@ impl<T> OneOrMany<T> {
     }
 
     /// Returns a new clone of the contained value.
+    #[must_use]
+    #[inline]
     pub fn to_vec(&self) -> Vec<T>
     where
         T: Clone,
@@ -72,11 +85,14 @@ impl<T> OneOrMany<T> {
 }
 
 pub trait JsReflectGetSet: Into<JsValue> + Clone {
+    #[inline]
     fn reflect_get<T: JsCast>(&self, k: impl Into<JsValue>) -> Result<T, JsError> {
         let result = js_sys::Reflect::get(&self.clone().into(), &k.into())
             .map_js_err("Error whilst getting key on Object");
         (result?.dyn_into()).map_js_err("Error whilst getting key on Object")
     }
+
+    #[inline]
     fn reflect_set(&self, k: impl Into<JsValue>, v: impl Into<JsValue>) -> Result<bool, JsError> {
         js_sys::Reflect::set(&self.clone().into(), &k.into(), &v.into())
             .map_js_err("Error whilst setting key on Object")
@@ -85,6 +101,7 @@ pub trait JsReflectGetSet: Into<JsValue> + Clone {
 impl<T: Into<JsValue> + Clone> JsReflectGetSet for T {}
 
 pub trait JsCall<T: js_sys::JsFunction>: Into<js_sys::Function<T>> + Clone {
+    #[inline]
     fn call_n<Args: js_sys::JsArgs<T>>(&self, args: Args) -> Result<T::Ret, JsError> {
         args.apply_call(&self.clone().into(), &JsValue::NULL).map_js_err("Call error")
     }
@@ -95,6 +112,7 @@ pub trait ResultJsExt<T, E> {
     fn map_js_err(self, prefix: &str) -> Result<T, JsError>;
 }
 impl<T, E: std::fmt::Debug> ResultJsExt<T, E> for Result<T, E> {
+    #[inline]
     fn map_js_err(self, prefix: &str) -> Result<T, JsError> {
         self.map_err(|e| JsError::new(&format!("{prefix}: {e:?}")))
     }
