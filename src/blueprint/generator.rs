@@ -432,10 +432,13 @@ impl<'a> BlueprintGenerator<'a> {
 
         if let Some(fd) = info.map(|x| &x.frame_data) {
             let color_format = match self.args.image_args.grayscale_bits {
-                0 => "Full Color (RGB8)",
-                1 => "Black & White",
-                4 => "4-bit Grayscale (16 colors)",
-                8 => "8-bit Grayscale (256 colors)",
+                0 => match self.args.image_args.color_palette_size {
+                    0 => "Full Color (RGB8)",
+                    x => &format!("{x} Color Shades"),
+                },
+                1 => "1-bit Grayscale (2 shades)",
+                4 => "4-bit Grayscale (16 shades)",
+                8 => "8-bit Grayscale (256 shades)",
                 x => &format!("{x}"),
             };
             output.push(format!("\n[font=var]Color Format[/font]:   {color_format}"));
