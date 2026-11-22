@@ -224,62 +224,21 @@ impl<'a> BlueprintGenerator<'a> {
         self
     }
 
-    // /// Calculates the required position for the given entity to counteract the rotation of the
-    // /// image.
-    // fn transform_entity(args: &BlueprintArgs, en: &mut BlueprintEntity) {
-    //     if !args.prefer_green_wires
-    //         && let Some(ControlBehavior::DeciderCombinator { decider_conditions }) =
-    //             en.control_behavior.as_mut()
-    //     {
-    //         decider_conditions.swap_networks();
-    //     }
-
-    //     let mut pos = en.position;
-    //     match args.image_args.flip {
-    //         ImageFlip::X => pos.x *= -1.0,
-    //         ImageFlip::Y => pos.y *= -1.0,
-    //         ImageFlip::Both => pos *= -1.0,
-    //         _ => (),
-    //     }
-    //     match args.image_args.rotate {
-    //         ImageRotate::Deg90 => pos = dvec2(pos.y, -pos.x),
-    //         ImageRotate::Deg180 => pos *= -1.0,
-    //         ImageRotate::Deg270 => pos = dvec2(-pos.y, pos.x),
-    //         _ => (),
-    //     }
-
-    //     en.position = pos;
-    //     en.direction = en.direction.map(|mut v| {
-    //         match args.image_args.rotate {
-    //             ImageRotate::Deg90 => v += 12,
-    //             ImageRotate::Deg180 => v += 8,
-    //             ImageRotate::Deg270 => v += 4,
-    //             _ => (),
-    //         }
-    //         match args.image_args.flip {
-    //             ImageFlip::X if (v + 4) % 8 == 0 => v += 8,
-    //             ImageFlip::Y if v % 8 == 0 => v += 8,
-    //             ImageFlip::Both => v += 8,
-    //             _ => (),
-    //         }
-    //         v % 16
-    //     });
-    // }
     fn transform_entity(
         args: &BlueprintArgs,
         position_transform: &PositionTransform,
         en: &mut BlueprintEntity,
     ) {
         if !args.prefer_green_wires
-            && let Some(ControlBehavior::DeciderCombinator { decider_conditions }) =
-                en.control_behavior_mut()
+            && let Some(cb) = en.control_behavior_mut()
         {
-            decider_conditions.swap_networks();
+            cb.maybe_swap_networks();
         }
 
         en.position = position_transform.apply(en.position);
 
-        if let Some(mut v) = en.direction() {
+        if let Some(dir) = en.direction_mut() {
+            let mut v = *dir;
             match args.image_args.rotate {
                 ImageRotate::Deg90 => v += 12,
                 ImageRotate::Deg180 => v += 8,
@@ -292,7 +251,7 @@ impl<'a> BlueprintGenerator<'a> {
                 ImageFlip::Both => v += 8,
                 _ => (),
             }
-            en.set_direction(v % 16);
+            *dir = v % 16;
         }
     }
 
@@ -589,7 +548,7 @@ impl<'a> BlueprintGenerator<'a> {
                     self.palette.as_ref(),
                 );
                 ent_data.next_ent_n = new_base_ent_n;
-                if group_i == 0 {
+                if unlikely(group_i == 0) {
                     ent_data.wires.push([3, WIRE_OUT_R, in_ent_n, WIRE_R]); // Connect timer
                 }
                 info.group_data_combs.push(data_combs);
@@ -628,7 +587,7 @@ impl<'a> BlueprintGenerator<'a> {
             for lamp in &grp_lamps {
                 occupied.request(lamp.position); // Request powerage for lamps
             }
-            if group_i > 0 {
+            if likely(group_i > 0) {
                 write_to(writer, b",")?;
             }
 
@@ -849,7 +808,7 @@ impl<'a> BlueprintGenerator<'a> {
                 self.state = BlueprintState::Wires;
                 break;
             }
-            if output_data.len() >= ENCODE_CHUNK_SIZE {
+            if unlikely(output_data.len() >= ENCODE_CHUNK_SIZE) {
                 break;
             }
         }
@@ -858,7 +817,7 @@ impl<'a> BlueprintGenerator<'a> {
             self.occupied.request(en.position); // Request powerage for generated combinators
             Self::transform_entity(self.args, &self.position_transform, en); // Translate positions
 
-            if *en.name == **CONSTANT_COMB {
+            if unlikely(*en.name == **CONSTANT_COMB) {
                 en.set_player_description(&self.get_description());
             }
         }
@@ -899,7 +858,7 @@ impl<'a> BlueprintGenerator<'a> {
 
         for (i, wires) in std::mem::take(all_wires).into_iter().enumerate() {
             buf.push(wires);
-            if buf.len() < WIRE_ENCODE_CHUNK_SIZE && i < n_wires - 1 {
+            if likely(buf.len() < WIRE_ENCODE_CHUNK_SIZE && i < n_wires - 1) {
                 continue;
             }
 
@@ -910,7 +869,7 @@ impl<'a> BlueprintGenerator<'a> {
                 &format!("Generating wires ({i} / {n_wires})..."),
             );
 
-            if !is_first_write {
+            if likely(!is_first_write) {
                 write_to(writer, b",")?;
             }
             write_json_trimmed_to(writer, &buf)?;

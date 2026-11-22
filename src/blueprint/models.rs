@@ -93,6 +93,12 @@ pub struct ArithmeticCombinatorParameters {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_signal: Option<Arc<SignalID>>,
 }
+impl ArithmeticCombinatorParameters {
+    pub const fn swap_networks(&mut self) {
+        self.first_signal_networks.swap();
+        self.second_signal_networks.swap();
+    }
+}
 
 #[derive(Tsify, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Blueprint {
@@ -495,13 +501,25 @@ pub enum ControlBehavior {
 }
 impl ControlBehavior {
     #[must_use]
+    #[inline]
     pub const fn arithmetic(arithmetic_conditions: ArithmeticCombinatorParameters) -> Self {
         Self::ArithmeticCombinator { arithmetic_conditions }
     }
 
     #[must_use]
+    #[inline]
     pub const fn decider(decider_conditions: DeciderCombinatorParameters) -> Self {
         Self::DeciderCombinator { decider_conditions }
+    }
+
+    #[inline]
+    pub fn maybe_swap_networks(&mut self) {
+        match self {
+            // This actually swaps outputs + inputs, it's just named weirdly in Factorio
+            Self::DeciderCombinator { decider_conditions: conds } => conds.swap_networks(),
+            Self::ArithmeticCombinator { arithmetic_conditions: conds } => conds.swap_networks(),
+            _ => {}
+        }
     }
 }
 
@@ -526,7 +544,7 @@ impl From<CircuitNetworkSelection> for CircuitNetworkSelectionRepr {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CircuitNetworkSelection(u8);
 impl Default for CircuitNetworkSelection {
     fn default() -> Self {
@@ -583,7 +601,7 @@ impl CircuitNetworkSelection {
 
     #[inline]
     pub const fn swap(&mut self) {
-        if self.0 & 1 != self.0 & 2 {
+        if self.red() != self.green() {
             self.0 ^= Self::BOTH.0;
         }
     }
