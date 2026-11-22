@@ -34,10 +34,15 @@ impl PowerPoleOccupied {
 
         start_pos += bounding_box * const { dvec2(-0.5, 0.5) };
 
+        let mut ref_entity = BlueprintEntity::new(0, &Arc::from(name), start_pos);
+        if let Some(quality) = quality {
+            ref_entity.set_quality(quality);
+        }
+
         Self {
             bounding_box,
             coverage: cov * f64::from(i32::from(args.include_power_poles)),
-            ref_entity: BlueprintEntity::new(0, &Arc::from(name), start_pos).with_quality(quality),
+            ref_entity,
             requests: BTreeSet::new(),
             start_pos,
         }

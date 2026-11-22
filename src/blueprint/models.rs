@@ -126,109 +126,209 @@ pub struct BlueprintBookInner {
     pub blueprints: Box<[Blueprint]>,
 }
 
+macro_rules! blueprint_entity_property {
+    ($name:ident, &str) => {
+        paste::paste! {
+            #[must_use]
+            pub fn [<$name:snake>](&self) -> Option<String> {
+                for p in &self.properties {
+                    if let BlueprintEntityProperty::$name(v) = p {
+                        return Some(v).cloned();
+                    }
+                }
+                None
+            }
+
+            pub fn [<set_ $name:snake>](&mut self, v: &str) {
+                for p in &mut self.properties {
+                    if let BlueprintEntityProperty::$name(t) = p {
+                        v.clone_into(t);
+                        return;
+                    }
+                }
+                self.properties.push(BlueprintEntityProperty::$name(v.to_owned()));
+            }
+
+            #[inline]
+            #[must_use = concat!("Use set_", stringify!([<$name:snake>]), "() instead if you don't use for chaining")]
+            pub fn [<with_ $name:snake>](mut self, v: &str) -> Self {
+                self.[<set_ $name:snake>](v);
+                self
+            }
+        }
+    };
+    ($name:ident, $typ: ty) => {
+        paste::paste! {
+            #[must_use]
+            pub fn [<$name:snake>](&self) -> Option<$typ> {
+                for p in &self.properties {
+                    if let BlueprintEntityProperty::$name(v) = p {
+                        return Some(v).cloned();
+                    }
+                }
+                None
+            }
+
+            #[must_use]
+            pub fn [<$name:snake _mut>](&mut self) -> Option<&mut $typ> {
+                for p in &mut self.properties {
+                    if let BlueprintEntityProperty::$name(v) = p {
+                        return Some(v);
+                    }
+                }
+                None
+            }
+
+            pub fn [<set_ $name:snake>](&mut self, v: $typ) {
+                for p in &mut self.properties {
+                    if let BlueprintEntityProperty::$name(t) = p {
+                        *t = v;
+                        return;
+                    }
+                }
+                self.properties.push(BlueprintEntityProperty::$name(v));
+            }
+
+            #[inline]
+            #[must_use = concat!("Use set_", stringify!([<$name:snake>]), "() instead if you don't use for chaining")]
+            pub fn [<with_ $name:snake>](mut self, v: $typ) -> Self {
+                self.[<set_ $name:snake>](v);
+                self
+            }
+        }
+    };
+}
+
 /// The representation of an entity inside of a blueprint.
-#[derive(Tsify, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Tsify, Clone, PartialEq)]
 pub struct BlueprintEntity {
     /// The entity's unique identifier in the blueprint.
     pub entity_number: u32,
-
     /// The prototype name of the entity.
-    pub name: Arc<str>,
-
+    pub name:          Arc<str>,
     /// The position of the entity.
-    #[serde(with = "dvec2_xy")]
-    pub position: DVec2,
-
-    /// The direction the entity is facing. Only present for entities that can face in
-    /// different directions and when the entity is not facing north.
-    #[serde(default, skip_serializing_if = "is_none_or_default")]
-    pub direction: Option<u32>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub control_behavior: Option<ControlBehavior>,
-
-    #[serde(default, skip_serializing_if = "is_none_or_default")]
-    pub player_description: Option<String>,
-
-    /// The prototype name of the entity's quality.
-    #[serde(default, skip_serializing_if = "SignalID::is_none_or_default_quality")]
-    pub quality: Option<Arc<str>>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub always_on: Option<bool>,
-
-    #[serde(skip)]
-    pub custom_tag: Option<String>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub color: Option<Color>,
+    pub position:      DVec2,
+    pub properties:    Vec<BlueprintEntityProperty>,
 }
 impl BlueprintEntity {
     /// Create a new entity with default None values for optional fields
     pub fn new(entity_number: u32, name: &Arc<str>, position: DVec2) -> Self {
-        Self {
-            entity_number,
-            name: Arc::clone(name),
-            position,
-            direction: None,
-            control_behavior: None,
-            player_description: None,
-            quality: None,
-            always_on: None,
-            custom_tag: None,
-            color: None,
+        let name = Arc::clone(name);
+        let properties = Vec::new();
+        Self { entity_number, name, position, properties }
+    }
+
+    blueprint_entity_property!(AlwaysOn, bool);
+    blueprint_entity_property!(Color, Color);
+    blueprint_entity_property!(ControlBehavior, ControlBehavior);
+    blueprint_entity_property!(CustomTag, &str);
+    blueprint_entity_property!(Direction, u8);
+    blueprint_entity_property!(PlayerDescription, &str);
+    blueprint_entity_property!(Quality, Arc<str>);
+
+    #[must_use]
+    pub fn has_custom_tag(&self, v: &'static str) -> bool {
+        (self.properties.iter())
+            .any(|p| matches!(p, BlueprintEntityProperty::CustomTag(t) if *t == v))
+    }
+}
+impl Serialize for BlueprintEntity {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+
+        let mut map = serializer.serialize_map(None)?;
+
+        map.serialize_entry("entity_number", &self.entity_number)?;
+        map.serialize_entry("name", &self.name)?;
+
+        map.serialize_entry(
+            "position",
+            &serde_json::to_value(self.position).map_err(serde::ser::Error::custom)?,
+        )?;
+
+        for property in &self.properties {
+            match property {
+                BlueprintEntityProperty::Direction(v) => map.serialize_entry("direction", v),
+                BlueprintEntityProperty::ControlBehavior(v) => {
+                    map.serialize_entry("control_behavior", v)
+                }
+                BlueprintEntityProperty::PlayerDescription(v) => {
+                    map.serialize_entry("player_description", v)
+                }
+                BlueprintEntityProperty::Quality(v) => map.serialize_entry("quality", v),
+                BlueprintEntityProperty::AlwaysOn(v) => map.serialize_entry("always_on", v),
+                BlueprintEntityProperty::CustomTag(_) => Ok(()),
+                BlueprintEntityProperty::Color(v) => map.serialize_entry("color", v),
+            }?;
         }
-    }
 
-    #[must_use]
-    pub fn has_tag(&self, tag: &str) -> bool {
-        self.custom_tag.as_deref() == Some(tag)
+        map.end()
     }
+}
+impl<'de> Deserialize<'de> for BlueprintEntity {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct Entity {
+            entity_number: u32,
+            name:          Arc<str>,
 
-    #[must_use]
-    pub const fn with_always_on(mut self, always_on: bool) -> Self {
-        self.always_on = Some(always_on);
-        self
-    }
+            #[serde(with = "dvec2_xy")]
+            position: DVec2,
 
-    #[must_use]
-    pub const fn with_color(mut self, color: Color) -> Self {
-        self.color = Some(color);
-        self
-    }
+            direction:          Option<u8>,
+            control_behavior:   Option<ControlBehavior>,
+            player_description: Option<String>,
+            quality:            Option<Arc<str>>,
+            always_on:          Option<bool>,
+            color:              Option<Color>,
+        }
 
-    #[must_use]
-    pub fn with_control_behavior(mut self, behavior: ControlBehavior) -> Self {
-        self.control_behavior = Some(behavior);
-        self
-    }
+        let entity = Entity::deserialize(deserializer)?;
 
-    #[must_use]
-    pub fn with_description(mut self, desc: &str) -> Self {
-        self.player_description = Some(desc.to_owned());
-        self
-    }
+        let mut properties = Vec::new();
 
-    #[must_use]
-    pub const fn with_direction(mut self, direction: u32) -> Self {
-        self.direction = Some(direction);
-        self
-    }
+        if let Some(v) = entity.direction {
+            properties.push(BlueprintEntityProperty::Direction(v));
+        }
+        if let Some(v) = entity.control_behavior {
+            properties.push(BlueprintEntityProperty::ControlBehavior(v));
+        }
+        if let Some(v) = entity.player_description {
+            properties.push(BlueprintEntityProperty::PlayerDescription(v));
+        }
+        if let Some(v) = entity.quality {
+            properties.push(BlueprintEntityProperty::Quality(v));
+        }
+        if let Some(v) = entity.always_on {
+            properties.push(BlueprintEntityProperty::AlwaysOn(v));
+        }
+        if let Some(v) = entity.color {
+            properties.push(BlueprintEntityProperty::Color(v));
+        }
 
-    #[must_use]
-    pub fn with_quality(mut self, quality: Option<Arc<str>>) -> Self {
-        self.quality = quality;
-        self
+        Ok(Self {
+            entity_number: entity.entity_number,
+            name: entity.name,
+            position: entity.position,
+            properties,
+        })
     }
+}
 
-    /// Custom tag for the entity. This does not get serialized.
-    ///
-    /// Utility to help identify entities for wire connections.
-    #[must_use]
-    pub fn with_tag(mut self, tag: &str) -> Self {
-        self.custom_tag = Some(tag.to_owned());
-        self
-    }
+#[derive(Tsify, Clone, Serialize, Deserialize, PartialEq)]
+pub enum BlueprintEntityProperty {
+    /// The direction the entity is facing. Only present for entities that can face in
+    /// different directions and when the entity is not facing north.
+    Direction(u8),
+    ControlBehavior(ControlBehavior),
+    PlayerDescription(String),
+    /// The prototype name of the entity's quality.
+    Quality(Arc<str>),
+    AlwaysOn(bool),
+
+    #[serde(skip)]
+    CustomTag(String),
+    Color(Color),
 }
 
 #[derive(Tsify, Clone, Serialize, Deserialize, PartialEq)]
@@ -744,14 +844,6 @@ pub struct SignalID {
     pub name: Arc<str>,
 }
 impl SignalID {
-    pub fn new_virtual(name: &Arc<str>) -> Self {
-        Self {
-            type_:   Arc::clone(&constants::SIG_TYPE_VIRTUAL),
-            name:    Arc::clone(name),
-            quality: None,
-        }
-    }
-
     pub fn default_signal_type() -> Arc<str> {
         Arc::clone(&constants::DEFAULT_SIGNAL_TYPE)
     }
@@ -774,13 +866,6 @@ impl SignalID {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WireConnectorId(u8);
 impl WireConnectorId {
-    pub const NONE: Self = Self(0);
-    pub const WIRE_R: Self = Self(1);
-    pub const WIRE_G: Self = Self(2);
-    pub const WIRE_OUT_R: Self = Self(3);
-    pub const WIRE_OUT_G: Self = Self(4);
-    pub const WIRE_C: Self = Self(5);
-
     #[must_use]
     #[inline]
     pub const fn pack(a: u8, b: u8) -> u8 {

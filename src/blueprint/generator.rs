@@ -272,29 +272,28 @@ impl<'a> BlueprintGenerator<'a> {
     ) {
         if !args.prefer_green_wires
             && let Some(ControlBehavior::DeciderCombinator { decider_conditions }) =
-                en.control_behavior.as_mut()
+                en.control_behavior_mut()
         {
             decider_conditions.swap_networks();
         }
 
         en.position = position_transform.apply(en.position);
-        en.direction = en.direction.map(|mut v| {
+
+        if let Some(mut v) = en.direction() {
             match args.image_args.rotate {
                 ImageRotate::Deg90 => v += 12,
                 ImageRotate::Deg180 => v += 8,
                 ImageRotate::Deg270 => v += 4,
                 _ => (),
             }
-
             match args.image_args.flip {
                 ImageFlip::X if (v + 4) % 8 == 0 => v += 8,
                 ImageFlip::Y if v % 8 == 0 => v += 8,
                 ImageFlip::Both => v += 8,
                 _ => (),
             }
-
-            v % 16
-        });
+            en.set_direction(v % 16);
+        }
     }
 
     fn get_signal_data(args: &BlueprintArgs) -> Result<SignalDataResult, JsError> {
@@ -405,9 +404,10 @@ impl<'a> BlueprintGenerator<'a> {
                     // Set description of constant combinator
                     if true
                         && let Some(incrementer) = self.entity_data.ents.first()
-                        && incrementer.has_tag("incrementer")
+                        && incrementer.has_custom_tag("incrementer")
                     {
-                        self.entity_data.ents[0].player_description = Some(self.get_description());
+                        let description = self.get_description();
+                        self.entity_data.ents[0].set_player_description(&description);
                     }
 
                     for en in &self.entity_data.ents {
@@ -859,7 +859,7 @@ impl<'a> BlueprintGenerator<'a> {
             Self::transform_entity(self.args, &self.position_transform, en); // Translate positions
 
             if *en.name == **CONSTANT_COMB {
-                en.player_description = Some(self.get_description());
+                en.set_player_description(&self.get_description());
             }
         }
         if !output_data.is_empty() {

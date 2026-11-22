@@ -47,8 +47,8 @@ pub fn generate_timer(
                 }],
             }],
         };
-        en = en.with_control_behavior(ControlBehavior::ConstantCombinator { sections });
-        ents.push(en.with_tag("incrementer"));
+        en.set_control_behavior(ControlBehavior::ConstantCombinator { sections });
+        ents.push(en.with_custom_tag("incrementer"));
     }
     {
         let mut en = BlueprintEntity::new(2, &DEC_CB, TIMER2_POS).with_direction(DIR_R);
@@ -58,10 +58,10 @@ pub fn generate_timer(
             outputs:    boxed_slice![DeciderCombinatorOutput::new(sig_t, None)],
         };
         if args.detailed_descriptions {
-            en = en.with_description("Increments 60 times per second up to the GIF's frame count, then resets to 0. It determines the current frame.");
+            en.set_player_description("Increments 60 times per second up to the GIF's frame count, then resets to 0. It determines the current frame.");
         }
-        en = en.with_control_behavior(ControlBehavior::DeciderCombinator { decider_conditions });
-        ents.push(en.with_tag("base_timer"));
+        en.set_control_behavior(ControlBehavior::DeciderCombinator { decider_conditions });
+        ents.push(en.with_custom_tag("base_timer"));
     }
     {
         let en = BlueprintEntity::new(3, &ARI_CB, TIMER3_POS).with_direction(DIR_R);
@@ -89,7 +89,7 @@ pub fn generate_timer(
             let mut en = BlueprintEntity::new(6, &ARI_CB, TIMER6_POS).with_direction(DIR_R);
             let conds = arithmetic_conds!(SIG_EACH * bits.cast_signed() => SIG_EACH);
             if args.detailed_descriptions {
-                en = en.with_description("Calculates the bit shift for current frame.");
+                en.set_player_description("Calculates the bit shift for current frame.");
             }
             ents.push(en.with_control_behavior(ControlBehavior::arithmetic(conds)));
         }

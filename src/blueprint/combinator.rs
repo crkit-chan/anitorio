@@ -17,6 +17,21 @@ struct CombinatorPositionData {
     blueprint:      Blueprint,
 }
 
+#[must_use]
+pub fn get_bounding_box(en: &BlueprintEntity) -> std::ops::Range<DVec2> {
+    use super::constants::{ARI_CB, CONSTANT_COMB, DEC_CB, DIR_D, DIR_L, DIR_R, DIR_U};
+    let offset = DVec2::from(match en.name.as_ref() {
+        name if name == &**ARI_CB || name == &**DEC_CB => match en.direction().unwrap_or(0) {
+            DIR_U | DIR_D => (1.0, 2.0),
+            DIR_L | DIR_R => (2.0, 1.0),
+            _ => panic!("Unsupported entity direction"),
+        },
+        name if name == &**CONSTANT_COMB => (1.0, 1.0),
+        _ => panic!("Unsupported entity type"),
+    });
+    (en.position - offset / 2.0)..(en.position + offset / 2.0)
+}
+
 pub fn load_comb_pos_json(data_json_reader: impl std::io::Read) -> Result<(), JsError> {
     #[derive(serde::Deserialize)]
     struct CombinatorPositionJson {
@@ -27,21 +42,6 @@ pub fn load_comb_pos_json(data_json_reader: impl std::io::Read) -> Result<(), Js
     #[derive(Clone, serde::Deserialize)]
     struct PositionEntry {
         blueprint: String,
-    }
-
-    fn get_bounding_box(en: &BlueprintEntity) -> std::ops::Range<DVec2> {
-        let offset = DVec2::from(match en.name.as_ref() {
-            name if name == &**constants::ARI_CB || name == &**constants::DEC_CB => {
-                match en.direction.unwrap_or(0) {
-                    constants::DIR_U | constants::DIR_D => (1.0, 2.0),
-                    constants::DIR_L | constants::DIR_R => (2.0, 1.0),
-                    _ => panic!("Unsupported entity direction"),
-                }
-            }
-            name if name == &**constants::CONSTANT_COMB => (1.0, 1.0),
-            _ => panic!("Unsupported entity type"),
-        });
-        (en.position - offset / 2.0)..(en.position + offset / 2.0)
     }
 
     let parsed: Box<[CombinatorPositionJson]> = serde_json::from_reader(data_json_reader)?;
@@ -68,7 +68,6 @@ pub fn load_comb_pos_json(data_json_reader: impl std::io::Read) -> Result<(), Js
             })
         })
     });
-
     COMB_POS_DATA.replace(Some(data_iter.collect::<Result<_, JsError>>()?));
     Ok(())
 }
@@ -111,7 +110,7 @@ pub fn generate_combinators(
     // Positions for combinators, for different widths.
     // TODO: Don't recalculate this for every group
     let mut best_pos_data: Option<CombinatorPositionData> = None;
-    let mut pos_dict = BTreeMap::<&str, &BlueprintEntity>::new();
+    let mut pos_dict = BTreeMap::<String, &BlueprintEntity>::new();
     let use_compact_layout = max_cols_per_grp < 2;
     let use_delta_comp = args.signal_compression == Some(SignalCompression::Delta);
     let bits = args.image_args.bits();
@@ -133,7 +132,7 @@ pub fn generate_combinators(
 
     if let Some(d) = best_pos_data.as_ref() {
         for en in &d.blueprint.blueprint.entities {
-            if let Some(tag) = en.player_description.as_ref() {
+            if let Some(tag) = en.player_description() {
                 pos_dict.insert(tag, en);
             }
         }
@@ -213,7 +212,7 @@ pub fn generate_combinators(
             let color = rgb_to_int(r, g, b);
             let grid_x = data_cbs.grid_pos.x;
 
-            en.control_behavior = Some(ControlBehavior::decider(DeciderCombinatorParameters {
+            en = en.with_control_behavior(ControlBehavior::decider(DeciderCombinatorParameters {
                 conditions: boxed_slice![
                     decider_cond!(SIG_EACH, ==, i32::try_from(i).unwrap())
                         .with_first_signal_networks("g"),
@@ -225,7 +224,7 @@ pub fn generate_combinators(
             }));
 
             if args.detailed_descriptions {
-                en = en.with_description(&[
+                en = en.with_player_description(&[
                     // Note: not i + 1 because we already skip the first colour (black)
                     format!("[font=var]Index combinator {} / {}.", i, palette.colors.len() - 1),
                     format!("\nMaps the index '{i}' to the colour [color=#{color:06X}]●[/color] #{color:06X}.[/font]"),
@@ -262,7 +261,7 @@ pub fn generate_combinators(
         pos.y -= height;
         pos
     };
-    let get_dir = |tag: &str| -> u32 { pos_dict.get(tag).unwrap().direction.unwrap_or(0) };
+    let get_dir = |tag: &str| -> u8 { pos_dict.get(tag).unwrap().direction().unwrap_or(0) };
 
     {
         // Find the used entities so we can jiggle around the positions until they fit in between the power poles
@@ -284,13 +283,13 @@ pub fn generate_combinators(
     if use_delta_comp {
         {
             let mut en = BlueprintEntity::new(curr_ent_n, &DEC_CB, get_pos("delay"));
-            en = en.with_tag("delay comb").with_direction(get_dir("delay"));
-            en = en.with_control_behavior(ControlBehavior::decider(DeciderCombinatorParameters {
+            en = en.with_custom_tag("delay comb").with_direction(get_dir("delay"));
+            en.set_control_behavior(ControlBehavior::decider(DeciderCombinatorParameters {
                 conditions: boxed_slice![decider_cond!(SIG_EACH, !=, 0)],
                 outputs:    boxed_slice![DeciderCombinatorOutput::new(&SIG_EACH, None)],
             }));
             if args.detailed_descriptions {
-                en = en.with_description("Utility 1-tick delay combinator.");
+                en.set_player_description("Utility 1-tick delay combinator.");
             }
             other_ents.push(en);
 
@@ -303,8 +302,8 @@ pub fn generate_combinators(
         }
         {
             let mut en = BlueprintEntity::new(curr_ent_n, &DEC_CB, get_pos("memory"));
-            en = en.with_direction(get_dir("memory")).with_tag("memory comb");
-            en = en.with_control_behavior(ControlBehavior::decider(DeciderCombinatorParameters {
+            en = en.with_direction(get_dir("memory")).with_custom_tag("memory comb");
+            en.set_control_behavior(ControlBehavior::decider(DeciderCombinatorParameters {
                 conditions: boxed_slice![
                     decider_cond!(SIG_EACH, !=, 0).with_first_signal_networks("g"),
                     decider_cond!(args.timing_signals.p, !=, 0)
@@ -316,7 +315,7 @@ pub fn generate_combinators(
                 ],
             }));
             if args.detailed_descriptions {
-                en = en.with_description("Memory cell for delta compression. This holds all the signal values, then allows us to set any signal value by applying a delta. We can reach any number in one tick using overflow logic.");
+                en.set_player_description("Memory cell for delta compression. This holds all the signal values, then allows us to set any signal value by applying a delta. We can reach any number in one tick using overflow logic.");
             }
             other_ents.push(en);
             data_cbs.out_ent_n = Some(curr_ent_n); // data combinators should output to the memory combinator
@@ -333,9 +332,9 @@ pub fn generate_combinators(
     if bits > 0 {
         {
             let mut en = BlueprintEntity::new(curr_ent_n, &ARI_CB, get_pos(">>"));
-            en = en.with_tag(">> comb").with_direction(get_dir(">>"));
+            en = en.with_custom_tag(">> comb").with_direction(get_dir(">>"));
             if args.detailed_descriptions {
-                en = en.with_description(
+                en.set_player_description(
                     "Shifts the input numbers until they are in the range of the current frame.",
                 );
             }
@@ -357,9 +356,9 @@ pub fn generate_combinators(
         }
         {
             let mut en = BlueprintEntity::new(curr_ent_n, &ARI_CB, get_pos("AND"));
-            en = en.with_tag("AND comb").with_direction(get_dir("AND"));
+            en = en.with_custom_tag("AND comb").with_direction(get_dir("AND"));
             if args.detailed_descriptions {
-                en = en.with_description("Filters out the bits that are not relevant for the current frame, after bit-shifting. (The value of each signal encodes multiple frames)");
+                en.set_player_description("Filters out the bits that are not relevant for the current frame, after bit-shifting. (The value of each signal encodes multiple frames)");
             }
             other_ents.push(en.with_control_behavior(ControlBehavior::arithmetic(
                 arithmetic_conds!(SIG_EACH AND ((1u32 << bits) - 1).cast_signed() => SIG_EACH),
@@ -376,7 +375,7 @@ pub fn generate_combinators(
 
         if palette.is_none() && matches!(bits, 1 | 4) {
             let mut en = BlueprintEntity::new(curr_ent_n, &ARI_CB, get_pos("*"));
-            en = en.with_tag("* comb").with_direction(get_dir("*"));
+            en = en.with_custom_tag("* comb").with_direction(get_dir("*"));
             other_ents.push(en.with_control_behavior(ControlBehavior::arithmetic(
                 arithmetic_conds!(SIG_EACH * if bits == 1 { 255 } else { 17 } => SIG_EACH),
             )));
@@ -411,7 +410,7 @@ pub struct LazyCombinators {
     base_pos:         DVec2,
     cb_midpoint:      DVec2,
     curr_pos:         DVec2,
-    direction:        u32,
+    direction:        u8,
     /// Forces the first entity number for e.g. when ``LazyCombinators.next()`` returns
     /// the first entity a wire should connect to
     first_ent_n:      Option<u32>,
