@@ -365,11 +365,11 @@ impl<'a> ImageFrameData<'a> {
 /// The palette colors as RGB triples.
 pub async fn build_palette(
     mut generator: FrameData<'_>,
-    size: u32,
+    size: u8,
     speed: i32,
 ) -> Result<ColorPalette, JsError> {
     let mut attr = imagequant::Attributes::new();
-    attr.set_max_colors(size)?;
+    attr.set_max_colors(u32::from(size))?;
     attr.set_speed(speed)?;
 
     let mut result = {
@@ -407,7 +407,7 @@ pub async fn build_palette(
         colors.swap(0, darkest);
     }
 
-    ColorPalette::new(&colors)
+    ColorPalette::new(colors)
 }
 
 /// Finds the palette entry closest to a color.9
@@ -423,11 +423,11 @@ pub async fn build_palette(
 pub fn quantized_frame_to_outputs(
     frame: &image::SubImage<&image::DynamicImage>,
     palette: &ColorPalette,
-) -> Vec<u32> {
+) -> Box<[u8]> {
     let (x, y) = frame.offsets();
     let (width, height) = (frame.width() as usize, frame.height() as usize);
     let inner = frame.inner();
-    let mut outputs = Vec::with_capacity(width * height);
+    let mut outputs = Vec::<u8>::with_capacity(width * height);
     let stride = frame.width() as usize;
 
     match inner {
@@ -438,7 +438,7 @@ pub fn quantized_frame_to_outputs(
                 let end = start + width * 4;
                 outputs.extend(
                     (rgba[start..end].as_chunks::<4>().0.iter())
-                        .map(|&[r, g, b, ..]| palette.nearest_index([r, g, b])),
+                        .map(|&[r, g, b, ..]| palette.nearest_index([r, g, b]) as u8),
                 );
             }
         }
@@ -447,13 +447,15 @@ pub fn quantized_frame_to_outputs(
             for row in 0..height {
                 let start = (y as usize + row) * stride + x as usize;
                 let end = start + width;
-                outputs.extend(luma[start..end].iter().map(|&l| palette.nearest_index([l, l, l])));
+                outputs.extend(
+                    luma[start..end].iter().map(|&l| palette.nearest_index([l, l, l]) as u8),
+                );
             }
         }
         _ => unreachable!("Expected RGBA8 or Luma8"),
     }
 
-    outputs
+    outputs.into_boxed_slice()
 }
 enum FrameDecoderState<'a> {
     NativeFrames(image::Frames<'a>),

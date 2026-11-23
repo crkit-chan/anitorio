@@ -35,7 +35,7 @@ pub struct BlueprintArgs {
 #[derive(Tsify, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImageArgs {
-    pub color_palette_size: u32,
+    pub color_palette_size: u8,
     pub dimensions:         Option<UVec2>,
     pub duration:           Option<f64>,
     pub flip:               ImageFlip,

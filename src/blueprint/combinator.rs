@@ -388,8 +388,10 @@ pub fn generate_combinators(
 
     // Finds the position for the combinator with the given tag, based off the blueprint string we
     // decoded earlier
-    let get_pos =
-        |tag: &str| -> DVec2 { pos_dict[tag].position + base_offset - dvec2(0.0, height) };
+    let get_pos = |tag: &str| -> DVec2 {
+        pos_dict.get(tag).unwrap_or_else(|| panic!("No tag '{tag}'")).position + base_offset
+            - dvec2(0.0, height)
+    };
     let get_dir = |tag: &str| -> u8 { pos_dict[tag].direction().unwrap_or_default() };
 
     // Note: signal compression is auto-disabled if generating a static image
