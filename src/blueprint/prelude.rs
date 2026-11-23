@@ -1,5 +1,5 @@
 pub use super::constants::{self, *};
-pub use super::models::{ComparatorString as CompStr, *};
+pub use super::models::*;
 pub use wasm_bindgen::JsError;
 
 #[allow(unused, clippy::allow_attributes, reason = "Log may not be used")]

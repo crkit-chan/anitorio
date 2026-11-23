@@ -11,19 +11,7 @@ macro_rules! log {
     };
 }
 
-/// Creates a constant value that is lazily evaluated once.
-#[macro_export]
-macro_rules! lazy_arc_const {
-    (pub $name:ident: $type:ident = $value:expr) => {
-        pub static $name: ::std::sync::LazyLock<::std::sync::Arc<$type>> =
-            ::std::sync::LazyLock::new(|| ::std::sync::Arc::from($value));
-    };
-    ($name:ident: $type:ident = $value:expr) => {
-        static $name: ::std::sync::LazyLock<::std::sync::Arc<$type>> =
-            ::std::sync::LazyLock::new(|| ::std::sync::Arc::from($value));
-    };
-}
-
+/// Utility wrapper around the existing
 #[macro_export]
 macro_rules! boxed_slice {
     ($elem:expr; $n:expr) => {
@@ -34,7 +22,15 @@ macro_rules! boxed_slice {
     };
 }
 
-pub use lazy_arc_const;
+#[macro_export]
+macro_rules! js_err {
+    ($($arg:tt)*) => {
+        JsError::new(&format!($($arg)*))
+    };
+}
+
+pub use boxed_slice;
+pub use js_err;
 #[allow(
     clippy::allow_attributes,
     unused_imports,

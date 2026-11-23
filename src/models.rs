@@ -1,6 +1,5 @@
 use glam::UVec2;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use tsify::Tsify;
 use wasm_bindgen::prelude::*;
 
@@ -23,7 +22,7 @@ pub struct BlueprintArgs {
     pub name:                    String,
     pub output_format:           OutputFormat,
     pub power_pole_name:         Option<String>,
-    pub power_pole_quality:      Option<Arc<str>>,
+    pub power_pole_quality:      Option<String>,
     pub prefer_green_wires:      bool,
     pub prefer_horizontal_wires: bool,
     pub signal_compression:      Option<SignalCompression>,
@@ -67,10 +66,10 @@ impl ImageArgs {
 
 #[derive(Tsify, Debug, Serialize, Deserialize)]
 pub struct TimingSignals {
-    pub f: Arc<crate::blueprint::models::SignalID>,
-    pub p: Arc<crate::blueprint::models::SignalID>,
-    pub s: Arc<crate::blueprint::models::SignalID>,
-    pub t: Arc<crate::blueprint::models::SignalID>,
+    pub f: crate::blueprint::models::SignalID,
+    pub p: crate::blueprint::models::SignalID,
+    pub s: crate::blueprint::models::SignalID,
+    pub t: crate::blueprint::models::SignalID,
 }
 
 #[derive(Tsify, Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -5,7 +5,9 @@
     reason = "Factorio Lua API"
 )]
 
-use super::{constants, dvec2_xy};
+use super::dvec2_xy;
+use crate::blueprint::data::{PROTOTYPE_DATA, SignalIDRepr};
+use crate::blueprint::prelude::{DEFAULT_QUALITY, DEFAULT_SIGNAL_TYPE};
 use crate::models::RawJsonString;
 use crate::prelude::*;
 use crate::util::{is_default, is_none_or_default};
@@ -14,7 +16,6 @@ use serde::{
     Deserialize, Serialize, Serializer,
     ser::{SerializeSeq, SerializeStruct},
 };
-use std::sync::Arc;
 use tsify::Tsify;
 use wasm_bindgen::prelude::*;
 
@@ -65,7 +66,7 @@ pub struct ArithmeticCombinatorParameters {
     /// First signal to use in an operation. If not specified, the second argument will be the
     /// value of ``first_constant``.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub first_signal: Option<Arc<SignalID>>,
+    pub first_signal: Option<SignalID>,
 
     /// Which circuit networks (red/green) to read ``first_signal`` from. Defaults to both.
     #[serde(default, skip_serializing_if = "is_default")]
@@ -78,7 +79,7 @@ pub struct ArithmeticCombinatorParameters {
     /// Second signal to use in an operation. If not specified, the second argument will be the
     /// value of ``second_constant``.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub second_signal: Option<Arc<SignalID>>,
+    pub second_signal: Option<SignalID>,
 
     /// Which circuit networks (red/green) to read ``second_signal`` from. Defaults to both.
     #[serde(default, skip_serializing_if = "is_default")]
@@ -91,7 +92,7 @@ pub struct ArithmeticCombinatorParameters {
 
     /// Specifies the signal to output.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output_signal: Option<Arc<SignalID>>,
+    pub output_signal: Option<SignalID>,
 }
 impl ArithmeticCombinatorParameters {
     pub const fn swap_networks(&mut self) {
@@ -157,7 +158,9 @@ macro_rules! blueprint_entity_property {
                         return;
                     }
                 }
-                self.properties.push(BlueprintEntityProperty::$name(v.to_owned()));
+                let mut properties = std::mem::take(&mut self.properties).into_vec();
+                properties.push(BlueprintEntityProperty::$name(v.to_owned()));
+                self.properties = properties.into();
             }
 
             #[inline]
@@ -197,7 +200,9 @@ macro_rules! blueprint_entity_property {
                         return;
                     }
                 }
-                self.properties.push(BlueprintEntityProperty::$name(v));
+                let mut properties = std::mem::take(&mut self.properties).into_vec();
+                properties.push(BlueprintEntityProperty::$name(v.to_owned()));
+                self.properties = properties.into();
             }
 
             #[inline]
@@ -215,18 +220,21 @@ macro_rules! blueprint_entity_property {
 pub struct BlueprintEntity {
     /// The entity's unique identifier in the blueprint.
     pub entity_number: u32,
-    /// The prototype name of the entity.
-    pub name:          Arc<str>,
+    /// Reference to the prototype name + quality of the Entity
+    signal_ref:        SignalID,
     /// The position of the entity.
+    #[serde(with = "dvec2_xy")]
     pub position:      DVec2,
-    pub properties:    Vec<BlueprintEntityProperty>,
+    pub properties:    Box<[BlueprintEntityProperty]>,
 }
 impl BlueprintEntity {
     /// Create a new entity with default None values for optional fields
-    pub fn new(entity_number: u32, name: &Arc<str>, position: DVec2) -> Self {
-        let name = Arc::clone(name);
-        let properties = Vec::new();
-        Self { entity_number, name, position, properties }
+    #[must_use]
+    #[inline]
+    pub fn new(entity_number: u32, signal: &SignalID, position: DVec2) -> Self {
+        let signal_ref = signal.clone();
+        let properties = boxed_slice![];
+        Self { entity_number, signal_ref, position, properties }
     }
 
     blueprint_entity_property!(AlwaysOn, bool);
@@ -235,12 +243,18 @@ impl BlueprintEntity {
     blueprint_entity_property!(CustomTag, &str);
     blueprint_entity_property!(Direction, u8);
     blueprint_entity_property!(PlayerDescription, &str);
-    blueprint_entity_property!(Quality, Arc<str>);
 
     #[must_use]
+    #[inline]
     pub fn has_custom_tag(&self, v: &'static str) -> bool {
         (self.properties.iter())
             .any(|p| matches!(p, BlueprintEntityProperty::CustomTag(t) if *t == v))
+    }
+
+    #[must_use]
+    #[inline]
+    pub fn name(&self) -> String {
+        self.signal_ref.name()
     }
 }
 impl Serialize for BlueprintEntity {
@@ -248,28 +262,23 @@ impl Serialize for BlueprintEntity {
         use serde::ser::SerializeMap;
 
         let mut map = serializer.serialize_map(None)?;
+        self.signal_ref.serialize_fields_into_map(&mut map, Some("entity"), false)?;
 
         map.serialize_entry("entity_number", &self.entity_number)?;
-        map.serialize_entry("name", &self.name)?;
-
-        map.serialize_entry(
-            "position",
-            &serde_json::to_value(self.position).map_err(serde::ser::Error::custom)?,
-        )?;
+        map.serialize_entry("position", &self.position)?;
 
         for property in &self.properties {
             match property {
-                BlueprintEntityProperty::Direction(v) => map.serialize_entry("direction", v),
+                BlueprintEntityProperty::AlwaysOn(v) => map.serialize_entry("always_on", v),
+                BlueprintEntityProperty::Color(v) => map.serialize_entry("color", v),
                 BlueprintEntityProperty::ControlBehavior(v) => {
                     map.serialize_entry("control_behavior", v)
                 }
+                BlueprintEntityProperty::CustomTag(_) => Ok(()),
+                BlueprintEntityProperty::Direction(v) => map.serialize_entry("direction", v),
                 BlueprintEntityProperty::PlayerDescription(v) => {
                     map.serialize_entry("player_description", v)
                 }
-                BlueprintEntityProperty::Quality(v) => map.serialize_entry("quality", v),
-                BlueprintEntityProperty::AlwaysOn(v) => map.serialize_entry("always_on", v),
-                BlueprintEntityProperty::CustomTag(_) => Ok(()),
-                BlueprintEntityProperty::Color(v) => map.serialize_entry("color", v),
             }?;
         }
 
@@ -281,7 +290,7 @@ impl<'de> Deserialize<'de> for BlueprintEntity {
         #[derive(Deserialize)]
         struct Entity {
             entity_number: u32,
-            name:          Arc<str>,
+            name:          String,
 
             #[serde(with = "dvec2_xy")]
             position: DVec2,
@@ -289,57 +298,57 @@ impl<'de> Deserialize<'de> for BlueprintEntity {
             direction:          Option<u8>,
             control_behavior:   Option<ControlBehavior>,
             player_description: Option<String>,
-            quality:            Option<Arc<str>>,
+            quality:            Option<String>,
             always_on:          Option<bool>,
             color:              Option<Color>,
         }
 
-        let entity = Entity::deserialize(deserializer)?;
-
+        let en = Entity::deserialize(deserializer)?;
         let mut properties = Vec::new();
 
-        if let Some(v) = entity.direction {
+        if let Some(v) = en.direction {
             properties.push(BlueprintEntityProperty::Direction(v));
         }
-        if let Some(v) = entity.control_behavior {
+        if let Some(v) = en.control_behavior {
             properties.push(BlueprintEntityProperty::ControlBehavior(v));
         }
-        if let Some(v) = entity.player_description {
+        if let Some(v) = en.player_description {
             properties.push(BlueprintEntityProperty::PlayerDescription(v));
         }
-        if let Some(v) = entity.quality {
-            properties.push(BlueprintEntityProperty::Quality(v));
-        }
-        if let Some(v) = entity.always_on {
+        if let Some(v) = en.always_on {
             properties.push(BlueprintEntityProperty::AlwaysOn(v));
         }
-        if let Some(v) = entity.color {
+        if let Some(v) = en.color {
             properties.push(BlueprintEntityProperty::Color(v));
         }
 
         Ok(Self {
-            entity_number: entity.entity_number,
-            name: entity.name,
-            position: entity.position,
-            properties,
+            signal_ref:    SignalID::try_from(SignalIDRepr {
+                type_:   Some("entity".to_owned()),
+                name:    en.name,
+                quality: en.quality,
+            })
+            .map_err(|e| {
+                serde::de::Error::custom(format!("Could not deserialize entity: {e:?}"))
+            })?,
+            entity_number: en.entity_number,
+            position:      en.position,
+            properties:    properties.into_boxed_slice(),
         })
     }
 }
 
 #[derive(Tsify, Clone, Serialize, Deserialize, PartialEq)]
 pub enum BlueprintEntityProperty {
+    AlwaysOn(bool),
+    Color(Color),
+    ControlBehavior(ControlBehavior),
+    #[serde(skip)]
+    CustomTag(String),
     /// The direction the entity is facing. Only present for entities that can face in
     /// different directions and when the entity is not facing north.
     Direction(u8),
-    ControlBehavior(ControlBehavior),
     PlayerDescription(String),
-    /// The prototype name of the entity's quality.
-    Quality(Arc<str>),
-    AlwaysOn(bool),
-
-    #[serde(skip)]
-    CustomTag(String),
-    Color(Color),
 }
 
 #[derive(Tsify, Clone, Serialize, Deserialize, PartialEq)]
@@ -364,29 +373,51 @@ pub struct BlueprintInner {
     pub version:     u64,
 }
 
-#[derive(Tsify, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Tsify, Clone, Deserialize, PartialEq, Eq)]
 pub struct BlueprintLogisticFilter {
     pub index: LogisticFilterIndex,
 
-    /// The type of the logistic filter.
-    #[serde(
-        rename = "type",
-        default = "SignalID::default_signal_type",
-        skip_serializing_if = "SignalID::is_default_signal_type"
-    )]
-    pub type_: Arc<str>,
-
-    /// Name of the logistic filter.
-    pub name: Arc<str>,
-
-    /// The prototype name of the quality. nil for any quality.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub quality: Option<Arc<str>>, // Note: MUST use Option::is_none, NOT is_none_or_normal_quality
+    #[serde(flatten)]
+    signal_ref: SignalID,
 
     /// The comparator for quality. nil if any quality.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub comparator: Option<ComparatorString>,
+    #[serde(default)]
     pub count:      i32,
+}
+impl BlueprintLogisticFilter {
+    #[inline]
+    pub fn new<C: TryInto<ComparatorString>>(
+        index: LogisticFilterIndex,
+        signal_ref: &SignalID,
+        comparator: C,
+        count: i32,
+    ) -> Result<Self, C::Error> {
+        Ok(Self {
+            index,
+            signal_ref: signal_ref.clone(),
+            comparator: Some(comparator.try_into()?),
+            count,
+        })
+    }
+}
+impl Serialize for BlueprintLogisticFilter {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(None)?;
+        self.signal_ref
+            .serialize_fields_into_map(&mut map, Some(DEFAULT_SIGNAL_TYPE), true)?;
+
+        if let Some(comparator) = &self.comparator {
+            map.serialize_entry("comparator", &comparator)?;
+        }
+        if self.count != 0 {
+            map.serialize_entry("count", &self.count)?;
+        }
+        map.serialize_entry("index", &self.index)?;
+        map.end()
+    }
 }
 
 #[derive(Tsify, Clone, Serialize, Deserialize, PartialEq)]
@@ -460,6 +491,24 @@ pub enum ComparatorString {
     #[serde(rename = "≠", alias = "!=")]
     Ne,
 }
+impl TryFrom<&str> for ComparatorString {
+    type Error = JsError;
+    fn try_from(other: &str) -> Result<Self, Self::Error> {
+        Ok(match other.to_lowercase().as_str() {
+            "=" | "==" | "eq" => Self::Eq,
+            ">" | "gt" => Self::Gt,
+            "<" | "lt" => Self::Lt,
+            ">=" | "ge" | "gte" => Self::Ge,
+            "<=" | "le" | "lte" => Self::Le,
+            "!=" | "^" | "ne" | "neq" => Self::Ne,
+            _ => {
+                return Err(js_err!(
+                    "Attempted to parse unknown ComparatorString '{other}'"
+                ));
+            }
+        })
+    }
+}
 
 #[derive(Tsify, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(untagged)]
@@ -479,16 +528,16 @@ pub enum ControlBehavior {
         use_colors: bool,
 
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        red_signal: Option<Arc<SignalID>>,
+        red_signal: Option<SignalID>,
 
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        green_signal: Option<Arc<SignalID>>,
+        green_signal: Option<SignalID>,
 
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        blue_signal: Option<Arc<SignalID>>,
+        blue_signal: Option<SignalID>,
 
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        rgb_signal: Option<Arc<SignalID>>,
+        rgb_signal: Option<SignalID>,
 
         /// Defaults to ``defines.control_behavior.lamp.color_mapping``.
         color_mode: i8,
@@ -634,7 +683,7 @@ impl From<&str> for CompareTypeString {
 pub struct DeciderCombinatorCondition {
     /// Defaults to blank
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub first_signal: Option<Arc<SignalID>>,
+    pub first_signal: Option<SignalID>,
 
     /// Which circuit networks (red/green) to read ``first_signal`` from. Defaults to both.
     #[serde(default, skip_serializing_if = "is_default")]
@@ -656,12 +705,16 @@ pub struct DeciderCombinatorCondition {
     pub compare_type: CompareTypeString,
 }
 impl DeciderCombinatorCondition {
-    pub fn new(first_signal: &Arc<SignalID>, constant: i32, comparator: ComparatorString) -> Self {
+    pub fn new(
+        first_signal: &SignalID,
+        constant: i32,
+        comparator: impl Into<ComparatorString>,
+    ) -> Self {
         Self {
-            first_signal: Some(Arc::clone(first_signal)),
-            constant: Some(constant),
-            comparator,
-            compare_type: const { CompareTypeString::default() },
+            first_signal:          Some(first_signal.clone()),
+            constant:              Some(constant),
+            comparator:            comparator.into(),
+            compare_type:          const { CompareTypeString::default() },
             first_signal_networks: CircuitNetworkSelection::BOTH,
         }
     }
@@ -690,7 +743,7 @@ impl DeciderCombinatorCondition {
 #[derive(Tsify, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DeciderCombinatorOutput {
     /// Specifies a signal to output.
-    pub signal: Arc<SignalID>,
+    pub signal: SignalID,
 
     /// Defaults to true. When false, will output the value from constant for the given
     /// ``output_signal``.
@@ -713,11 +766,11 @@ pub struct DeciderCombinatorOutput {
     pub networks: CircuitNetworkSelection,
 }
 impl DeciderCombinatorOutput {
-    pub fn new(signal: &Arc<SignalID>, constant: Option<i32>) -> Self {
+    pub fn new(signal: &SignalID, constant: Option<i32>) -> Self {
         Self {
             copy_count_from_input: constant.is_none(),
             constant:              constant.unwrap_or(Self::default_constant()),
-            signal:                Arc::clone(signal),
+            signal:                signal.clone(),
             networks:              CircuitNetworkSelection::BOTH,
         }
     }
@@ -772,7 +825,7 @@ impl DeciderCombinatorParameters {
 pub struct DeciderCombinatorCustomParameters {
     pub conditions:  Box<[DeciderCombinatorCondition]>,
     pub indices:     Box<[(usize, i32)]>,
-    pub signal_list: Arc<[RawJsonString]>,
+    pub signal_list: ::std::sync::Arc<[RawJsonString]>,
 }
 impl PartialEq for DeciderCombinatorCustomParameters {
     fn eq(&self, other: &Self) -> bool {
@@ -830,7 +883,7 @@ struct IndexedDeciderCombinatorOutput<'a> {
 
 #[derive(Tsify, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Icon {
-    pub signal: Arc<SignalID>,
+    pub signal: SignalID,
     pub index:  u32,
 }
 
@@ -849,40 +902,212 @@ pub struct LogisticSections {
     pub sections: Box<[LogisticSection]>,
 }
 
-#[derive(Tsify, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SignalID {
-    /// The type of the signal. If the type is "item", this will be nil when reading.
-    #[serde(
-        rename = "type",
-        default = "SignalID::default_signal_type",
-        skip_serializing_if = "SignalID::is_default_signal_type"
-    )]
-    pub type_: Arc<str>,
-
-    /// The prototype name of the signal's quality. Defaults to normal.
-    #[serde(default, skip_serializing_if = "SignalID::is_none_or_default_quality")]
-    pub quality: Option<Arc<str>>,
-
-    /// Name of the prototype.
-    pub name: Arc<str>,
-}
+#[derive(Tsify, Clone, Hash, PartialEq, Eq)]
+pub struct SignalID(pub ::std::sync::Arc<usize>);
 impl SignalID {
-    pub fn default_signal_type() -> Arc<str> {
-        Arc::clone(&constants::DEFAULT_SIGNAL_TYPE)
+    #[inline]
+    #[must_use]
+    pub fn new(type_: &str, name: &str) -> Self {
+        Self::try_from_values(type_, name, None).unwrap()
     }
 
-    #[expect(clippy::unnecessary_wraps, reason = "Use with serde")]
-    pub fn default_quality() -> Option<Arc<str>> {
-        Some(Arc::clone(&constants::DEFAULT_QUALITY))
+    #[inline]
+    #[allow(
+        clippy::needless_pass_by_value,
+        reason = "API pattern should consume value"
+    )]
+    pub fn try_from_repr(
+        signal: SignalIDRepr,
+        default_type: Option<&str>,
+    ) -> Result<Self, JsError> {
+        let type_ = signal.type_.as_deref().unwrap_or_else(|| default_type.unwrap_or("item"));
+        Self::try_from_values(type_, &signal.name, signal.quality.as_deref())
     }
 
-    pub fn is_default_signal_type(value: &Arc<str>) -> bool {
-        value == &*constants::DEFAULT_SIGNAL_TYPE
+    #[inline]
+    pub fn try_from_values(
+        type_: &str,
+        name: &str,
+        quality: Option<&str>,
+    ) -> Result<Self, JsError> {
+        PROTOTYPE_DATA.with_borrow(|data| {
+            let data = data.as_ref().unwrap();
+            let bounds = (data.signal_types.get_range(type_))
+                .ok_or_else(|| js_err!("Unknown signal type '{type_}'"))?;
+
+            let sig_i = (data.signals[bounds.clone()].iter())
+                .position(|x| x == name)
+                .ok_or_else(|| js_err!("Unknown signal name '{name}'"))?
+                + bounds.start;
+
+            let qual_i = match quality {
+                None => 0,
+                Some(quality) => (data.qualities.iter())
+                    .position(|x| x == quality)
+                    .ok_or_else(|| js_err!("Unknown signal quality '{quality}'"))?,
+            };
+            let n_quals = data.qualities.len().max(1);
+
+            // IMPORTANT: We increment the Arc<usize> handle stored on ``signal_ids``
+            Ok(data.signal_ids[sig_i * n_quals + qual_i].clone())
+        })
     }
 
-    #[expect(clippy::ref_option, reason = "Use with serde")]
-    pub fn is_none_or_default_quality(value: &Option<Arc<str>>) -> bool {
-        (value.as_deref()).is_none_or(|v| v == constants::DEFAULT_QUALITY.as_ref())
+    #[must_use]
+    #[inline]
+    fn as_repr(&self) -> SignalIDRepr {
+        PROTOTYPE_DATA.with_borrow(|data| {
+            let data = data.as_ref().unwrap();
+            let i = *self.0;
+            let modulus = data.qualities.len().max(1);
+
+            SignalIDRepr {
+                name:    data.signals[i / modulus].clone(),
+                quality: (!data.qualities.is_empty())
+                    .then(|| data.qualities[i % data.qualities.len()].clone()),
+                type_:   Some(data.signal_types.get_type(i / modulus).unwrap().to_owned()),
+            }
+        })
+    }
+
+    #[must_use]
+    #[inline]
+    pub fn name(&self) -> String {
+        PROTOTYPE_DATA.with_borrow(|data| {
+            let data = data.as_ref().unwrap();
+            data.signals[*self.0 / data.qualities.len().max(1)].clone()
+        })
+    }
+    #[must_use]
+    #[inline]
+    pub fn quality(&self) -> Option<String> {
+        PROTOTYPE_DATA.with_borrow(|data| {
+            let data = data.as_ref().unwrap();
+            (!data.qualities.is_empty())
+                .then(|| data.qualities[*self.0 % data.qualities.len()].clone())
+        })
+    }
+    #[must_use]
+    #[inline]
+    pub fn type_(&self) -> String {
+        PROTOTYPE_DATA.with_borrow(|data| {
+            let data = data.as_ref().unwrap();
+            let type_ = data.signal_types.get_type(*self.0 / data.qualities.len().max(1));
+            type_.unwrap().to_owned()
+        })
+    }
+
+    #[inline]
+    pub fn set_name(&mut self, name: &str) {
+        *self = self.with_name(name);
+    }
+    #[inline]
+    pub fn set_quality(&mut self, quality: Option<&str>) {
+        *self = self.with_quality(quality);
+    }
+    #[inline]
+    pub fn set_type_(&mut self, type_: &str) {
+        *self = self.with_type_(type_);
+    }
+
+    #[must_use]
+    #[inline]
+    pub fn with_name(&self, name: &str) -> Self {
+        let repr = self.as_repr();
+        Self::try_from_values(&repr.type_.unwrap(), name, repr.quality.as_deref()).unwrap()
+    }
+    #[must_use]
+    #[inline]
+    pub fn with_quality(&self, quality: Option<&str>) -> Self {
+        let repr = self.as_repr();
+        Self::try_from_values(&repr.type_.unwrap(), &repr.name, quality).unwrap()
+    }
+    #[must_use]
+    #[inline]
+    pub fn with_type_(&self, type_: &str) -> Self {
+        let repr = self.as_repr();
+        Self::try_from_values(type_, &repr.name, repr.quality.as_deref()).unwrap()
+    }
+
+    #[inline]
+    fn serialize_fields_into_map<S: serde::ser::SerializeMap>(
+        &self,
+        map: &mut S,
+        default_type: Option<&str>,
+        always_include_quality: bool,
+    ) -> Result<(), S::Error> {
+        PROTOTYPE_DATA.with_borrow(|data| {
+            let data = data.as_ref().unwrap();
+            let i = *self.0;
+            let modulus = data.qualities.len().max(1);
+            let type_ = data.signal_types.get_type(i / modulus).unwrap();
+            let name = &data.signals[i / modulus];
+
+            if default_type.is_none_or(|t| t != type_) {
+                map.serialize_entry("type", type_)?;
+            }
+            if !data.qualities.is_empty() {
+                let qual = &data.qualities[i % modulus];
+                if always_include_quality || qual != DEFAULT_QUALITY {
+                    map.serialize_entry("quality", qual)?;
+                }
+            }
+            map.serialize_entry("name", &name)
+        })
+    }
+
+    #[inline]
+    fn deserialize_fields<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+        default_type: Option<&str>,
+    ) -> Result<Self, D::Error> {
+        Self::try_from_repr(SignalIDRepr::deserialize(deserializer)?, default_type)
+            .map_err(|e| serde::de::Error::custom(format!("Could not deserialize SignalID: {e:?}")))
+    }
+}
+impl std::fmt::Debug for SignalID {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            r#"SignalID(id={}, strong_count={}) {{ type_: "{}", name: "{}"{} }}"#,
+            *self.0,
+            ::std::sync::Arc::strong_count(&self.0),
+            self.type_(),
+            self.name(),
+            self.quality().map_or_else(String::new, |q| format!(r#", quality: "{q}""#)),
+        )
+    }
+}
+impl std::fmt::Display for SignalID {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.type_(), self.name())
+    }
+}
+impl TryFrom<SignalIDRepr> for SignalID {
+    type Error = JsError;
+
+    #[inline]
+    fn try_from(other: SignalIDRepr) -> Result<Self, Self::Error> {
+        Self::try_from_repr(other, Some(DEFAULT_SIGNAL_TYPE))
+    }
+}
+impl From<SignalID> for SignalIDRepr {
+    #[inline]
+    fn from(val: SignalID) -> Self {
+        val.as_repr()
+    }
+}
+impl Serialize for SignalID {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(None)?;
+        self.serialize_fields_into_map(&mut map, Some(DEFAULT_SIGNAL_TYPE), false)?;
+        map.end()
+    }
+}
+impl<'de> Deserialize<'de> for SignalID {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Self::deserialize_fields(deserializer, Some(DEFAULT_SIGNAL_TYPE))
     }
 }
 
@@ -933,6 +1158,8 @@ impl Wires {
     pub fn extend_from_slice(&mut self, other: &[[u32; 4]]) {
         self.extend(other.iter().copied());
     }
+
+    #[inline]
     pub fn push(&mut self, wire: [u32; 4]) {
         self.entity_ids.push([wire[0], wire[2]]);
         self.wire_ids.push(WireConnectorId::pack(wire[1] as u8, wire[3] as u8));

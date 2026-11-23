@@ -21,7 +21,7 @@ use std::{ops::Not, sync::Arc};
 /// A tuple with lamp entities, lamp wires, the next entity number, and the top-right lamp entity.
 #[expect(clippy::needless_pass_by_value, reason = "Arc")]
 pub fn generate_lamps(
-    signals: &[Arc<SignalID>],
+    signals: &[SignalID],
     grid_dim: UVec2,
     curr_frame: Option<Arc<image::DynamicImage>>,
     occupied: &mut PowerPoleOccupied,
@@ -60,7 +60,7 @@ pub fn generate_lamps(
 
             let curr_ent_n = get_ent_num(r as u32, c as u32);
             let mut lamp =
-                BlueprintEntity::new(curr_ent_n, &constants::LAMP, pos).with_always_on(true);
+                BlueprintEntity::new(curr_ent_n, &constants::ENT_LAMP, pos).with_always_on(true);
             let index = r * grid_dim.x as usize + c;
 
             if unlikely(top_right_ent_n.is_none()) {
@@ -78,15 +78,15 @@ pub fn generate_lamps(
                     a: f64::from(p[3]) / 255.0,
                 });
             } else {
-                let sig = Arc::clone(&signals[index]);
+                let sig = &signals[index];
                 let grayscale_bits = args.image_args.grayscale_bits;
                 lamp = lamp.with_control_behavior(ControlBehavior::Lamp {
                     use_colors:   true,
                     color_mode:   if grayscale_bits > 0 { 1 } else { 2 },
-                    red_signal:   (grayscale_bits > 0).then(|| Arc::clone(&sig)),
-                    green_signal: (grayscale_bits > 0).then(|| Arc::clone(&sig)),
-                    blue_signal:  (grayscale_bits > 0).then(|| Arc::clone(&sig)),
-                    rgb_signal:   (grayscale_bits > 0).not().then(|| Arc::clone(&sig)),
+                    red_signal:   (grayscale_bits > 0).then(|| sig.clone()),
+                    green_signal: (grayscale_bits > 0).then(|| sig.clone()),
+                    blue_signal:  (grayscale_bits > 0).then(|| sig.clone()),
+                    rgb_signal:   (grayscale_bits > 0).not().then(|| sig.clone()),
                 });
             }
 

@@ -1,10 +1,7 @@
 use super::prelude::*;
 use crate::prelude::*;
 use glam::{DVec2, IVec2, dvec2, ivec2};
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::Arc,
-};
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Tracks cells occupied by power poles.
 pub struct PowerPoleOccupied {
@@ -31,18 +28,16 @@ impl PowerPoleOccupied {
         let dists = &data.supply_area_distances;
         let half_cov = dists.iter().find(|d| quality == Some(d.quality.clone()));
         let cov = 2.0 * half_cov.unwrap_or(&dists[0]).supply_area_distance;
+        let ref_sig = SignalID::new("entity", name).with_quality(quality.as_deref());
 
         start_pos += bounding_box * const { dvec2(-0.5, 0.5) };
 
-        let mut ref_entity = BlueprintEntity::new(0, &Arc::from(name), start_pos);
-        if let Some(quality) = quality {
-            ref_entity.set_quality(quality);
-        }
+        log!("Power Pole: {ref_sig}, {cov}");
 
         Self {
             bounding_box,
-            coverage: cov * f64::from(i32::from(args.include_power_poles)),
-            ref_entity,
+            coverage: if args.include_power_poles { cov } else { 0.0 },
+            ref_entity: BlueprintEntity::new(0, &ref_sig, start_pos),
             requests: BTreeSet::new(),
             start_pos,
         }

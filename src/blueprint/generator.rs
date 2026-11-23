@@ -14,6 +14,7 @@ use crate::{boxed_slice, prelude::*};
 use crate::{decider_cond, util::format_duration};
 use glam::{DVec2, UVec2, dvec2, uvec2};
 use image::GenericImageView;
+use std::collections::HashSet;
 use std::{io, sync::Arc};
 
 /// How many entities to encode in one go. Encoding more entities at once is faster, but uses more
@@ -24,7 +25,7 @@ const ENCODE_CHUNK_SIZE: usize = 100;
 /// we can batch more wires together for better speed.
 const WIRE_ENCODE_CHUNK_SIZE: usize = 5000;
 
-type SignalDataResult = (Box<[Arc<SignalID>]>, Arc<[RawJsonString]>);
+type SignalDataResult = (Box<[SignalID]>, Arc<[RawJsonString]>);
 
 /// Precomputed transformation for flipping entities.
 #[derive(Clone, Copy)]
@@ -97,7 +98,7 @@ pub struct BlueprintGenerator<'a> {
     position_transform: PositionTransform,
 
     /// List of unique signals to use for the blueprint.
-    signals: Box<[Arc<SignalID>]>,
+    signals: Box<[SignalID]>,
 
     /// Stores the JSON representation of each signal for efficient JSON reproduction
     signals_json: Arc<[RawJsonString]>,
@@ -256,42 +257,47 @@ impl<'a> BlueprintGenerator<'a> {
     }
 
     fn get_signal_data(args: &BlueprintArgs) -> Result<SignalDataResult, JsError> {
-        let mut signals = crate::blueprint::data::PROTOTYPE_DATA.with_borrow(|v| {
-            let signals = &v.as_ref().expect("No signal data loaded yet!").signals;
-            if matches!(
+        let mut signals = crate::blueprint::data::PROTOTYPE_DATA.with_borrow(|data| {
+            let data = data.as_ref().expect("No signal data loaded yet!");
+            let mut blacklisted_sigs = data.blacklist_signals.iter().collect::<HashSet<_>>();
+
+            if !matches!(
                 args.image_args.mode,
                 Mode::LampGrid | Mode::Lamps | Mode::Static { timer: false, .. }
             ) {
-                return signals.clone();
+                blacklisted_sigs.insert(&args.timing_signals.f);
+                blacklisted_sigs.insert(&args.timing_signals.p);
+                blacklisted_sigs.insert(&args.timing_signals.s);
+                blacklisted_sigs.insert(&args.timing_signals.t);
             }
-            let blacklist_sigs = [
-                Arc::clone(&args.timing_signals.f),
-                Arc::clone(&args.timing_signals.p),
-                Arc::clone(&args.timing_signals.s),
-                Arc::clone(&args.timing_signals.t),
-            ]; // Disallow timing signals from being used
-            let filtered = signals.iter().filter(|&v| !blacklist_sigs.contains(v));
+
+            let filtered = data.signal_ids.iter().filter(|v| !blacklisted_sigs.contains(v));
             filtered.cloned().collect::<Box<_>>()
         });
+
         match args.signal_sorting {
             // Only sort by name (compressor really likes this)
             SignalSorting::Compression => {
-                signals.sort_by(|a, b| a.type_.cmp(&b.type_).then_with(|| a.name.cmp(&b.name)));
-                signals.sort_by(|a, b| a.type_.len().cmp(&b.type_.len()));
+                signals.sort_by(|a, b| {
+                    a.type_().cmp(&b.type_()).then_with(|| a.name().cmp(&b.name()))
+                });
+                signals.sort_by_key(|s| s.type_().len());
             }
             // Sort by total length of the type + name + quality (actual smallest JSON)
             SignalSorting::Json => signals.sort_by_key(|s| {
-                s.quality.as_ref().map_or(0, |q| match q.as_ref() {
-                    "normal" => const { -(r#","quality":"normal""#.len() as i128) },
+                s.quality().as_ref().map_or(0, |q| match q.as_ref() {
+                    DEFAULT_QUALITY => {
+                        -const { (DEFAULT_QUALITY.len() + r#","quality":"""#.len()) as i128 }
+                    }
                     _ => q.len() as i128,
-                }) + match s.type_.as_ref() {
+                }) + match s.type_().as_ref() {
                     "item" => const { -(r#","type":"item""#.len() as i128) }, // type defaults to "item" if not specified
-                    _ => s.type_.len() as i128,
-                } + s.name.len() as i128
+                    _ => s.type_().len() as i128,
+                } + s.name().len() as i128
             }),
             _ => {}
         }
-        signals.sort_by_key(|s| s.name.contains("parameter")); // Push "parameter" signals to end
+        signals.sort_by_key(|s| s.name().contains("parameter")); // Push "parameter" signals to end
 
         let signals_str = (signals.iter())
             .map(|s| serde_json::value::RawValue::from_string(serde_json::to_string(s).unwrap()))
@@ -320,14 +326,10 @@ impl<'a> BlueprintGenerator<'a> {
                 let bp = BlueprintInner {
                     description: None,
                     icons:       Some(boxed_slice![Icon {
-                        signal: Arc::from(SignalID {
-                            type_:   Arc::from("item"),
-                            name:    Arc::clone(&constants::LAMP),
-                            quality: None,
-                        }),
+                        signal: SignalID::new("item", constants::LAMP),
                         index:  1,
                     }]),
-                    item:        constants::BLUEPRINT.to_string(),
+                    item:        constants::BLUEPRINT.to_owned(),
                     label:       Some(match self.args.image_args.mode {
                         Mode::Full => name,
                         Mode::Lamps => format!("{}x{} Lamps", self.dim.x, self.dim.y),
@@ -460,7 +462,9 @@ impl<'a> BlueprintGenerator<'a> {
             ]);
         }
 
-        if self.signals.iter().any(|s| s.type_.as_ref() == "space-location") {
+        if super::data::PROTOTYPE_DATA
+            .with_borrow(|data| data.as_ref().unwrap().signal_types.has_type("space-location"))
+        {
             output.push(
                 "\n\n [space-age][font=scenario-message-dialog]  Uses the Space Age DLC.[/font]"
                     .to_owned(),
@@ -624,34 +628,29 @@ impl<'a> BlueprintGenerator<'a> {
         let use_delta_comp = info.use_delta_comp;
         let ticks_per_grp = u32::from(ticks_per_frame) * frames_per_cb;
         let mode = self.args.image_args.mode;
-        let sig_p = Arc::clone(&self.args.timing_signals.p);
+        let sig_p = self.args.timing_signals.p.clone();
         let mut output_data: Vec<BlueprintEntity> = Vec::new();
 
         let mk_cb = |range: UVec2, indices: Box<[(usize, i32)]>| -> ControlBehavior {
             if matches!(mode, Mode::Static { const_cb: true, .. }) {
                 let sections = indices.chunks(1000).enumerate().map(|(i, chunk)| {
                     let filters = chunk.iter().enumerate().map(|(j, &(sig_i, count))| {
-                        let sig = &signals[sig_i];
-                        BlueprintLogisticFilter {
-                            index: j as u16 + 1,
-                            type_: Arc::clone(&sig.type_),
-                            name: Arc::clone(&sig.name),
-                            quality: sig.quality.clone(),
-                            comparator: Some(CompStr::Eq),
-                            count,
-                        }
+                        BlueprintLogisticFilter::new(j as u16 + 1, &signals[sig_i], "==", count)
                     });
-                    LogisticSection { index: i as u8 + 1, filters: filters.collect() }
+                    LogisticSection {
+                        index:   i as u8 + 1,
+                        filters: filters.collect::<Result<_, JsError>>().unwrap(),
+                    }
                 });
                 let sections = LogisticSections { sections: sections.collect() };
                 ControlBehavior::ConstantCombinator { sections }
             } else {
                 let signal_list = Arc::clone(&self.signals_json);
                 let conditions = match range.y - range.x {
-                    1 => boxed_slice![decider_cond!(sig_p, ==, range.x.cast_signed()),],
+                    1 => boxed_slice![decider_cond!(&sig_p, ==, range.x.cast_signed()),],
                     _ => boxed_slice![
-                        decider_cond!(sig_p, >=, range.x.cast_signed()),
-                        decider_cond!(sig_p, <, range.y.cast_signed()).with_compare_type("&"),
+                        decider_cond!(&sig_p, >=, range.x.cast_signed()),
+                        decider_cond!(&sig_p, <, range.y.cast_signed()).with_compare_type("&"),
                     ],
                 };
                 let decider_conditions =
@@ -820,7 +819,7 @@ impl<'a> BlueprintGenerator<'a> {
             self.occupied.request(en.position); // Request powerage for generated combinators
             Self::transform_entity(self.args, &self.position_transform, en); // Translate positions
 
-            if unlikely(*en.name == **CONSTANT_COMB) {
+            if unlikely(en.name() == CONSTANT_CB) {
                 en.set_player_description(&self.get_description());
             }
         }
