@@ -32,8 +32,6 @@ impl PowerPoleOccupied {
 
         start_pos += bounding_box * const { dvec2(-0.5, 0.5) };
 
-        log!("Power Pole: {ref_sig}, {cov}");
-
         Self {
             bounding_box,
             coverage: if args.include_power_poles { cov } else { 0.0 },
