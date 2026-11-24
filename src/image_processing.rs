@@ -326,40 +326,50 @@ impl<'a> FrameData<'a> {
         assert!(!palette.colors.is_empty(), "Palette cannot be empty");
 
         let offsets = frames[0].offsets();
-        let (width, height) = frames[0].dimensions();
+        let (width, height) = (frames[0].width() as usize, frames[0].height() as usize);
         assert!(
-            (frames.iter()).all(|f| f.dimensions() == (width, height) && f.offsets() == offsets),
+            (frames.iter())
+                .all(|f| f.dimensions() == (width as u32, height as u32) && f.offsets() == offsets),
             "All frames must have identical dimensions"
         );
 
         let bits_per_index = (usize::BITS - (palette.colors.len() - 1).leading_zeros()).max(1);
         assert!(bits_per_index <= 32, "Palette too large to pack into i32");
 
-        let frames = (frames.iter().map(|f| match *f.inner() {
-            image::DynamicImage::ImageRgba8(ref f) => Ok(f),
-            _ => err_js!("Expected all frames to be RGBA8"),
-        }))
-        .collect::<Result<Box<_>, _>>()?;
-
         let frames_per_output = (32_u32.div_euclid(bits_per_index)) as usize;
         let n_groups = frames.len().div_ceil(frames_per_output);
-        let n_pixels = (width * height) as usize;
+        let n_pixels = width * height;
 
         let mut outputs = boxed_slice![0_i32; n_pixels * n_groups];
 
-        for (group_i, frame_group) in frames.chunks(frames_per_output).enumerate() {
+        let offset_x = offsets.0 as usize * 4;
+        let offset_y = offsets.1 as usize;
+
+        for (frame_i, &frame) in frames.iter().enumerate() {
+            let group_i = frame_i.div_euclid(frames_per_output);
+            let frame_i = frame_i.rem_euclid(frames_per_output);
+
+            let image::DynamicImage::ImageRgba8(ref img) = *frame.inner() else {
+                err_js!("Expected all frames to be RGBA8");
+            };
+
+            let raw = img.as_raw();
+            let stride = img.width() as usize * 4;
+
             let group_offset = group_i * n_pixels;
 
-            for (y, x) in (0..height).flat_map(|y| (0..width).map(move |x| (y, x))) {
-                let pixel_idx = (y * width + x) as usize;
-                let mut packed = 0_u32;
+            for y in 0..height {
+                let pixel_row = y * width;
+                let source_row = (y + offset_y) * stride + offset_x;
 
-                for (frame_i, frame) in frame_group.iter().enumerate() {
-                    let [r, g, b, ..] = frame.get_pixel(x + offsets.0, y + offsets.1).0;
-                    packed |= palette.nearest_index([r, g, b]) << (frame_i as u32 * bits_per_index);
+                for x in 0..width {
+                    let pixel_i = pixel_row + x;
+                    let i = source_row + x * 4;
+                    let palette_i = palette.nearest_index([raw[i], raw[i + 1], raw[i + 2]]);
+
+                    outputs[group_offset + pixel_i] |=
+                        (palette_i << (frame_i as u32 * bits_per_index)).cast_signed();
                 }
-
-                outputs[group_offset + pixel_idx] = packed.cast_signed();
             }
         }
 
