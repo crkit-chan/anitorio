@@ -3,6 +3,7 @@
     const_cmp,
     const_default,
     const_destruct,
+    const_result_trait_fn,
     const_trait_impl,
     likely_unlikely
 )]

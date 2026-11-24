@@ -1,4 +1,5 @@
 use crate::constants;
+use crate::palette::ColorPalettePixel;
 use crate::util::wasm_shared_memory;
 use crate::{constants::DEFAULT_FRAME_DELAY, util::format_duration};
 use crate::{prelude::*, ts};
@@ -204,16 +205,13 @@ impl<'a> FrameData<'a> {
 
     #[inline]
     #[must_use]
-    pub fn get_palette_colors(&self) -> Option<&[[u8; 3]]> {
-        if let Some(ref palette) = self.palette {
-            return Some(&palette.colors);
-        }
-        None
+    pub fn get_palette_colors(&self) -> Option<&[ColorPalettePixel]> {
+        self.palette.as_ref().map(ColorPalette::get_colors)
     }
 
     //// Returns the current output time in microseconds.
-    #[must_use]
     #[inline]
+    #[must_use]
     fn out_t_us(&self) -> u64 {
         (self.out_frame_i as u64 * 1000 * 1000).div_euclid(u64::from(self.args.target_fps))
     }
@@ -281,14 +279,16 @@ impl<'a> FrameData<'a> {
 
             match img {
                 image::DynamicImage::ImageRgba8(ref mut inner) => {
+                    let colors = palette.get_colors();
                     for (pixel, v) in inner.pixels_mut().zip(indexes) {
-                        let [r, g, b] = palette.colors[v as usize];
+                        let [r, g, b] = colors[v as usize];
                         *pixel = image::Rgba([r, g, b, 255]);
                     }
                 }
                 image::DynamicImage::ImageLuma8(ref mut inner) => {
+                    let colors = palette.get_colors();
                     for (pixel, v) in inner.iter_mut().zip(indexes) {
-                        *pixel = palette.colors[v as usize][0];
+                        *pixel = colors[v as usize][0];
                     }
                 }
                 _ => err_js!("Expected Rgba8 or Luma8, got '{:?}'", img.color()),
@@ -323,7 +323,7 @@ impl<'a> FrameData<'a> {
         };
 
         assert!(!frames.is_empty(), "No frames provided for packing");
-        assert!(!palette.colors.is_empty(), "Palette cannot be empty");
+        assert!(!palette.get_colors().is_empty(), "Palette cannot be empty");
 
         let offsets = frames[0].offsets();
         let (width, height) = (frames[0].width() as usize, frames[0].height() as usize);
@@ -333,7 +333,8 @@ impl<'a> FrameData<'a> {
             "All frames must have identical dimensions"
         );
 
-        let bits_per_index = (usize::BITS - (palette.colors.len() - 1).leading_zeros()).max(1);
+        let bits_per_index =
+            (usize::BITS - (palette.get_colors().len() - 1).leading_zeros()).max(1);
         assert!(bits_per_index <= 32, "Palette too large to pack into i32");
 
         let frames_per_output = (32_u32.div_euclid(bits_per_index)) as usize;
@@ -365,7 +366,7 @@ impl<'a> FrameData<'a> {
                 for x in 0..width {
                     let pixel_i = pixel_row + x;
                     let i = source_row + x * 4;
-                    let palette_i = palette.nearest_index([raw[i], raw[i + 1], raw[i + 2]]);
+                    let palette_i = palette.exact_index([raw[i], raw[i + 1], raw[i + 2]]);
 
                     outputs[group_offset + pixel_i] |=
                         (palette_i << (frame_i as u32 * bits_per_index)).cast_signed();

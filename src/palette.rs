@@ -1,13 +1,14 @@
 use crate::prelude::*;
 #[cfg(feature = "kiddo")]
 use kiddo::{ImmutableKdTree, SquaredEuclidean};
+use std::collections::HashMap;
 
 pub type ColorPalettePixel = [u8; 3];
 pub struct ColorPalette {
-    pub colors: Box<[ColorPalettePixel]>,
-
+    colors:        Box<[ColorPalettePixel]>,
+    colors_hashed: HashMap<ColorPalettePixel, usize>,
     #[cfg(feature = "kiddo")]
-    tree: ImmutableKdTree<u8, 3>,
+    tree:          ImmutableKdTree<u8, 3>,
 }
 impl ColorPalette {
     #[allow(
@@ -15,15 +16,33 @@ impl ColorPalette {
         clippy::unnecessary_wraps,
         reason = "Result<> used for 'kiddo'"
     )]
-    pub fn new(colors: Box<[ColorPalettePixel]>) -> Result<Self, JsError> {
+    pub fn new(mut colors: Box<[ColorPalettePixel]>) -> Result<Self, JsError> {
+        colors.sort_unstable(); // Allows better compression
+
         Ok(Self {
             #[cfg(feature = "kiddo")]
             tree: ImmutableKdTree::new_from_slice(&colors)?,
+            colors_hashed: colors.iter().enumerate().map(|(i, c)| (*c, i)).collect(),
             colors,
         })
     }
 
     #[inline]
+    #[must_use]
+    pub const fn get_colors(&self) -> &[ColorPalettePixel] {
+        &self.colors
+    }
+
+    /// Finds the exact index of a pixel. This uses a cached ``HashMap`` and will error if the
+    /// pixel colour is not inside the ``HashMap``.
+    #[inline]
+    #[must_use]
+    pub fn exact_index(&self, target: ColorPalettePixel) -> u32 {
+        self.colors_hashed[&target] as u32
+    }
+
+    #[inline]
+    #[must_use]
     pub fn nearest_index(&self, target: ColorPalettePixel) -> u32 {
         #[cfg(feature = "kiddo")]
         {
