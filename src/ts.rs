@@ -31,7 +31,7 @@ pub type TsVoid = js_sys::Undefined;
 #[repr(transparent)]
 pub struct TsIntoRust<T: DeserializeOwned> {
     value:   JsValue,
-    _marker: std::marker::PhantomData<fn() -> T>,
+    _marker: core::marker::PhantomData<fn() -> T>,
 }
 impl<T: DeserializeOwned> TsIntoRust<T> {
     #[expect(clippy::wrong_self_convention, reason = "Matches `tsify` API")]
@@ -41,7 +41,7 @@ impl<T: DeserializeOwned> TsIntoRust<T> {
 }
 impl<T: DeserializeOwned> From<JsValue> for TsIntoRust<T> {
     fn from(value: JsValue) -> Self {
-        Self { value, _marker: std::marker::PhantomData }
+        Self { value, _marker: core::marker::PhantomData }
     }
 }
 impl<T: DeserializeOwned> From<TsIntoRust<T>> for JsValue {
@@ -52,6 +52,8 @@ impl<T: DeserializeOwned> From<TsIntoRust<T>> for JsValue {
 impl<T: DeserializeOwned> FromWasmAbi for TsIntoRust<T> {
     type Abi = <JsValue as FromWasmAbi>::Abi;
     unsafe fn from_abi(js: Self::Abi) -> Self {
+        // SAFETY: `TsIntoRust<T>` uses the same ABI representation as `JsValue`.
+        // The incoming ABI value is therefore valid to reconstruct as a `JsValue`.
         Self::from(unsafe { JsValue::from_abi(js) })
     }
 }
@@ -60,6 +62,8 @@ impl<T: DeserializeOwned> WasmDescribe for TsIntoRust<T> {
         <JsValue as WasmDescribe>::describe();
     }
 }
+// SAFETY: `TsIntoRust<T>` is `#[repr(transparent)]` over `JsValue`.
+// Its only additional field is `PhantomData`, which has no runtime representation.
 unsafe impl<T: DeserializeOwned> ErasableGeneric for TsIntoRust<T> {
     type Repr = JsValue;
 }
@@ -88,12 +92,16 @@ impl<T: DeserializeOwned> JsCast for TsIntoRust<T> {
         true
     }
 
-    fn unchecked_from_js(value: JsValue) -> Self {
-        Self::from(value)
+    fn unchecked_from_js(val: JsValue) -> Self {
+        Self::from(val)
     }
 
-    fn unchecked_from_js_ref(value: &JsValue) -> &Self {
-        unsafe { &*std::ptr::from_ref::<JsValue>(value).cast::<Self>() }
+    fn unchecked_from_js_ref(val: &JsValue) -> &Self {
+        // SAFETY: `TsIntoRust<T>` is `#[repr(transparent)]` over `JsValue`.
+        // The `PhantomData` field has no runtime representation, so both types
+        // have identical layouts and alignment. The returned reference cannot
+        // outlive the input reference.
+        unsafe { &*core::ptr::from_ref::<JsValue>(val).cast::<Self>() }
     }
 }
 

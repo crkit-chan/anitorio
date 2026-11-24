@@ -3,19 +3,15 @@ use super::lamp::generate_lamps;
 use super::power_pole::PowerPoleOccupied;
 use super::prelude::*;
 use super::timer::generate_timer;
-use super::util::{
-    color_frame_to_outputs, grayscale_frames_to_outputs, palette_frames_to_outputs,
-    write_json_trimmed_to, write_to,
-};
 use crate::callbacks::report_lamp_group;
-use crate::image_processing::FrameData;
+use crate::image_processing::{FrameData, color_frame_to_outputs, grayscale_frames_to_outputs};
 use crate::models::RawJsonString;
 use crate::{boxed_slice, prelude::*};
 use crate::{decider_cond, util::format_duration};
+use alloc::sync::Arc;
 use glam::{DVec2, UVec2, dvec2, uvec2};
-use image::GenericImageView;
-use std::collections::HashSet;
-use std::{io, sync::Arc};
+use image::GenericImageView as _;
+use std::{collections::HashSet, io};
 
 /// How many entities to encode in one go. Encoding more entities at once is faster, but uses more
 /// memory.
@@ -94,7 +90,6 @@ pub struct BlueprintGenerator<'a> {
     /// Keeps track of positions currently occupied by power poles, and used to request powerage
     /// for generated entities.
     occupied:           PowerPoleOccupied,
-    palette:            Option<ColorPalette>,
     position_transform: PositionTransform,
 
     /// List of unique signals to use for the blueprint.
@@ -154,7 +149,7 @@ impl<'a> BlueprintGenerator<'a> {
         let dim: UVec2;
 
         if let Some(mut frame_data) = data {
-            let frames_per_cb = 32u32.checked_div(args.image_args.bits()).unwrap_or(1);
+            let frames_per_cb = 32_u32.checked_div(args.image_args.bits()).unwrap_or(1);
             let n_buf_frames = if time_comp_win > 0 {
                 (time_comp_win * u32::from(args.image_args.target_fps))
                     .div_ceil(1000 * frames_per_cb)
@@ -170,7 +165,7 @@ impl<'a> BlueprintGenerator<'a> {
                 n_buf_frames,
                 next_frame: None,
                 patch_states: Vec::new(),
-                ticks_per_frame: 60 / args.image_args.target_fps,
+                ticks_per_frame: 60_u8.div_euclid(args.image_args.target_fps),
                 use_delta_comp: comb_comp.is_some_and(|c| c == SignalCompression::Delta),
             });
         } else {
@@ -180,9 +175,10 @@ impl<'a> BlueprintGenerator<'a> {
         let max_lamp_cols_per_grp = match args.image_args.mode {
             Mode::Static { combs: false, .. } => dim.x,
             // Constant combinators can only hold up to 1000 signals
-            _ => ((signals.len() as u32).min(if use_const_cbs { 255_000 } else { u32::MAX })
-                / dim.y)
-                .min(args.max_group_size.map_or(dim.x, u32::from)),
+            _ => ((signals.len() as u32)
+                .min(if use_const_cbs { 255_000 } else { u32::MAX })
+                .div_euclid(dim.y))
+            .min(args.max_group_size.map_or(dim.x, u32::from)),
         };
         assert!(
             max_lamp_cols_per_grp >= 1,
@@ -191,11 +187,12 @@ impl<'a> BlueprintGenerator<'a> {
         let n_groups = dim.x.div_ceil(max_lamp_cols_per_grp);
 
         if let Some(frame_info) = frame_info.as_mut() {
-            let states_iter = (0..n_groups).map(|_| GroupPatchState {
+            let states_iter = core::iter::repeat_with(|| GroupPatchState {
                 chunk_i:   0,
                 frame_buf: Vec::with_capacity(frame_info.frames_per_cb as usize),
                 sig_buf:   Vec::with_capacity(frame_info.n_buf_frames as usize),
-            });
+            })
+            .take(n_groups as usize);
             frame_info.patch_states = states_iter.collect();
         }
 
@@ -211,8 +208,7 @@ impl<'a> BlueprintGenerator<'a> {
             ),
             max_cols_per_grp: max_lamp_cols_per_grp,
             n_groups,
-            occupied: PowerPoleOccupied::new(dvec2(0.0, -f64::from(args.display_margin_y)), args),
-            palette: None,
+            occupied: PowerPoleOccupied::new(dvec2(0.0, -f64::from(args.display_margin_y)), args)?,
             position_transform: PositionTransform::new(args),
             signals,
             signals_json,
@@ -220,11 +216,7 @@ impl<'a> BlueprintGenerator<'a> {
         })
     }
 
-    pub fn with_palette(mut self, palette: Option<ColorPalette>) -> Self {
-        self.palette = palette;
-        self
-    }
-
+    #[inline]
     fn transform_entity(
         args: &BlueprintArgs,
         position_transform: &PositionTransform,
@@ -247,12 +239,12 @@ impl<'a> BlueprintGenerator<'a> {
                 _ => (),
             }
             match args.image_args.flip {
-                ImageFlip::X if (v + 4) % 8 == 0 => v += 8,
-                ImageFlip::Y if v % 8 == 0 => v += 8,
+                ImageFlip::X if (v + 4).rem_euclid(8) == 0 => v += 8,
+                ImageFlip::Y if v.rem_euclid(8) == 0 => v += 8,
                 ImageFlip::Both => v += 8,
                 _ => (),
             }
-            *dir = v % 16;
+            *dir = v.rem_euclid(16);
         }
     }
 
@@ -306,6 +298,8 @@ impl<'a> BlueprintGenerator<'a> {
         Ok((signals, signals_str))
     }
 
+    #[inline]
+    #[must_use]
     pub fn done(&self) -> bool {
         self.state == BlueprintState::Finished
     }
@@ -315,7 +309,7 @@ impl<'a> BlueprintGenerator<'a> {
         let old_state = self.state;
         match old_state {
             BlueprintState::Start => {
-                write_to(writer, br#"{"blueprint":{"#)?;
+                write_to!(writer, br#"{"blueprint":{"#)?;
 
                 let bp_color = match self.args.image_args.grayscale_bits {
                     0 => "#8888ff",
@@ -342,7 +336,7 @@ impl<'a> BlueprintGenerator<'a> {
                     wires:       Some(Wires::new()), // don't serialize
                 };
 
-                write_json_trimmed_to(writer, &bp)?;
+                write_json_trimmed_to!(writer, &bp)?;
                 self.state = BlueprintState::Entities;
             }
             BlueprintState::Entities => self.place_entities(writer)?,
@@ -354,13 +348,13 @@ impl<'a> BlueprintGenerator<'a> {
                 }
             }
             BlueprintState::Wires => self.make_wires(writer)?,
-            BlueprintState::Finished => panic!("Already processed all chunks"),
+            BlueprintState::Finished => err_js!("Already processed all chunks"),
         }
 
         // Properly delimit the JSON stream before the next chunks
         if old_state != self.state {
             match self.state {
-                BlueprintState::Entities => write_to(writer, br#","entities":["#)?,
+                BlueprintState::Entities => write_to!(writer, br#","entities":["#)?,
                 BlueprintState::Wires => {
                     // Set description of constant combinator
                     if true
@@ -386,18 +380,18 @@ impl<'a> BlueprintGenerator<'a> {
                     // Write remaining entities. Data combinators were NOT included in
                     // self.entity_data.ents
                     for ents in self.entity_data.ents.chunks(ENCODE_CHUNK_SIZE) {
-                        write_to(writer, b",")?;
-                        write_json_trimmed_to(writer, &ents)?;
+                        write_to!(writer, b",")?;
+                        write_json_trimmed_to!(writer, &ents)?;
                     }
 
-                    write_to(writer, br#"],"wires":["#)?;
+                    write_to!(writer, br#"],"wires":["#)?;
                 }
                 BlueprintState::Finished => {
-                    write_to(writer, b"]")?;
-                    write_to(writer, br#","description":""#)?;
-                    write_json_trimmed_to(writer, &self.get_description())?;
-                    write_to(writer, br#"""#)?;
-                    write_to(writer, b"}}")?;
+                    write_to!(writer, b"]")?;
+                    write_to!(writer, br#","description":""#)?;
+                    write_json_trimmed_to!(writer, &self.get_description())?;
+                    write_to!(writer, br#"""#)?;
+                    write_to!(writer, b"}}")?;
                 }
                 _ => {}
             }
@@ -405,6 +399,8 @@ impl<'a> BlueprintGenerator<'a> {
         Ok(())
     }
 
+    #[inline]
+    #[must_use]
     pub fn get_description(&mut self) -> String {
         if self.description.is_none() {
             self.description = Some(self.generate_description());
@@ -413,6 +409,7 @@ impl<'a> BlueprintGenerator<'a> {
     }
 
     /// Gets the description to attach to the blueprint.
+    #[must_use]
     fn generate_description(&self) -> String {
         // Note: we use the `var` font for bold text as the word "var" is short and takes up less space.
         let name = self.args.name.clone();
@@ -455,7 +452,7 @@ impl<'a> BlueprintGenerator<'a> {
 
             let fps = self.args.image_args.target_fps;
             let n_frames = fd.curr_total_frames();
-            let duration = format_duration((1000 * n_frames as u64) / u64::from(fps));
+            let duration = format_duration((1000 * n_frames as u64).div_euclid(u64::from(fps)));
             output.extend([
                 format!("\n[font=var]Duration[/font]:   {duration}"),
                 format!("\n[font=var]Frames[/font]:      {n_frames} ({fps} FPS)"),
@@ -552,8 +549,8 @@ impl<'a> BlueprintGenerator<'a> {
                     self.max_cols_per_grp,
                     args,
                     occupied,
-                    self.palette.as_ref(),
-                );
+                    info.frame_data.get_palette_colors(),
+                )?;
                 ent_data.next_ent_n = new_base_ent_n;
                 if unlikely(group_i == 0) {
                     ent_data.wires.push([3, WIRE_OUT_R, in_ent_n, WIRE_R]); // Connect timer
@@ -595,14 +592,14 @@ impl<'a> BlueprintGenerator<'a> {
                 occupied.request(lamp.position); // Request powerage for lamps
             }
             if likely(group_i > 0) {
-                write_to(writer, b",")?;
+                write_to!(writer, b",")?;
             }
 
             for en in &mut grp_lamps {
                 Self::transform_entity(self.args, &self.position_transform, en);
             }
 
-            write_json_trimmed_to(writer, &grp_lamps)?;
+            write_json_trimmed_to!(writer, &grp_lamps)?;
             ent_data.wires.extend(grp_lamp_wires.into_iter());
         }
 
@@ -683,6 +680,7 @@ impl<'a> BlueprintGenerator<'a> {
                 let frame_sigs: Box<[i32]>;
 
                 let target_outputs_len: usize;
+                let has_palette = frame_data.get_palette_colors().is_some();
 
                 {
                     let grp_left = group_i * max_cols_per_grp;
@@ -691,7 +689,7 @@ impl<'a> BlueprintGenerator<'a> {
                     let (w, h) = (grp_right - grp_left, self.dim.y);
                     target_outputs_len = (w * h) as usize;
 
-                    if self.palette.is_some() || gray_bits > 0 {
+                    if has_palette || gray_bits > 0 {
                         state.frame_buf.push(image::SubImage::new(Arc::clone(frame), x, y, w, h));
                         if state.frame_buf.len() < frames_per_cb as usize && !is_last_frame {
                             continue; // wait until we have a full chunk for this group
@@ -700,14 +698,15 @@ impl<'a> BlueprintGenerator<'a> {
                             .map(|f| f.inner().view(x, y, w, h))
                             .collect::<Box<_>>();
 
-                        frame_sigs = self.palette.as_ref().map_or_else(
-                            || grayscale_frames_to_outputs(&frames, gray_bits.into()),
-                            |palette| palette_frames_to_outputs(&frames, palette),
-                        );
+                        frame_sigs = if has_palette {
+                            frame_data.palette_frames_to_outputs(&frames)?
+                        } else {
+                            grayscale_frames_to_outputs(&frames, gray_bits.into())?
+                        };
 
                         state.frame_buf.clear();
                     } else {
-                        frame_sigs = color_frame_to_outputs(&frame.as_ref().view(x, y, w, h));
+                        frame_sigs = color_frame_to_outputs(&frame.as_ref().view(x, y, w, h))?;
                     }
                 }
 
@@ -718,7 +717,7 @@ impl<'a> BlueprintGenerator<'a> {
                 );
 
                 if use_delta_comp && state.sig_buf.is_empty() {
-                    state.sig_buf.push(boxed_slice![0i32; target_outputs_len]); // Populate first frame with zeros
+                    state.sig_buf.push(boxed_slice![0_i32; target_outputs_len]); // Populate first frame with zeros
                 } else if !use_delta_comp {
                     state.sig_buf.push(frame_sigs.clone()); // If we're using delta compression we only compare aginst the previous frame
                 }
@@ -824,7 +823,7 @@ impl<'a> BlueprintGenerator<'a> {
             }
         }
         if !output_data.is_empty() {
-            write_to(writer, b",")?;
+            write_to!(writer, b",")?;
 
             if self.args.low_mem_usage {
                 let mut buffered = io::BufWriter::with_capacity(512 * 1024, writer);
@@ -832,7 +831,7 @@ impl<'a> BlueprintGenerator<'a> {
                 serde_json::to_writer(&mut trimmed, &output_data)?;
                 trimmed.finish()?;
             } else {
-                write_json_trimmed_to(writer, &output_data)?;
+                write_json_trimmed_to!(writer, &output_data)?;
             }
         }
 
@@ -858,7 +857,7 @@ impl<'a> BlueprintGenerator<'a> {
         let mut is_first_write = true;
         let mut buf: Vec<[u32; 4]> = Vec::with_capacity(WIRE_ENCODE_CHUNK_SIZE);
 
-        for (i, wires) in std::mem::take(all_wires).into_iter().enumerate() {
+        for (i, wires) in core::mem::take(all_wires).into_iter().enumerate() {
             buf.push(wires);
             if likely(buf.len() < WIRE_ENCODE_CHUNK_SIZE && i < n_wires - 1) {
                 continue;
@@ -872,9 +871,9 @@ impl<'a> BlueprintGenerator<'a> {
             );
 
             if likely(!is_first_write) {
-                write_to(writer, b",")?;
+                write_to!(writer, b",")?;
             }
-            write_json_trimmed_to(writer, &buf)?;
+            write_json_trimmed_to!(writer, &buf)?;
 
             buf.clear();
             is_first_write = false;

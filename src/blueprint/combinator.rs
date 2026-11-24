@@ -1,11 +1,12 @@
 use super::{power_pole::PowerPoleOccupied, prelude::*};
-use crate::image_processing::rgb_to_int;
+use crate::palette::ColorPalettePixel;
 use crate::util::bounding_box_midpoints;
-use crate::{arithmetic_conds, decider_cond, mkwires};
-use crate::{boxed_slice, prelude::*};
+use crate::{arithmetic_conds, mkwires, prelude::*};
+use crate::{decider_cond, image_processing::rgb_to_int};
+use alloc::collections::BTreeMap;
+use core::cell::RefCell;
 use glam::{DVec2, IVec2, dvec2};
 use std::collections::HashSet;
-use std::{cell::RefCell, collections::BTreeMap};
 
 thread_local! {
     static COMB_POS_DATA: RefCell<Option<Box<[CombinatorPositionData]>>> = const { RefCell::new(None) };
@@ -19,20 +20,19 @@ struct CombinatorPositionData {
     blueprint:      Blueprint,
 }
 
-#[must_use]
 #[inline]
-pub fn get_bounding_box(en: &BlueprintEntity) -> std::ops::Range<DVec2> {
+pub fn get_bounding_box(en: &BlueprintEntity) -> Result<core::ops::Range<DVec2>, JsError> {
     use super::constants::{ARI_CB, CONSTANT_CB, DEC_CB, DIR_D, DIR_L, DIR_R, DIR_U};
     let offset = DVec2::from(match en.name().as_str() {
         ARI_CB | DEC_CB => match en.direction() {
             None | Some(DIR_U | DIR_D) => const { (1.0, 2.0) },
             Some(DIR_L | DIR_R) => const { (2.0, 1.0) },
-            _ => panic!("Unsupported entity direction"),
+            _ => err_js!("Unsupported entity direction"),
         },
         CONSTANT_CB => const { (1.0, 1.0) },
-        v => panic!("Unsupported entity type '{v}'"),
+        v => err_js!("Unsupported entity type '{v}'"),
     });
-    (en.position - offset / 2.0)..(en.position + offset / 2.0)
+    Ok((en.position - offset / 2.0)..(en.position + offset / 2.0))
 }
 
 pub fn load_comb_pos_json(data_json_reader: impl std::io::Read) -> Result<(), JsError> {
@@ -55,7 +55,7 @@ pub fn load_comb_pos_json(data_json_reader: impl std::io::Read) -> Result<(), Js
 
             // Extend bounds to fit all entities
             for en in &blueprint.blueprint.entities {
-                let en_bounds = get_bounding_box(en);
+                let en_bounds = get_bounding_box(en)?;
                 bounds.start = bounds.start.min(en_bounds.start);
                 bounds.end = bounds.end.max(en_bounds.end);
             }
@@ -108,8 +108,8 @@ pub fn generate_combinators(
     max_cols_per_grp: u32,
     args: &BlueprintArgs,
     occupied: &PowerPoleOccupied,
-    palette: Option<&ColorPalette>,
-) -> GenerateCombinatorsOutput {
+    palette_colors: Option<&[ColorPalettePixel]>,
+) -> Result<GenerateCombinatorsOutput, JsError> {
     // Positions for combinators, for different widths.
     // TODO: Don't recalculate this for every group
     let mut best_pos_data: Option<CombinatorPositionData> = None;
@@ -195,11 +195,11 @@ pub fn generate_combinators(
                 DEC_CB
             },
         ),
-        tick_i: 0usize,
+        tick_i: 0_usize,
         wires: Wires::new(),
     };
 
-    if let Some(palette) = palette {
+    if let Some(palette_colors) = palette_colors {
         struct EntityCand {
             grid_x: i32,
             ent_n:  u32,
@@ -210,7 +210,7 @@ pub fn generate_combinators(
 
         data_cbs.target_signal_ref.set_name(DEC_CB);
 
-        for (i, &[r, g, b, ..]) in palette.colors.iter().enumerate().skip(1) {
+        for (i, &[r, g, b, ..]) in palette_colors.iter().enumerate().skip(1) {
             in_ent_n.get_or_insert(curr_ent_n); // The input timing wire should connect to the first palette combinator
             out_ent_n.get_or_insert(curr_ent_n);
 
@@ -233,7 +233,7 @@ pub fn generate_combinators(
             if args.detailed_descriptions {
                 en = en.with_player_description(&[
                     // Note: not i + 1 because we already skip the first colour (black)
-                    format!("[font=var]Index combinator {} / {}.", i, palette.colors.len() - 1),
+                    format!("[font=var]Index combinator {} / {}.", i, palette_colors.len() - 1),
                     format!("\nMaps the index '{i}' to the colour [color=#{color:06X}]●[/color] #{color:06X}.[/font]"),
                 ].join("\n"));
             }
@@ -267,7 +267,7 @@ pub fn generate_combinators(
             let mut bounds = DVec2::INFINITY..DVec2::NEG_INFINITY;
 
             for en in pos_dict.values() {
-                let en_bounds = get_bounding_box(en);
+                let en_bounds = get_bounding_box(en)?;
                 bounds.start = bounds.start.min(en_bounds.start);
                 bounds.end = bounds.end.max(en_bounds.end);
             }
@@ -284,7 +284,7 @@ pub fn generate_combinators(
         }
         if bits > 0 {
             used_tags.extend([">>", "AND"]);
-            if palette.is_none() && matches!(bits, 1 | 4) {
+            if palette_colors.is_none() && matches!(bits, 1 | 4) {
                 used_tags.push("*");
             }
         }
@@ -298,41 +298,38 @@ pub fn generate_combinators(
             used_tags.iter().map(|tag| (tag, pos_dict[tag].position)).collect();
 
         // The leftmost boundary of the original combinator group.
-        let (original_left, original_right) = (used_tags.iter())
-            .map(|tag| {
-                let bounds = get_bounding_box(&pos_dict[tag]);
-                (bounds.start.x, bounds.end.x)
-            })
-            .fold(
-                (f64::INFINITY, f64::NEG_INFINITY),
-                |(l, r), (new_l, new_r)| (l.min(new_l), r.max(new_r)),
-            );
+        let (original_left, original_right) =
+            used_tags.iter().try_fold((f64::INFINITY, f64::NEG_INFINITY), |(l, r), tag| {
+                let bounds = get_bounding_box(&pos_dict[tag])?;
+                Ok::<_, JsError>((l.min(bounds.start.x), r.max(bounds.end.x)))
+            })?;
 
-        let fits = |offset: DVec2| {
+        let fits = |offset: DVec2| -> Result<bool, JsError> {
             // Never shift the group further left than its original bounding box.
             if offset.x < 0.0 {
-                return false;
+                return Ok(false);
             }
 
-            used_tags.iter().all(|tag| {
-                let bounds = get_bounding_box(&pos_dict[tag]);
-                bounding_box_midpoints(bounds.start + offset, bounds.end + offset)
-                    .all(|pos| occupied.test(placement_origin + pos))
+            used_tags.iter().try_fold(true, |_, tag| {
+                let bounds = get_bounding_box(&pos_dict[tag])?;
+                let mut midpoints =
+                    bounding_box_midpoints(bounds.start + offset, bounds.end + offset);
+                Ok(midpoints.all(|pos| occupied.test(placement_origin + pos)))
             })
         };
 
         // Individual placement fallback.
         let mut placed = HashSet::<(i32, i32)>::new();
 
-        for (tag, original_pos) in &original_positions {
-            let en = &pos_dict[*tag];
-            let bounds = get_bounding_box(en);
+        for &(tag, original_pos) in &original_positions {
+            let en = &pos_dict[tag];
+            let bounds = get_bounding_box(en)?;
             let new_positions = (-SEARCH_RADIUS..=SEARCH_RADIUS).flat_map(|y| {
                 (-SEARCH_RADIUS..=SEARCH_RADIUS)
-                    .map(move |x| *original_pos + dvec2(f64::from(x), f64::from(y)))
+                    .map(move |x| original_pos + dvec2(f64::from(x), f64::from(y)))
             });
             let new_positions = new_positions.filter(|&pos| {
-                let offset = pos - *original_pos;
+                let offset = pos - original_pos;
 
                 // Do not allow any combinator to extend left of the original group boundary.
                 let new_left = bounds.start.x + offset.x;
@@ -349,19 +346,19 @@ pub fn generate_combinators(
                 })
             });
             let new_pos = new_positions.min_by(|a, b| {
-                a.distance_squared(*original_pos).total_cmp(&b.distance_squared(*original_pos))
+                a.distance_squared(original_pos).total_cmp(&b.distance_squared(original_pos))
             });
 
             if let Some(new_pos) = new_pos {
-                let offset = new_pos - *original_pos;
-                let new_bounds = get_bounding_box(en);
+                let offset = new_pos - original_pos;
+                let new_bounds = get_bounding_box(en)?;
 
                 for p in bounding_box_midpoints(new_bounds.start + offset, new_bounds.end + offset)
                 {
                     placed.insert((p.x as i32, p.y as i32));
                 }
 
-                pos_dict.get_mut(*tag).unwrap().position = new_pos;
+                pos_dict.get_mut(tag).unwrap().position = new_pos;
             } else {
                 // No valid position found for this combinator.
                 // Handle this case rather than silently accepting an overlap.
@@ -378,7 +375,7 @@ pub fn generate_combinators(
 
         // Extend bounds to fit all entities
         for en in pos_dict.values() {
-            let en_bounds = get_bounding_box(en);
+            let en_bounds = get_bounding_box(en)?;
             bounds.start = bounds.start.min(en_bounds.start);
             bounds.end = bounds.end.max(en_bounds.end);
         }
@@ -412,7 +409,7 @@ pub fn generate_combinators(
             in_ent_n.get_or_insert(curr_ent_n);
             data_cbs.in_ent_n = curr_ent_n; // Data combinator timing wires should share the same timing wires as this combinator
             curr_ent_n += 1;
-        }
+        };
         {
             let mut en = BlueprintEntity::new(curr_ent_n, &ENT_DEC_CB, get_pos("memory"));
             en = en.with_direction(get_dir("memory")).with_custom_tag("memory comb");
@@ -439,7 +436,7 @@ pub fn generate_combinators(
             wires.push([curr_ent_n, WIRE_G, curr_ent_n, WIRE_OUT_G]);
             wires.push(mkwires!(R other_ents; OUT "delay comb" => IN "memory comb"));
             curr_ent_n += 1;
-        }
+        };
     }
 
     if bits > 0 {
@@ -466,7 +463,7 @@ pub fn generate_combinators(
             data_cbs.out_ent_n = Some(curr_ent_n);
             in_ent_n.get_or_insert(curr_ent_n);
             curr_ent_n += 1;
-        }
+        };
         {
             let mut en = BlueprintEntity::new(curr_ent_n, &ENT_ARI_CB, get_pos("AND"));
             en = en.with_custom_tag("AND comb").with_direction(get_dir("AND"));
@@ -474,7 +471,7 @@ pub fn generate_combinators(
                 en.set_player_description("Filters out the bits that are not relevant for the current frame, after bit-shifting. (The value of each signal encodes multiple frames)");
             }
             other_ents.push(en.with_control_behavior(ControlBehavior::arithmetic(
-                arithmetic_conds!(SIG_EACH AND ((1u32 << bits) - 1).cast_signed() => SIG_EACH),
+                arithmetic_conds!(SIG_EACH AND ((1_u32 << bits) - 1).cast_signed() => SIG_EACH),
             )));
 
             ent_to_palette_ent_n = Some(curr_ent_n);
@@ -484,9 +481,9 @@ pub fn generate_combinators(
             }
             wires.push(mkwires!(G other_ents; OUT ">> comb" => IN "AND comb"));
             curr_ent_n += 1;
-        }
+        };
 
-        if palette.is_none() && matches!(bits, 1 | 4) {
+        if palette_colors.is_none() && matches!(bits, 1 | 4) {
             let mut en = BlueprintEntity::new(curr_ent_n, &ENT_ARI_CB, get_pos("*"));
             en = en.with_custom_tag("* comb").with_direction(get_dir("*"));
             other_ents.push(en.with_control_behavior(ControlBehavior::arithmetic(
@@ -507,7 +504,7 @@ pub fn generate_combinators(
     data_cbs.base_pos.y -= height;
     data_cbs.first_ent_n = (curr_ent_n == base_ent_n).then_some(curr_ent_n);
 
-    GenerateCombinatorsOutput {
+    Ok(GenerateCombinatorsOutput {
         data_cbs,
         in_ent_n,
         out_ent_n,
@@ -516,7 +513,7 @@ pub fn generate_combinators(
             wires,
             next_ent_n: curr_ent_n + u32::from(curr_ent_n == base_ent_n),
         },
-    }
+    })
 }
 
 pub struct LazyCombinators {
@@ -540,6 +537,7 @@ pub struct LazyCombinators {
     pub wires:         Wires,
 }
 impl LazyCombinators {
+    #[inline]
     pub fn next(
         &mut self,
         curr_ent_n: u32,

@@ -4,5 +4,5 @@ pub use super::palette::ColorPalette;
 pub use super::util::{JsCall, JsReflectGetSet, OneOrMany, ResultJsExt, now_ms};
 #[allow(unused, clippy::allow_attributes, reason = "Log may not be used")]
 pub use crate::macros::*;
-pub use std::hint::{cold_path, likely, unlikely};
+pub use core::hint::{cold_path, likely, unlikely};
 pub use wasm_bindgen::JsError;

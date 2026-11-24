@@ -41,7 +41,7 @@ pub fn generate_timer(
         };
         en.set_control_behavior(ControlBehavior::ConstantCombinator { sections });
         ents.push(en.with_custom_tag("incrementer"));
-    }
+    };
     {
         let mut en = BlueprintEntity::new(2, &ENT_DEC_CB, TIMER2_POS).with_direction(DIR_R);
         let condition = decider_cond!(sig_t, <, i32::try_from(stop)?);
@@ -54,12 +54,12 @@ pub fn generate_timer(
         }
         en.set_control_behavior(ControlBehavior::DeciderCombinator { decider_conditions });
         ents.push(en.with_custom_tag("base_timer"));
-    }
+    };
     {
         let en = BlueprintEntity::new(3, &ENT_ARI_CB, TIMER3_POS).with_direction(DIR_R);
         let conds = arithmetic_conds!(sig_t - 1 => sig_p);
         ents.push(en.with_control_behavior(ControlBehavior::arithmetic(conds)));
-    }
+    };
 
     wires.push([1, WIRE_R, 2, WIRE_R]);
     wires.push([2, WIRE_R, 2, WIRE_OUT_R]);
@@ -70,13 +70,13 @@ pub fn generate_timer(
             let en = BlueprintEntity::new(4, &ENT_ARI_CB, TIMER4_POS).with_direction(DIR_L);
             let conds = arithmetic_conds!(sig_t % (u32::from(ticks_per_frame) * frames_per_comb).cast_signed() => sig_s);
             ents.push(en.with_control_behavior(ControlBehavior::arithmetic(conds)));
-        }
+        };
         {
             let en = BlueprintEntity::new(5, &ENT_ARI_CB, TIMER5_POS).with_direction(DIR_U);
             let conds =
                 arithmetic_conds!(sig_s / u32::from(ticks_per_frame).cast_signed() => sig_f);
             ents.push(en.with_control_behavior(ControlBehavior::arithmetic(conds)));
-        }
+        };
         {
             let mut en = BlueprintEntity::new(6, &ENT_ARI_CB, TIMER6_POS).with_direction(DIR_R);
             let conds = arithmetic_conds!(SIG_EACH * bits.cast_signed() => SIG_EACH);
@@ -84,7 +84,7 @@ pub fn generate_timer(
                 en.set_player_description("Calculates the bit shift for current frame.");
             }
             ents.push(en.with_control_behavior(ControlBehavior::arithmetic(conds)));
-        }
+        };
 
         wires.push([3, WIRE_R, 4, WIRE_R]);
         wires.push([4, WIRE_OUT_R, 5, WIRE_R]);

@@ -2,9 +2,10 @@ use crate::constants;
 use crate::util::wasm_shared_memory;
 use crate::{constants::DEFAULT_FRAME_DELAY, util::format_duration};
 use crate::{prelude::*, ts};
+use alloc::{rc::Rc, sync::Arc};
+use core::{pin::Pin, time::Duration};
 use glam::{DVec2, UVec2, uvec2};
-use image::{AnimationDecoder, GenericImageView, imageops};
-use std::{pin::Pin, rc::Rc, sync::Arc, time::Duration};
+use image::{AnimationDecoder as _, GenericImageView as _, imageops};
 use wasm_bindgen::JsValue;
 
 pub type FrameCallback = dyn for<'a> Fn(
@@ -76,7 +77,7 @@ impl<'a> FrameData<'a> {
         #[must_use]
         #[inline]
         const fn expected_output_frames(n_ms: u64, fps: u32) -> usize {
-            1 + ((n_ms * fps as u64) / 1000) as usize
+            1 + ((n_ms * fps as u64).div_euclid(1000)) as usize
         }
 
         let in_dim = frame_data.dimensions();
@@ -123,7 +124,7 @@ impl<'a> FrameData<'a> {
             let Some(FrameWithTime(f, timestamp)) = self.decoder.next_frame().await? else {
                 return Ok(None);
             };
-            img = Some(Arc::new(self.convert_frame(f.into_buffer())));
+            img = Some(Arc::new(self.convert_frame(f.into_buffer())?));
             self.curr_n_us = timestamp;
         } else if unlikely(self.out_frame_i == 0) {
             self.fps_timer = now_ms();
@@ -131,7 +132,7 @@ impl<'a> FrameData<'a> {
 
         loop {
             if self.out_t_us() <= self.curr_n_us
-                && let Some(prev) = &self.prev_img
+                && let Some(ref prev) = self.prev_img
             {
                 img = Some(Arc::clone(&prev.0)); // Emit duplicate frames if necessary
                 self.out_frame_i += 1;
@@ -154,7 +155,7 @@ impl<'a> FrameData<'a> {
                 };
                 self.curr_n_us = timestamp + Duration::from(frame.delay()).as_micros() as u64;
 
-                let img = self.convert_frame(frame.into_buffer());
+                let img = self.convert_frame(frame.into_buffer())?;
                 self.prev_img = Some((Arc::new(img), self.curr_n_us));
                 self.in_frame_i += 1;
             }
@@ -192,22 +193,31 @@ impl<'a> FrameData<'a> {
         }
     }
 
+    #[inline]
     #[must_use]
     pub fn with_palette(mut self, palette: Option<ColorPalette>) -> Self {
         self.palette = palette;
         self
     }
 
+    #[inline]
+    #[must_use]
+    pub fn get_palette_colors(&self) -> Option<&[[u8; 3]]> {
+        if let Some(ref palette) = self.palette {
+            return Some(&palette.colors);
+        }
+        None
+    }
+
     //// Returns the current output time in microseconds.
     #[must_use]
     #[inline]
     fn out_t_us(&self) -> u64 {
-        (self.out_frame_i as u64 * 1000 * 1000) / u64::from(self.args.target_fps)
+        (self.out_frame_i as u64 * 1000 * 1000).div_euclid(u64::from(self.args.target_fps))
     }
 
     /// Converts the input frame to the target output using the specified settings.
-    #[must_use]
-    pub fn convert_frame(&self, buf: image::RgbaImage) -> image::DynamicImage {
+    pub fn convert_frame(&self, buf: image::RgbaImage) -> Result<image::DynamicImage, JsError> {
         let mut img = image::DynamicImage::ImageRgba8(buf);
         let out_dim = self.out_dim_raw.round().as_uvec2();
 
@@ -267,22 +277,91 @@ impl<'a> FrameData<'a> {
             let indexes =
                 quantized_frame_to_outputs(&img.view(0, 0, img.width(), img.height()), palette);
 
-            match &mut img {
-                image::DynamicImage::ImageRgba8(inner) => {
+            match img {
+                image::DynamicImage::ImageRgba8(ref mut inner) => {
                     for (pixel, v) in inner.pixels_mut().zip(indexes) {
                         let [r, g, b] = palette.colors[v as usize];
                         *pixel = image::Rgba([r, g, b, 255]);
                     }
                 }
-                image::DynamicImage::ImageLuma8(inner) => {
+                image::DynamicImage::ImageLuma8(ref mut inner) => {
                     for (pixel, v) in inner.iter_mut().zip(indexes) {
                         *pixel = palette.colors[v as usize][0];
                     }
                 }
-                _ => unimplemented!(),
+                _ => err_js!("Expected Rgba8 or Luma8, got '{:?}'", img.color()),
             }
         }
-        img
+        Ok(img)
+    }
+
+    /// Packs palette frames into output signals by bit-packing palette indices.
+    ///
+    /// A single output represents the palette indices of a single pixel across
+    /// multiple frames.
+    ///
+    /// Each palette index uses the minimum number of bits required to represent
+    /// the palette.
+    ///
+    /// # Arguments
+    ///
+    /// * `frames` - A slice of image frames.
+    /// * `palette` - The RGBA palette used to identify pixel indices.
+    ///
+    /// # Returns
+    ///
+    /// A vector of packed palette indices. Each group of frames produces
+    /// `width * height` outputs, in row-major order.
+    pub fn palette_frames_to_outputs(
+        &self,
+        frames: &[image::SubImage<&image::DynamicImage>],
+    ) -> Result<Box<[i32]>, JsError> {
+        let Some(ref palette) = self.palette else {
+            err_js!("palette_frames_to_outputs() called without a palette!");
+        };
+
+        assert!(!frames.is_empty(), "No frames provided for packing");
+        assert!(!palette.colors.is_empty(), "Palette cannot be empty");
+
+        let offsets = frames[0].offsets();
+        let (width, height) = frames[0].dimensions();
+        assert!(
+            (frames.iter()).all(|f| f.dimensions() == (width, height) && f.offsets() == offsets),
+            "All frames must have identical dimensions"
+        );
+
+        let bits_per_index = (usize::BITS - (palette.colors.len() - 1).leading_zeros()).max(1);
+        assert!(bits_per_index <= 32, "Palette too large to pack into i32");
+
+        let frames = (frames.iter().map(|f| match *f.inner() {
+            image::DynamicImage::ImageRgba8(ref f) => Ok(f),
+            _ => err_js!("Expected all frames to be RGBA8"),
+        }))
+        .collect::<Result<Box<_>, _>>()?;
+
+        let frames_per_output = (32_u32.div_euclid(bits_per_index)) as usize;
+        let n_groups = frames.len().div_ceil(frames_per_output);
+        let n_pixels = (width * height) as usize;
+
+        let mut outputs = boxed_slice![0_i32; n_pixels * n_groups];
+
+        for (group_i, frame_group) in frames.chunks(frames_per_output).enumerate() {
+            let group_offset = group_i * n_pixels;
+
+            for (y, x) in (0..height).flat_map(|y| (0..width).map(move |x| (y, x))) {
+                let pixel_idx = (y * width + x) as usize;
+                let mut packed = 0_u32;
+
+                for (frame_i, frame) in frame_group.iter().enumerate() {
+                    let [r, g, b, ..] = frame.get_pixel(x + offsets.0, y + offsets.1).0;
+                    packed |= palette.nearest_index([r, g, b]) << (frame_i as u32 * bits_per_index);
+                }
+
+                outputs[group_offset + pixel_idx] = packed.cast_signed();
+            }
+        }
+
+        Ok(outputs)
     }
 }
 
@@ -333,7 +412,7 @@ impl<'a> ImageFrameData<'a> {
                 let mut data = Vec::new();
                 reader.read_to_end(&mut data)?;
 
-                let frames = image::Frames::new(Box::new(std::iter::once(Ok(image::Frame::new(
+                let frames = image::Frames::new(Box::new(core::iter::once(Ok(image::Frame::new(
                     image::RgbaImage::from_raw(dim.x, dim.y, data)
                         .expect("buffer length must be width * height * 4"),
                 ))))); // bruh
@@ -344,7 +423,7 @@ impl<'a> ImageFrameData<'a> {
                 let get_frame = js_next_frame.expect("JS next frame must be provided for videos");
                 FrameDecoderState::JsFrames(get_frame)
             }
-            t => panic!("Unsupported image type: '{t}'"),
+            t => err_js!("Unsupported image type: '{t}'"),
         };
 
         let decoder = FrameDecoder::new(state, info.dimensions.unwrap());
@@ -368,6 +447,8 @@ pub async fn build_palette(
     size: u32,
     speed: i32,
 ) -> Result<ColorPalette, JsError> {
+    use imagequant::RGBA;
+
     let mut attr = imagequant::Attributes::new();
     attr.set_max_colors(size)?;
     attr.set_speed(speed)?;
@@ -381,17 +462,23 @@ pub async fn build_palette(
                 image::DynamicImage::ImageRgba8(rgba) => {
                     attr.new_image(bytemuck::cast_slice(&rgba.into_raw()), w, h, 0.0)?
                 }
-                image::DynamicImage::ImageLuma8(luma) => unsafe {
+                image::DynamicImage::ImageLuma8(luma) => {
                     let pixels = luma.into_raw();
-                    let f = move |row: &mut [std::mem::MaybeUninit<imagequant::RGBA>], y: usize| {
+                    let f = move |row: &mut [core::mem::MaybeUninit<RGBA>], y: usize| {
                         let start = y * w;
                         for (x, pixel) in row.iter_mut().enumerate() {
                             let l = pixels[start + x];
-                            pixel.write(imagequant::RGBA::new(l, l, l, 255));
+                            pixel.write(RGBA::new(l, l, l, 255));
                         }
                     };
-                    imagequant::Image::new_fn(&attr, f, w, h, 0.0)?
-                },
+
+                    // SAFETY: `Image::new_fn` requires the callback to initialize every
+                    // `MaybeUninit<RGBA>` element in each row before returning. The row
+                    // length is `w`, and `pixels` contains exactly `w * h` elements.
+                    // `y` is a valid row index, so `start + x` is in bounds for every
+                    // pixel written.
+                    unsafe { imagequant::Image::new_fn(&attr, f, w, h, 0.0)? }
+                }
                 _ => unreachable!("Expected RGBA8 or LumaA8"),
             };
             hist.add_image(&attr, &mut qimg)?;
@@ -407,7 +494,156 @@ pub async fn build_palette(
         colors.swap(0, darkest);
     }
 
-    ColorPalette::new(&colors)
+    ColorPalette::new(colors)
+}
+
+/// Converts an RGB pixel to an integer using a utility function.
+///
+/// # Arguments
+///
+/// * `r` - Red channel.
+/// * `g` - Green channel.
+/// * `b` - Blue channel.
+///
+/// # Returns
+///
+/// A vector of ``CombinatorOutputs`` for the frame
+#[cfg_attr(target_arch = "wasm32", target_feature(enable = "simd128"))]
+pub fn color_frame_to_outputs(
+    view: &image::SubImage<&image::DynamicImage>,
+) -> Result<Box<[i32]>, JsError> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        use core::arch::wasm32::{i8x16_shuffle, i8x16_splat, v128, v128_load, v128_store};
+        use image::GenericImageView as _;
+
+        let Some(rgba) = view.inner().as_rgba8() else {
+            err_js!("Expected RGBA8, got '{:?}'", view.inner().color())
+        };
+
+        let (x, y) = view.offsets();
+        let (width, height) = (view.width() as usize, view.height() as usize);
+        let mut output: Vec<i32> = Vec::with_capacity(width * height);
+
+        let stride = rgba.width() as usize * 4;
+        let raw = rgba.as_raw();
+        let zero = i8x16_splat(0);
+
+        for row in 0..height {
+            let start = (y as usize + row) * stride + x as usize * 4;
+            let bytes = &raw[start..start + width * 4];
+
+            let mut i = 0;
+
+            // SAFETY: `output` has capacity for `width * height` elements. Since
+            // `row < height`, `row * width` is within that allocation.
+            let output_ptr = unsafe { output.as_mut_ptr().add(row * width) };
+
+            #[expect(clippy::cast_ptr_alignment, reason = "v128_load uses unaligned memory")]
+            #[expect(clippy::ptr_as_ptr, reason = "Cast to pass byte buf to v128_load")]
+            while i + 4 <= width {
+                // SAFETY: `i + 4 <= width` guarantees at least 16 bytes remain in `bytes`.
+                let input_ptr = unsafe { bytes.as_ptr().add(i * 4) as *const v128 };
+
+                // SAFETY: WebAssembly SIMD loads permit unaligned memory accesses.
+                let input = unsafe { v128_load(input_ptr) };
+                let packed = i8x16_shuffle::<2, 1, 0, 16, 6, 5, 4, 16, 10, 9, 8, 16, 14, 13, 12, 16>(
+                    input, zero,
+                );
+
+                // SAFETY: `i + 4 <= width` guarantees four remaining output elements.
+                let output_ptr = unsafe { output_ptr.add(i) as *mut v128 };
+
+                // SAFETY: WebAssembly SIMD stores permit unaligned memory accesses.
+                unsafe { v128_store(output_ptr, packed) };
+
+                i += 4;
+            }
+            while i < width {
+                let j = i * 4;
+
+                // SAFETY: `i < width` guarantees the pointer is within the allocated output capacity.
+                let pixel_ptr = unsafe { output_ptr.add(i) };
+
+                // SAFETY: `pixel_ptr` points to a valid, properly aligned, writable
+                // `i32` slot within `output`'s allocated capacity. This slot has not
+                // yet been initialized, and the assignment initializes it.
+                unsafe {
+                    *pixel_ptr = (i32::from(bytes[j]) << 16)
+                        | (i32::from(bytes[j + 1]) << 8)
+                        | i32::from(bytes[j + 2]);
+                };
+                i += 1;
+            }
+
+            // SAFETY: Every element in the current row has been initialized by
+            // the SIMD and scalar loops. All previous rows were initialized
+            // before their lengths were committed. `(row + 1) * width` does
+            // not exceed the vector's allocated capacity.
+            unsafe { output.set_len((row + 1) * width) }; // Mark this row's output as initialized.
+        }
+
+        Ok(output.into_boxed_slice())
+    }
+
+    #[cfg(not(target_arch = "wasm32"))] // scalar fallback
+    {
+        Ok((rgba.as_raw().as_chunks::<4>().0.iter())
+            .map(|&[r, g, b, ..]| crate::image_processing::rgb_to_int(r, g, b).cast_signed())
+            .collect())
+    }
+}
+
+/// Packs grayscale frames into output signals by bit-packing pixel values.
+///
+/// A single output represents the value of a single pixel across multiple frames.
+///
+/// # Arguments
+///
+/// * `frames` - A slice of grayscale image frames.
+/// * `prev_outputs` - Previous output values, for delta compression.
+/// * `grayscale_bits` - Number of bits for grayscale conversion.
+///
+/// # Returns
+///
+/// A vector of JSON objects representing output filters.
+pub fn grayscale_frames_to_outputs(
+    frames: &[image::SubImage<&image::DynamicImage>],
+    bits: u32,
+) -> Result<Box<[i32]>, JsError> {
+    assert!(!frames.is_empty(), "No frames provided for packing");
+
+    let (width, height) = frames[0].dimensions();
+    let num_pixels = (width * height) as usize;
+    let mut outputs = boxed_slice![0_i32; num_pixels];
+
+    match bits {
+        1 | 4 | 8 => {
+            for (i, output) in outputs.iter_mut().enumerate() {
+                let mut packed = 0_u32;
+
+                for (j, img) in frames.iter().enumerate() {
+                    let x = (i as u32).rem_euclid(width);
+                    let y = (i as u32).div_euclid(width);
+
+                    let pixel = img.get_pixel(x, y)[0];
+                    let value = match bits {
+                        1 => u32::from(pixel >= constants::GRAYSCALE_THRESH),
+                        4 => u32::from(pixel >> 4),
+                        8 => u32::from(pixel),
+                        _ => unreachable!(),
+                    };
+
+                    packed |= value << (j as u32 * bits);
+                }
+
+                *output = packed.cast_signed();
+            }
+        }
+        _ => err_js!("Unsupported grayscale bit depth '{bits}'"),
+    }
+
+    Ok(outputs)
 }
 
 /// Finds the palette entry closest to a color.9
@@ -423,37 +659,39 @@ pub async fn build_palette(
 pub fn quantized_frame_to_outputs(
     frame: &image::SubImage<&image::DynamicImage>,
     palette: &ColorPalette,
-) -> Vec<u32> {
+) -> Box<[u8]> {
     let (x, y) = frame.offsets();
     let (width, height) = (frame.width() as usize, frame.height() as usize);
     let inner = frame.inner();
-    let mut outputs = Vec::with_capacity(width * height);
+    let mut outputs = Vec::<u8>::with_capacity(width * height);
     let stride = frame.width() as usize;
 
-    match inner {
-        image::DynamicImage::ImageRgba8(img) => {
+    match *inner {
+        image::DynamicImage::ImageRgba8(ref img) => {
             let rgba = img.as_raw();
             for row in 0..height {
                 let start = ((y as usize + row) * stride + x as usize) * 4;
                 let end = start + width * 4;
                 outputs.extend(
                     (rgba[start..end].as_chunks::<4>().0.iter())
-                        .map(|&[r, g, b, ..]| palette.nearest_index([r, g, b])),
+                        .map(|&[r, g, b, ..]| palette.nearest_index([r, g, b]) as u8),
                 );
             }
         }
-        image::DynamicImage::ImageLuma8(img) => {
+        image::DynamicImage::ImageLuma8(ref img) => {
             let luma = img.as_raw();
             for row in 0..height {
                 let start = (y as usize + row) * stride + x as usize;
                 let end = start + width;
-                outputs.extend(luma[start..end].iter().map(|&l| palette.nearest_index([l, l, l])));
+                outputs.extend(
+                    luma[start..end].iter().map(|&l| palette.nearest_index([l, l, l]) as u8),
+                );
             }
         }
         _ => unreachable!("Expected RGBA8 or Luma8"),
     }
 
-    outputs
+    outputs.into_boxed_slice()
 }
 enum FrameDecoderState<'a> {
     NativeFrames(image::Frames<'a>),
@@ -480,8 +718,8 @@ impl<'a> FrameDecoder<'a> {
     }
 
     async fn next_frame(&mut self) -> Result<Option<FrameWithTime>, JsError> {
-        Ok(match &mut self.state {
-            FrameDecoderState::NativeFrames(frames) => {
+        Ok(match self.state {
+            FrameDecoderState::NativeFrames(ref mut frames) => {
                 let frame = frames.next().transpose()?.map(|f| {
                     let delay = f.delay();
                     let output = FrameWithTime(f, self.curr_n_us);
@@ -496,9 +734,9 @@ impl<'a> FrameDecoder<'a> {
                 self.finished = frame.is_none();
                 frame
             }
-            FrameDecoderState::JsFrames(get_next_frame) => {
+            FrameDecoderState::JsFrames(ref mut get_next_frame) => {
                 let args_obj = js_sys::Object::new();
-                let in_buf = vec![0u8; self.dim.element_product() as usize * 4];
+                let in_buf = vec![0_u8; self.dim.element_product() as usize * 4];
                 args_obj.reflect_set("inBuffer", wasm_shared_memory(&in_buf)?)?;
                 args_obj.reflect_set("dimensions", serde_wasm_bindgen::to_value(&self.dim)?)?;
 
@@ -532,9 +770,9 @@ pub async fn encode_gif(
     args: &EncodeGifArgs,
 ) -> Result<(), JsError> {
     use crate::ioutil::CallbackWriter;
+    use alloc::rc::Rc;
     use core::cell::RefCell;
     use image::codecs::gif::{GifEncoder, Repeat};
-    use std::rc::Rc;
 
     let promises = Rc::new(const { RefCell::new(Vec::<ts::TsFut>::new()) });
     let promise_q = Rc::clone(&promises);
@@ -549,7 +787,7 @@ pub async fn encode_gif(
     let mut encoder = GifEncoder::new_with_speed(&mut writer, i32::from(args.speed));
     (encoder.set_repeat(Repeat::Infinite))?;
 
-    let in_buf = vec![0u8; args.dim.element_product() as usize * 4];
+    let in_buf = vec![0_u8; args.dim.element_product() as usize * 4];
     let flush = async || -> Result<(), JsError> {
         let pending = core::mem::take(&mut *promises.borrow_mut());
         for promise in pending {

@@ -12,10 +12,7 @@ use crate::models::RawJsonString;
 use crate::prelude::*;
 use crate::util::{is_default, is_none_or_default};
 use glam::DVec2;
-use serde::{
-    Deserialize, Serialize, Serializer,
-    ser::{SerializeSeq, SerializeStruct},
-};
+use serde::{Deserialize, Serialize};
 use tsify::Tsify;
 use wasm_bindgen::prelude::*;
 
@@ -144,7 +141,7 @@ macro_rules! blueprint_entity_property {
             #[must_use]
             pub fn [<$name:snake>](&self) -> Option<&str> {
                 for p in &self.properties {
-                    if let BlueprintEntityProperty::$name(v) = p {
+                    if let BlueprintEntityProperty::$name(ref v) = *p {
                         return Some(v);
                     }
                 }
@@ -153,12 +150,12 @@ macro_rules! blueprint_entity_property {
 
             pub fn [<set_ $name:snake>](&mut self, v: &str) {
                 for p in &mut self.properties {
-                    if let BlueprintEntityProperty::$name(t) = p {
+                    if let BlueprintEntityProperty::$name(ref mut t) = *p {
                         v.clone_into(t);
                         return;
                     }
                 }
-                let mut properties = std::mem::take(&mut self.properties).into_vec();
+                let mut properties = core::mem::take(&mut self.properties).into_vec();
                 properties.push(BlueprintEntityProperty::$name(v.to_owned()));
                 self.properties = properties.into();
             }
@@ -176,7 +173,7 @@ macro_rules! blueprint_entity_property {
             #[must_use]
             pub fn [<$name:snake>](&self) -> Option<$typ> {
                 for p in &self.properties {
-                    if let BlueprintEntityProperty::$name(v) = p {
+                    if let BlueprintEntityProperty::$name(ref v) = *p {
                         return Some(v).cloned();
                     }
                 }
@@ -186,7 +183,7 @@ macro_rules! blueprint_entity_property {
             #[must_use]
             pub fn [<$name:snake _mut>](&mut self) -> Option<&mut $typ> {
                 for p in &mut self.properties {
-                    if let BlueprintEntityProperty::$name(v) = p {
+                    if let BlueprintEntityProperty::$name(ref mut v) = *p {
                         return Some(v);
                     }
                 }
@@ -195,12 +192,12 @@ macro_rules! blueprint_entity_property {
 
             pub fn [<set_ $name:snake>](&mut self, v: $typ) {
                 for p in &mut self.properties {
-                    if let BlueprintEntityProperty::$name(t) = p {
+                    if let BlueprintEntityProperty::$name(ref mut t) = *p {
                         *t = v;
                         return;
                     }
                 }
-                let mut properties = std::mem::take(&mut self.properties).into_vec();
+                let mut properties = core::mem::take(&mut self.properties).into_vec();
                 properties.push(BlueprintEntityProperty::$name(v.to_owned()));
                 self.properties = properties.into();
             }
@@ -259,7 +256,7 @@ impl BlueprintEntity {
 }
 impl Serialize for BlueprintEntity {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeMap;
+        use serde::ser::SerializeMap as _;
 
         let mut map = serializer.serialize_map(None)?;
         self.signal_ref.serialize_fields_into_map(&mut map, Some("entity"), false)?;
@@ -268,15 +265,15 @@ impl Serialize for BlueprintEntity {
         map.serialize_entry("position", &self.position)?;
 
         for property in &self.properties {
-            match property {
-                BlueprintEntityProperty::AlwaysOn(v) => map.serialize_entry("always_on", v),
-                BlueprintEntityProperty::Color(v) => map.serialize_entry("color", v),
-                BlueprintEntityProperty::ControlBehavior(v) => {
+            match *property {
+                BlueprintEntityProperty::AlwaysOn(ref v) => map.serialize_entry("always_on", v),
+                BlueprintEntityProperty::Color(ref v) => map.serialize_entry("color", v),
+                BlueprintEntityProperty::ControlBehavior(ref v) => {
                     map.serialize_entry("control_behavior", v)
                 }
-                BlueprintEntityProperty::CustomTag(_) => Ok(()),
-                BlueprintEntityProperty::Direction(v) => map.serialize_entry("direction", v),
-                BlueprintEntityProperty::PlayerDescription(v) => {
+                BlueprintEntityProperty::CustomTag(..) => Ok(()),
+                BlueprintEntityProperty::Direction(ref v) => map.serialize_entry("direction", v),
+                BlueprintEntityProperty::PlayerDescription(ref v) => {
                     map.serialize_entry("player_description", v)
                 }
             }?;
@@ -404,12 +401,13 @@ impl BlueprintLogisticFilter {
 }
 impl Serialize for BlueprintLogisticFilter {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeMap;
+        use serde::ser::SerializeMap as _;
+
         let mut map = serializer.serialize_map(None)?;
         self.signal_ref
             .serialize_fields_into_map(&mut map, Some(DEFAULT_SIGNAL_TYPE), true)?;
 
-        if let Some(comparator) = &self.comparator {
+        if let &Some(comparator) = &self.comparator {
             map.serialize_entry("comparator", &comparator)?;
         }
         if self.count != 0 {
@@ -480,15 +478,15 @@ pub enum ComparatorString {
     Lt,
 
     /// "greater than or equal to"
-    #[serde(rename = "≥", alias = ">=")]
+    #[serde(rename = "\u{2265}", alias = ">=")] // ≥
     Ge,
 
     /// "lesser than or equal to"
-    #[serde(rename = "≤", alias = "<=")]
+    #[serde(rename = "\u{2264}", alias = "<=")] // ≤
     Le,
 
     /// "not equal to"
-    #[serde(rename = "≠", alias = "!=")]
+    #[serde(rename = "\u{2260}", alias = "!=")] // ≠
     Ne,
 }
 impl TryFrom<&str> for ComparatorString {
@@ -563,10 +561,12 @@ impl ControlBehavior {
 
     #[inline]
     pub fn maybe_swap_networks(&mut self) {
-        match self {
+        match *self {
             // This actually swaps outputs + inputs, it's just named weirdly in Factorio
-            Self::DeciderCombinator { decider_conditions: conds } => conds.swap_networks(),
-            Self::ArithmeticCombinator { arithmetic_conditions: conds } => conds.swap_networks(),
+            Self::DeciderCombinator { decider_conditions: ref mut conds } => conds.swap_networks(),
+            Self::ArithmeticCombinator { arithmetic_conditions: ref mut conds } => {
+                conds.swap_networks();
+            }
             _ => {}
         }
     }
@@ -825,7 +825,7 @@ impl DeciderCombinatorParameters {
 pub struct DeciderCombinatorCustomParameters {
     pub conditions:  Box<[DeciderCombinatorCondition]>,
     pub indices:     Box<[(usize, i32)]>,
-    pub signal_list: ::std::sync::Arc<[RawJsonString]>,
+    pub signal_list: ::alloc::sync::Arc<[RawJsonString]>,
 }
 impl PartialEq for DeciderCombinatorCustomParameters {
     fn eq(&self, other: &Self) -> bool {
@@ -838,7 +838,9 @@ impl PartialEq for DeciderCombinatorCustomParameters {
 }
 impl Eq for DeciderCombinatorCustomParameters {}
 impl Serialize for DeciderCombinatorCustomParameters {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct as _;
+
         let mut state = serializer.serialize_struct("DeciderCombinatorParameters", 2)?;
         if unlikely(self.conditions.is_empty()) {
             state.skip_field("conditions")
@@ -862,7 +864,9 @@ struct IndexedDeciderCombinatorOutputs<'a> {
     signal_list: &'a [RawJsonString],
 }
 impl Serialize for IndexedDeciderCombinatorOutputs<'_> {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeSeq as _;
+
         let mut seq = serializer.serialize_seq(Some(self.indices.len()))?;
         for &(i, constant) in self.indices {
             seq.serialize_element(&IndexedDeciderCombinatorOutput {
@@ -903,7 +907,7 @@ pub struct LogisticSections {
 }
 
 #[derive(Tsify, Clone, Hash, PartialEq, Eq)]
-pub struct SignalID(pub ::std::sync::Arc<usize>);
+pub struct SignalID(pub ::alloc::sync::Arc<usize>);
 impl SignalID {
     #[inline]
     #[must_use]
@@ -924,7 +928,6 @@ impl SignalID {
         Self::try_from_values(type_, &signal.name, signal.quality.as_deref())
     }
 
-    #[inline]
     pub fn try_from_values(
         type_: &str,
         name: &str,
@@ -962,10 +965,12 @@ impl SignalID {
             let modulus = data.qualities.len().max(1);
 
             SignalIDRepr {
-                name:    data.signals[i / modulus].clone(),
+                name:    data.signals[i.div_euclid(modulus)].clone(),
                 quality: (!data.qualities.is_empty())
-                    .then(|| data.qualities[i % data.qualities.len()].clone()),
-                type_:   Some(data.signal_types.get_type(i / modulus).unwrap().to_owned()),
+                    .then(|| data.qualities[i.rem_euclid(data.qualities.len())].clone()),
+                type_:   Some(
+                    data.signal_types.get_type(i.div_euclid(modulus)).unwrap().to_owned(),
+                ),
             }
         })
     }
@@ -975,7 +980,7 @@ impl SignalID {
     pub fn name(&self) -> String {
         PROTOTYPE_DATA.with_borrow(|data| {
             let data = data.as_ref().unwrap();
-            data.signals[*self.0 / data.qualities.len().max(1)].clone()
+            data.signals[(*self.0).div_euclid(data.qualities.len().max(1))].clone()
         })
     }
     #[must_use]
@@ -984,7 +989,7 @@ impl SignalID {
         PROTOTYPE_DATA.with_borrow(|data| {
             let data = data.as_ref().unwrap();
             (!data.qualities.is_empty())
-                .then(|| data.qualities[*self.0 % data.qualities.len()].clone())
+                .then(|| data.qualities[(*self.0).rem_euclid(data.qualities.len())].clone())
         })
     }
     #[must_use]
@@ -992,7 +997,8 @@ impl SignalID {
     pub fn type_(&self) -> String {
         PROTOTYPE_DATA.with_borrow(|data| {
             let data = data.as_ref().unwrap();
-            let type_ = data.signal_types.get_type(*self.0 / data.qualities.len().max(1));
+            let type_ =
+                data.signal_types.get_type((*self.0).div_euclid(data.qualities.len().max(1)));
             type_.unwrap().to_owned()
         })
     }
@@ -1040,14 +1046,14 @@ impl SignalID {
             let data = data.as_ref().unwrap();
             let i = *self.0;
             let modulus = data.qualities.len().max(1);
-            let type_ = data.signal_types.get_type(i / modulus).unwrap();
-            let name = &data.signals[i / modulus];
+            let type_ = data.signal_types.get_type(i.div_euclid(modulus)).unwrap();
+            let name = &data.signals[i.div_euclid(modulus)];
 
             if default_type.is_none_or(|t| t != type_) {
                 map.serialize_entry("type", type_)?;
             }
             if !data.qualities.is_empty() {
-                let qual = &data.qualities[i % modulus];
+                let qual = &data.qualities[i.rem_euclid(modulus)];
                 if always_include_quality || qual != DEFAULT_QUALITY {
                     map.serialize_entry("quality", qual)?;
                 }
@@ -1065,21 +1071,21 @@ impl SignalID {
             .map_err(|e| serde::de::Error::custom(format!("Could not deserialize SignalID: {e:?}")))
     }
 }
-impl std::fmt::Debug for SignalID {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Debug for SignalID {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(
             f,
             r#"SignalID(id={}, strong_count={}) {{ type_: "{}", name: "{}"{} }}"#,
             *self.0,
-            ::std::sync::Arc::strong_count(&self.0),
+            ::alloc::sync::Arc::strong_count(&self.0),
             self.type_(),
             self.name(),
             self.quality().map_or_else(String::new, |q| format!(r#", quality: "{q}""#)),
         )
     }
 }
-impl std::fmt::Display for SignalID {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for SignalID {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{}:{}", self.type_(), self.name())
     }
 }
@@ -1099,7 +1105,8 @@ impl From<SignalID> for SignalIDRepr {
 }
 impl Serialize for SignalID {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeMap;
+        use serde::ser::SerializeMap as _;
+
         let mut map = serializer.serialize_map(None)?;
         self.serialize_fields_into_map(&mut map, Some(DEFAULT_SIGNAL_TYPE), false)?;
         map.end()
@@ -1117,8 +1124,8 @@ impl WireConnectorId {
     #[must_use]
     #[inline]
     pub const fn pack(a: u8, b: u8) -> u8 {
-        debug_assert!(a >= 1 && a <= 9);
-        debug_assert!(b >= 1 && b <= 9);
+        debug_assert!(a >= 1 && a <= 9, "Wire connector ID out of bounds");
+        debug_assert!(b >= 1 && b <= 9, "Wire connector ID out of bounds");
         (a << 4) | b
     }
 
@@ -1168,7 +1175,11 @@ impl Wires {
     #[must_use]
     #[inline]
     pub fn len(&self) -> usize {
-        debug_assert!(self.entity_ids.len() == self.wire_ids.len());
+        debug_assert_eq!(
+            self.entity_ids.len(),
+            self.wire_ids.len(),
+            "Lengths should match"
+        );
         self.wire_ids.len()
     }
 
@@ -1189,8 +1200,8 @@ impl Wires {
 }
 impl IntoIterator for Wires {
     type Item = [u32; 4];
-    type IntoIter = std::iter::Map<
-        std::iter::Zip<std::vec::IntoIter<[u32; 2]>, std::vec::IntoIter<u8>>,
+    type IntoIter = core::iter::Map<
+        core::iter::Zip<alloc::vec::IntoIter<[u32; 2]>, alloc::vec::IntoIter<u8>>,
         fn(([u32; 2], u8)) -> [u32; 4],
     >;
 
@@ -1204,7 +1215,9 @@ impl IntoIterator for Wires {
     }
 }
 impl Serialize for Wires {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeSeq as _;
+
         let mut seq = serializer.serialize_seq(Some(self.entity_ids.len()))?;
         for entry in self.entity_ids.iter().copied().zip(self.wire_ids.iter().copied()) {
             seq.serialize_element(&Self::unpack_item(entry, self.should_swap))?;
@@ -1218,7 +1231,7 @@ impl<'de> serde::Deserialize<'de> for Wires {
         impl<'de> serde::de::Visitor<'de> for WiresVisitor {
             type Value = Wires;
 
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            fn expecting(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
                 formatter.write_str("a sequence of [u32; 4] wire entries")
             }
 

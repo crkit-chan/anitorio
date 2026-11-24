@@ -10,4 +10,3 @@ pub mod models;
 mod power_pole;
 mod prelude;
 mod timer;
-pub mod util;

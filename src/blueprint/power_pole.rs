@@ -1,7 +1,7 @@
 use super::prelude::*;
 use crate::prelude::*;
+use alloc::collections::{BTreeMap, BTreeSet};
 use glam::{DVec2, IVec2, dvec2, ivec2};
-use std::collections::{BTreeMap, BTreeSet};
 
 /// Tracks cells occupied by power poles.
 pub struct PowerPoleOccupied {
@@ -12,18 +12,19 @@ pub struct PowerPoleOccupied {
     start_pos:    DVec2,
 }
 impl PowerPoleOccupied {
-    pub fn new(mut start_pos: DVec2, args: &BlueprintArgs) -> Self {
+    pub fn new(mut start_pos: DVec2, args: &BlueprintArgs) -> Result<Self, JsError> {
         let quality = args.power_pole_quality.clone();
         let quality = quality.filter(|q| *q != *constants::DEFAULT_QUAL_KEY);
         let name = args.power_pole_name.as_ref();
         let name = name.map_or_else(|| constants::DEFAULT_POWER_POLE_NAME, |v| v.as_str());
 
         let data = crate::blueprint::data::PROTOTYPE_DATA.with_borrow(|data| {
-            let data = &data.as_ref().expect("No power pole data loaded yet!");
-            let poles = &data.electric_poles;
-            let p = poles.iter().find(|p| *p.name == *name);
-            p.unwrap_or_else(|| panic!("No power pole with name '{name}'!")).clone()
-        });
+            let data = data.as_ref().expect("No power pole data loaded yet!");
+            let Some(p) = data.electric_poles.iter().find(|p| *p.name == *name) else {
+                err_js!("No power pole with name '{name}'!");
+            };
+            Ok(p.clone())
+        })?;
         let bounding_box = dvec2(f64::from(data.tile_width), f64::from(data.tile_height));
         let dists = &data.supply_area_distances;
         let half_cov = dists.iter().find(|d| quality == Some(d.quality.clone()));
@@ -32,13 +33,13 @@ impl PowerPoleOccupied {
 
         start_pos += bounding_box * const { dvec2(-0.5, 0.5) };
 
-        Self {
+        Ok(Self {
             bounding_box,
             coverage: if args.include_power_poles { cov } else { 0.0 },
             ref_entity: BlueprintEntity::new(0, &ref_sig, start_pos),
             requests: BTreeSet::new(),
             start_pos,
-        }
+        })
     }
 
     /// Generates power pole entities and wires for powering the blueprint.
@@ -72,7 +73,9 @@ impl PowerPoleOccupied {
         requests.sort_by(|&a, &b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
 
         for (i, &&req) in requests.iter().enumerate() {
-            if unlikely(matches!(args.image_args.mode, Mode::Static { .. }) && i % 100 == 0) {
+            if unlikely(
+                matches!(args.image_args.mode, Mode::Static { .. }) && i.rem_euclid(100) == 0,
+            ) {
                 set_progress(
                     0.70,
                     0.85,
@@ -89,7 +92,9 @@ impl PowerPoleOccupied {
         let offset_left = ivec2(-cov as i32, 0);
 
         for (i, (&pos, &ent_n)) in pole_pos_map.iter().enumerate() {
-            if unlikely(matches!(args.image_args.mode, Mode::Static { .. }) && i % 100 == 0) {
+            if unlikely(
+                matches!(args.image_args.mode, Mode::Static { .. }) && i.rem_euclid(100) == 0,
+            ) {
                 set_progress(
                     0.85,
                     0.90,

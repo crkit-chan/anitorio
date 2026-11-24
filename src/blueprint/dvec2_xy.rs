@@ -11,7 +11,8 @@ pub struct F64XY {
 }
 
 pub fn serialize<S: serde::Serializer>(v: &DVec2, serializer: S) -> Result<S::Ok, S::Error> {
-    F64XY { x: v.x, y: v.y }.serialize(serializer)
+    let xy: &F64XY = bytemuck::cast_ref(v);
+    xy.serialize(serializer)
 }
 pub fn deserialize<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<DVec2, D::Error> {
     Ok(bytemuck::cast(F64XY::deserialize(deserializer)?))

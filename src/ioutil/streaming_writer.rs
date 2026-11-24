@@ -43,10 +43,10 @@ impl<F: FnMut(Vec<u8>) -> Result<(), JsValue>> StreamingWriter<F> {
 
 impl<F: FnMut(Vec<u8>) -> Result<(), JsValue>> Write for StreamingWriter<F> {
     #[inline]
-    fn write(&mut self, data: &[u8]) -> io::Result<usize> {
-        self.buffer.extend_from_slice(data);
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.buffer.extend_from_slice(buf);
         self.emit()?;
-        Ok(data.len())
+        Ok(buf.len())
     }
 
     fn flush(&mut self) -> io::Result<()> {

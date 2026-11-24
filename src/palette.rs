@@ -1,15 +1,13 @@
 use crate::prelude::*;
 #[cfg(feature = "kiddo")]
 use kiddo::{ImmutableKdTree, SquaredEuclidean};
-#[cfg(feature = "kiddo")]
-use std::sync::Arc;
 
-#[derive(Clone)]
+pub type ColorPalettePixel = [u8; 3];
 pub struct ColorPalette {
-    pub colors: Box<[[u8; 3]]>,
+    pub colors: Box<[ColorPalettePixel]>,
 
     #[cfg(feature = "kiddo")]
-    pub tree: Arc<ImmutableKdTree<u8, 3>>,
+    tree: ImmutableKdTree<u8, 3>,
 }
 impl ColorPalette {
     #[allow(
@@ -17,16 +15,16 @@ impl ColorPalette {
         clippy::unnecessary_wraps,
         reason = "Result<> used for 'kiddo'"
     )]
-    pub fn new(colors: &[[u8; 3]]) -> Result<Self, JsError> {
+    pub fn new(colors: Box<[ColorPalettePixel]>) -> Result<Self, JsError> {
         Ok(Self {
             #[cfg(feature = "kiddo")]
-            tree: Arc::new(ImmutableKdTree::new_from_slice(colors)?),
-            colors: colors.into(),
+            tree: ImmutableKdTree::new_from_slice(&colors)?,
+            colors,
         })
     }
 
     #[inline]
-    pub fn nearest_index(&self, target: [u8; 3]) -> u32 {
+    pub fn nearest_index(&self, target: ColorPalettePixel) -> u32 {
         #[cfg(feature = "kiddo")]
         {
             self.tree.query(&target).nearest_one::<SquaredEuclidean<f32>>().execute().item

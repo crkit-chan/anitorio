@@ -10,12 +10,12 @@ pub fn bounding_box_midpoints(min: DVec2, max: DVec2) -> impl Iterator<Item = DV
 #[must_use]
 pub fn format_duration<T: Into<u128>>(ms: T) -> String {
     let ms = ms.into();
-    let total_seconds = ms / 1000;
+    let total_seconds = ms.div_euclid(1000);
 
-    let hours = total_seconds / 3600;
-    let minutes = (total_seconds % 3600) / 60;
-    let seconds = total_seconds % 60;
-    let milliseconds = ms % 1000;
+    let hours = total_seconds.div_euclid(3600);
+    let minutes = (total_seconds.rem_euclid(3600)).div_euclid(60);
+    let seconds = total_seconds.rem_euclid(60);
+    let milliseconds = ms.rem_euclid(1000);
 
     match hours {
         0 => format!("{minutes:02}:{seconds:02}:{milliseconds:03}"),
@@ -24,18 +24,27 @@ pub fn format_duration<T: Into<u128>>(ms: T) -> String {
 }
 
 /// Checks if the value is the default value for the type.
-#[must_use]
 #[inline]
-pub fn is_default<T: Default + PartialEq>(value: &T) -> bool {
+#[must_use]
+pub const fn is_default<T: [const] Default + [const] PartialEq + [const] core::marker::Destruct>(
+    value: &T,
+) -> bool {
     value == &T::default()
 }
 
 /// Checks if an Option is None or the default value for the type.
-#[must_use]
 #[inline]
+#[must_use]
 #[expect(clippy::ref_option, reason = "Use with serde")]
-pub fn is_none_or_default<T: Default + PartialEq>(value: &Option<T>) -> bool {
-    value.as_ref().is_none_or(|v| v == &T::default())
+pub const fn is_none_or_default<
+    T: [const] Default + [const] PartialEq + [const] core::marker::Destruct,
+>(
+    value: &Option<T>,
+) -> bool {
+    if let Some(value) = value.as_ref() {
+        return value == &T::default();
+    }
+    true
 }
 
 #[must_use]
@@ -77,9 +86,9 @@ impl<T> OneOrMany<T> {
     where
         T: Clone,
     {
-        match self {
-            Self::One(v) => vec![v.clone()],
-            Self::Many(v) => v.clone(),
+        match *self {
+            Self::One(ref v) => vec![v.clone()],
+            Self::Many(ref v) => v.clone(),
         }
     }
 }
@@ -111,7 +120,7 @@ impl<T: js_sys::JsFunction, S: Into<js_sys::Function<T>> + Clone> JsCall<T> for 
 pub trait ResultJsExt<T, E> {
     fn map_js_err(self, prefix: &str) -> Result<T, JsError>;
 }
-impl<T, E: std::fmt::Debug> ResultJsExt<T, E> for Result<T, E> {
+impl<T, E: core::fmt::Debug> ResultJsExt<T, E> for Result<T, E> {
     #[inline]
     fn map_js_err(self, prefix: &str) -> Result<T, JsError> {
         self.map_err(|e| JsError::new(&format!("{prefix}: {e:?}")))

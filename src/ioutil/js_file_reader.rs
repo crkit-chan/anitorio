@@ -1,10 +1,10 @@
 use crate::prelude::*;
-use crate::{ts, util::JsCall};
+use crate::{ts, util::JsCall as _};
 use std::io;
 
 pub type JsFileReaderCallback = ts::TsFn<fn(ts::TsNum, ts::TsNum) -> js_sys::Uint8Array>;
 
-const MAX_SAFE_F64_INT: u64 = (1u64 << 53) - 1;
+const MAX_SAFE_F64_INT: u64 = (1_u64 << 53) - 1;
 
 // Note we use a ``u64`` for the position, because the file size can be larger than 2^32-1.
 // Maximum pointer size for JS is 2^53.
@@ -38,7 +38,10 @@ impl JsFileReader {
         if start >= end {
             self.cache.clear();
         } else {
-            assert!(start <= MAX_SAFE_F64_INT && end <= MAX_SAFE_F64_INT);
+            assert!(
+                start <= MAX_SAFE_F64_INT && end <= MAX_SAFE_F64_INT,
+                "Cannot fetch beyond bounds: {start} - {end}",
+            );
 
             let array = (self.callback)
                 .call_n((&(start as f64).into(), &(end as f64).into()))

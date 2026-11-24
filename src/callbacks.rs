@@ -1,5 +1,5 @@
 use crate::{prelude::*, ts};
-use std::cell::RefCell;
+use core::cell::RefCell;
 use wasm_bindgen::prelude::*;
 
 #[derive(tsify::Tsify, serde::Deserialize)]
@@ -49,7 +49,7 @@ pub fn report_progress<T: Into<f64>>(percentage: T, status: &str) {
     CALLBACKS.with_borrow(|cbs| {
         if let Some(cbs) = cbs.as_ref() {
             let pct = 100.0 * percentage.into();
-            let _ = cbs.on_progress.call_n((&pct.into(), &status.into()));
+            _ = cbs.on_progress.call_n((&pct.into(), &status.into()));
         }
     });
 }
@@ -57,11 +57,12 @@ pub fn report_lamp_group<T: Into<f64>>(percentage: T) {
     CALLBACKS.with_borrow(|cbs| {
         if let Some(cbs) = cbs.as_ref() {
             let pct = 100.0 * percentage.into();
-            let _ = cbs.on_lamp_group.call_n((&pct.into(),));
+            _ = cbs.on_lamp_group.call_n((&pct.into(),));
         }
     });
 }
 
+#[inline]
 pub fn set_progress(start: f64, end: f64, progress: f64, msg: &str) {
     report_progress(progress.mul_add(end - start, start), msg);
 }

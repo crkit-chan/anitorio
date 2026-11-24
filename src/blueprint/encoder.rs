@@ -45,7 +45,7 @@ fn compress(
 ) -> io::Result<()> {
     let writer = ChannelWriter { tx: output.clone() };
     let writer = io::BufWriter::with_capacity(64 * 1024, writer);
-    match mode {
+    match *mode {
         CompressionMode::Blueprint => {
             let base64 = EncoderWriter::new(writer, &STANDARD);
             let mut encoder = ZlibEncoder::new(base64, Compression::best());
@@ -77,7 +77,7 @@ impl Compressor {
         let (output_tx, output_rx) = async_channel::unbounded::<Result<Vec<u8>, String>>();
         spawn(move || {
             if let Err(e) = compress(&mode, &input_rx, &output_tx) {
-                let _ = futures_lite::future::block_on(output_tx.send(Err(e.to_string())));
+                _ = futures_lite::future::block_on(output_tx.send(Err(e.to_string())));
             }
         });
         Self { input: Some(input_tx), output: output_rx }
@@ -127,22 +127,22 @@ enum OutputWriter<'a, W: Write> {
 impl<W: Write> io::Write for OutputWriter<'_, W> {
     #[inline]
     fn flush(&mut self) -> io::Result<()> {
-        match self {
-            Self::Blueprint(w) => w.flush(),
-            Self::Json(w) => w.flush(),
-            Self::RawCompressed(w) => w.flush(),
+        match *self {
+            Self::Blueprint(ref mut w) => w.flush(),
+            Self::Json(ref mut w) => w.flush(),
+            Self::RawCompressed(ref mut w) => w.flush(),
             #[cfg(feature = "threads")]
-            Self::ThreadedCompressed { compressor: w, .. } => w.flush(),
+            Self::ThreadedCompressed { compressor: ref mut w, .. } => w.flush(),
         }
     }
     #[inline]
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        match self {
-            Self::Blueprint(w) => w.write(buf),
-            Self::Json(w) => w.write(buf),
-            Self::RawCompressed(w) => w.write(buf),
+        match *self {
+            Self::Blueprint(ref mut w) => w.write(buf),
+            Self::Json(ref mut w) => w.write(buf),
+            Self::RawCompressed(ref mut w) => w.write(buf),
             #[cfg(feature = "threads")]
-            Self::ThreadedCompressed { compressor: w, .. } => w.write(buf),
+            Self::ThreadedCompressed { compressor: ref mut w, .. } => w.write(buf),
         }
     }
 }
@@ -154,7 +154,7 @@ impl<W: Write> OutputWriter<'_, W> {
 
     #[cfg(feature = "threads")]
     pub async fn drain(&mut self) -> Result<(), JsError> {
-        if let Self::ThreadedCompressed { compressor, writer } = self {
+        if let Self::ThreadedCompressed { ref mut compressor, ref mut writer } = *self {
             while let Some(chunk) = compressor.next_chunk().await {
                 writer.write_all(&chunk.map_js_err("Write error")?)?;
             }
@@ -163,7 +163,7 @@ impl<W: Write> OutputWriter<'_, W> {
     }
     #[cfg(feature = "threads")]
     pub fn drain_available(&mut self) -> Result<(), JsError> {
-        if let Self::ThreadedCompressed { compressor, writer } = self {
+        if let Self::ThreadedCompressed { ref mut compressor, ref mut writer } = *self {
             while let Some(chunk) = compressor.try_next_chunk() {
                 writer.write_all(&chunk.map_js_err("Write error")?)?;
             }
@@ -232,7 +232,7 @@ impl<'a, W: Write> BlueprintEncoder<'a, W> {
         #[cfg(feature = "threads")]
         {
             self.writer.drain_available()?;
-        }
+        };
 
         Ok(Some(()))
     }
@@ -248,11 +248,11 @@ impl<'a, W: Write> BlueprintEncoder<'a, W> {
 
         #[cfg(feature = "threads")]
         {
-            if let OutputWriter::ThreadedCompressed { compressor, .. } = &mut self.writer {
+            if let OutputWriter::ThreadedCompressed { ref mut compressor, .. } = self.writer {
                 compressor.finish();
             }
             self.writer.drain().await?;
-        }
+        };
 
         self.writer.finish()
     }

@@ -1,8 +1,9 @@
 use super::power_pole::PowerPoleOccupied;
 use super::prelude::*;
 use crate::prelude::*;
+use alloc::sync::Arc;
+use core::ops::Not as _;
 use glam::{DVec2, UVec2, dvec2};
-use std::{ops::Not, sync::Arc};
 
 /// Generates a grid of lamp entities for the blueprint.
 ///

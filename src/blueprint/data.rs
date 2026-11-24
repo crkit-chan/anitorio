@@ -1,6 +1,8 @@
 use super::prelude::*;
+use alloc::sync::Arc;
+use core::cell::RefCell;
 use serde::{Deserialize, Serialize};
-use std::{cell::RefCell, collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 thread_local! {
     pub static PROTOTYPE_DATA: RefCell<Option<PrototypeData>> = const { RefCell::new(None) };
@@ -36,24 +38,24 @@ pub struct PrototypeData {
 
 #[derive(Clone, Debug)]
 pub struct BoundedSignalTypes {
-    types: HashMap<std::ops::Range<usize>, String>,
+    types: HashMap<core::ops::Range<usize>, String>,
 }
 impl BoundedSignalTypes {
-    #[must_use]
     #[inline]
+    #[must_use]
     pub fn get_type(&self, index: usize) -> Option<&str> {
         (self.types.iter())
             .find_map(|(bounds, type_)| bounds.contains(&index).then_some(type_.as_str()))
     }
 
-    #[must_use]
     #[inline]
-    pub fn get_range(&self, type_: &str) -> Option<std::ops::Range<usize>> {
+    #[must_use]
+    pub fn get_range(&self, type_: &str) -> Option<core::ops::Range<usize>> {
         (self.types.iter()).find_map(|(bounds, t)| (t == type_).then(|| bounds.clone()))
     }
 
-    #[must_use]
     #[inline]
+    #[must_use]
     pub fn has_type(&self, type_: &str) -> bool {
         self.types.values().any(|v| v == type_)
     }
@@ -68,8 +70,8 @@ pub struct SignalIDRepr {
     pub quality: Option<String>,
 }
 impl SignalIDRepr {
-    #[must_use]
     #[inline]
+    #[must_use]
     pub fn new(type_: impl Into<String>, name: impl Into<String>) -> Self {
         Self {
             type_:   Some(type_.into()),
@@ -78,8 +80,8 @@ impl SignalIDRepr {
         }
     }
 
-    #[must_use]
     #[inline]
+    #[must_use]
     pub fn with_quality(mut self, quality: impl Into<Option<String>>) -> Self {
         self.quality = quality.into();
         self
@@ -100,7 +102,7 @@ pub fn load_data(data_json_reader: impl std::io::Read) -> Result<(), JsError> {
     }
 
     let mut data: PrototypeDataJson = serde_json::from_reader(data_json_reader)?;
-    let mut bounded_types = HashMap::<String, std::ops::Range<usize>>::new();
+    let mut bounded_types = HashMap::<String, core::ops::Range<usize>>::new();
     let mut signals = Vec::<String>::with_capacity(data.signals.len());
     let mut blacklist_signals = Vec::<SignalIDRepr>::new();
 
@@ -124,7 +126,7 @@ pub fn load_data(data_json_reader: impl std::io::Read) -> Result<(), JsError> {
     }
     data.signals.sort_by_key(|x| x.type_.clone().unwrap());
 
-    for (i, sig) in std::mem::take(&mut data.signals).into_iter().enumerate() {
+    for (i, sig) in core::mem::take(&mut data.signals).into_iter().enumerate() {
         let type_ = sig.type_.unwrap();
         if let Some(bounded_type) = bounded_types.get_mut(&type_) {
             bounded_type.end = i + 1;
@@ -135,8 +137,8 @@ pub fn load_data(data_json_reader: impl std::io::Read) -> Result<(), JsError> {
     }
 
     PROTOTYPE_DATA.with_borrow_mut(|prev| {
-        if let Some(prev) = prev {
-            for signal_id in std::mem::take(&mut prev.signal_ids) {
+        if let &mut Some(ref mut prev) = prev {
+            for signal_id in core::mem::take(&mut prev.signal_ids) {
                 assert_eq!(
                     Arc::strong_count(&signal_id.0),
                     1,
@@ -155,8 +157,8 @@ pub fn load_data(data_json_reader: impl std::io::Read) -> Result<(), JsError> {
             },
 
             blacklist_signals: vec![].into(), // We'll assign this just afterwards
-            electric_poles:    std::mem::take(&mut data.electric_poles),
-            qualities:         std::mem::take(&mut data.qualities).into_boxed_slice(),
+            electric_poles:    core::mem::take(&mut data.electric_poles),
+            qualities:         core::mem::take(&mut data.qualities).into_boxed_slice(),
         });
     });
 

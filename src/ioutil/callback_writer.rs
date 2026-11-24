@@ -13,10 +13,10 @@ impl<F: FnMut(Vec<u8>) -> Result<(), JsValue>> CallbackWriter<F> {
 
 impl<F: FnMut(Vec<u8>) -> Result<(), JsValue>> Write for CallbackWriter<F> {
     #[inline]
-    fn write(&mut self, data: &[u8]) -> io::Result<usize> {
-        (self.on_chunk)(data.to_vec())
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        (self.on_chunk)(buf.to_vec())
             .map_err(|e| io::Error::other(e.as_string().unwrap_or_else(|| format!("{e:?}"))))?;
-        Ok(data.len())
+        Ok(buf.len())
     }
 
     fn flush(&mut self) -> io::Result<()> {

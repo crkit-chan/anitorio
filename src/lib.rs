@@ -1,4 +1,13 @@
-#![feature(cold_path, likely_unlikely)]
+#![feature(
+    cold_path,
+    const_cmp,
+    const_default,
+    const_destruct,
+    const_trait_impl,
+    likely_unlikely
+)]
+
+extern crate alloc;
 
 use wasm_bindgen::prelude::*;
 
@@ -109,15 +118,13 @@ pub async fn run_blueprint(
     callbacks: tsify::Ts<RunBlueprintCallbacks>,
 ) -> Result<JsValue, JsError> {
     use crate::prelude::*;
+    use alloc::rc::Rc;
     use blueprint::{encoder::BlueprintEncoder, generator::BlueprintGenerator};
+    use core::cell::{Cell, RefCell};
     use image_processing::{FrameCallback, FrameData, ImageFrameData};
     use ioutil::JsFileReader;
     use js_sys as js;
     use models::BlueprintArgs;
-    use std::{
-        cell::{Cell, RefCell},
-        rc::Rc,
-    };
 
     const SYNC_TIME_MS: f64 = 1000.0;
 
@@ -127,7 +134,6 @@ pub async fn run_blueprint(
     let should_show_preview = Rc::new(cbs.should_preview);
     let yield_to_js = Rc::new(cbs.js_yield);
 
-    let mut palette: Option<ColorPalette> = None;
     let mut frame_data: Option<FrameData> = None;
     let promises = Rc::new(const { RefCell::new(Vec::<ts::TsFut>::new()) });
     let promise_q = Rc::clone(&promises);
@@ -183,6 +189,7 @@ pub async fn run_blueprint(
             })
         }));
 
+        let mut palette: Option<ColorPalette> = None;
         let palette_size = args.image_args.color_palette_size;
         let shading_speed = i32::from(args.image_args.shading_speed);
         let data_len = cbs.get_data_len.call_n(())?.as_f64().unwrap();
@@ -207,7 +214,7 @@ pub async fn run_blueprint(
         let generator = FrameData::new(decoder, &args.image_args, on_frame.clone())
             .with_progress_message("Processing Frame");
 
-        frame_data = Some(generator.with_palette(palette.clone()));
+        frame_data = Some(generator.with_palette(palette));
     }
 
     // Custom writer that invokes a callback whenever chunk size is reached.
@@ -218,7 +225,7 @@ pub async fn run_blueprint(
     });
 
     // Yields JSON or compressed blueprint in chunks
-    let generator = BlueprintGenerator::new(frame_data, &args).await?.with_palette(palette);
+    let generator = BlueprintGenerator::new(frame_data, &args).await?;
     let mut encoder = BlueprintEncoder::new(generator, &args, writer)?;
 
     let flush = async || -> Result<(), JsError> {
@@ -290,7 +297,7 @@ pub async fn encode_gif(
     callbacks: tsify::Ts<EncodeGifCallbacks>,
 ) -> Result<(), JsError> {
     use image_processing::{JsVideoFrameCallback, encode_gif};
-    use util::JsReflectGetSet;
+    use util::JsReflectGetSet as _;
 
     let args: models::EncodeGifArgs = serde_wasm_bindgen::from_value(args)?;
     let get_next_frame = callbacks.reflect_get::<JsVideoFrameCallback>("getFrameData")?;

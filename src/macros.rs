@@ -7,7 +7,7 @@
 #[macro_export]
 macro_rules! log {
     ($($arg:tt)*) => {
-        ::web_sys::console::log_1(&format!($($arg)*).into());
+        ::web_sys::console::log_1(&::std::format!($($arg)*).into());
     };
 }
 
@@ -25,11 +25,39 @@ macro_rules! boxed_slice {
 #[macro_export]
 macro_rules! js_err {
     ($($arg:tt)*) => {
-        JsError::new(&format!($($arg)*))
+        ::wasm_bindgen::JsError::new(&::std::format!($($arg)*))
     };
 }
 
+/// Utility with similar signature to ``panic!()``.
+///
+/// Supports variable interpolation using `{}` syntax.
+#[macro_export]
+macro_rules! err_js {
+    ($($arg:tt)*) => {
+        return Err(::wasm_bindgen::JsError::new(&::std::format!($($arg)*)))
+    };
+}
+
+#[macro_export]
+macro_rules! write_json_trimmed_to {
+    ($writer:expr, $buf:expr) => {{
+        let json_bytes = serde_json::to_vec($buf)
+            .map_err(|e| ::wasm_bindgen::JsError::new(&::std::format!("Write error: {e:?}")))?;
+        $crate::macros::write_to!($writer, &json_bytes[1..json_bytes.len() - 1]) // Remove braces
+    }};
+}
+
+#[macro_export]
+macro_rules! write_to {
+    ($writer:expr, $buf:expr) => {{
+        ($writer.write_all($buf))
+            .map_err(|e| ::wasm_bindgen::JsError::new(&::std::format!("Write error: {e:?}")))
+    }};
+}
+
 pub use boxed_slice;
+pub use err_js;
 pub use js_err;
 #[allow(
     clippy::allow_attributes,
@@ -37,3 +65,5 @@ pub use js_err;
     reason = "Might not necessarily be used"
 )]
 pub use log;
+pub use write_json_trimmed_to;
+pub use write_to;
