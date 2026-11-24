@@ -5,6 +5,12 @@ use alloc::sync::Arc;
 use core::ops::Not as _;
 use glam::{DVec2, UVec2, dvec2};
 
+type GenerateLampsOutput = (
+    Vec<BlueprintEntity>,
+    ObjectGeneratorMetadata,
+    (Option<u32>, Option<u32>),
+);
+
 /// Generates a grid of lamp entities for the blueprint.
 ///
 /// # Arguments
@@ -29,11 +35,7 @@ pub fn generate_lamps(
     base_ent_n: u32,
     start_pos: DVec2,
     args: &BlueprintArgs,
-) -> (
-    Vec<BlueprintEntity>,
-    ObjectGeneratorMetadata,
-    (Option<u32>, Option<u32>),
-) {
+) -> Result<GenerateLampsOutput, JsError> {
     let mut ents = Vec::new();
     let mut wires = Wires::new();
     let mut top_left_ent_n: Option<u32> = None;
@@ -70,7 +72,8 @@ pub fn generate_lamps(
 
             if matches!(args.image_args.mode, Mode::Static { combs: false, .. }) {
                 let frame = curr_frame.as_ref();
-                let frame = frame.expect("StaticImage without combintors requires a frame");
+                let frame =
+                    frame.ok_or_js_err("StaticImage without combintors requires a frame")?;
                 let p = frame.get_pixel(c as u32, r as u32);
                 lamp = lamp.with_color(Color {
                     r: f64::from(p[0]) / 255.0,
@@ -129,5 +132,6 @@ pub fn generate_lamps(
         wires,
         next_ent_n: get_ent_num(grid_dim.y - 1, grid_dim.x - 1) + 1,
     };
-    (ents, output, (top_left_ent_n, top_right_ent_n))
+
+    Ok((ents, output, (top_left_ent_n, top_right_ent_n)))
 }

@@ -117,6 +117,16 @@ pub trait JsCall<T: js_sys::JsFunction>: Into<js_sys::Function<T>> + Clone {
 }
 impl<T: js_sys::JsFunction, S: Into<js_sys::Function<T>> + Clone> JsCall<T> for S {}
 
+pub trait OptionJsExt<T> {
+    fn ok_or_js_err(self, prefix: &str) -> Result<T, JsError>;
+}
+impl<T> OptionJsExt<T> for Option<T> {
+    #[inline]
+    fn ok_or_js_err(self, prefix: &str) -> Result<T, JsError> {
+        self.ok_or_else(|| JsError::new(prefix))
+    }
+}
+
 pub trait ResultJsExt<T, E> {
     fn map_js_err(self, prefix: &str) -> Result<T, JsError>;
 }
@@ -126,3 +136,42 @@ impl<T, E: core::fmt::Debug> ResultJsExt<T, E> for Result<T, E> {
         self.map_err(|e| JsError::new(&format!("{prefix}: {e:?}")))
     }
 }
+
+#[allow(
+    clippy::allow_attributes,
+    dead_code,
+    reason = "Overarching convenience lib"
+)]
+pub trait TryIteratorExt: Iterator {
+    #[inline]
+    fn try_any<E, F: FnMut(Self::Item) -> Result<bool, E>>(&mut self, mut f: F) -> Result<bool, E>
+    where
+        Self: Sized,
+    {
+        match self.try_fold((), |(), item| match f(item) {
+            Ok(true) => ::core::ops::ControlFlow::Break(Ok(true)),
+            Ok(false) => ::core::ops::ControlFlow::Continue(()),
+            Err(err) => ::core::ops::ControlFlow::Break(Err(err)),
+        }) {
+            ::core::ops::ControlFlow::Break(result) => result,
+            ::core::ops::ControlFlow::Continue(..) => Ok(false),
+        }
+    }
+
+    #[inline]
+    fn try_all<E, F: FnMut(Self::Item) -> Result<bool, E>>(&mut self, mut f: F) -> Result<bool, E>
+    where
+        Self: Sized,
+    {
+        match self.try_fold((), |(), item| match f(item) {
+            Ok(true) => ::core::ops::ControlFlow::Continue(()),
+            Ok(false) => ::core::ops::ControlFlow::Break(Ok(false)),
+            Err(err) => ::core::ops::ControlFlow::Break(Err(err)),
+        }) {
+            ::core::ops::ControlFlow::Break(result) => result,
+            ::core::ops::ControlFlow::Continue(..) => Ok(true),
+        }
+    }
+}
+
+impl<I: Iterator + ?Sized> TryIteratorExt for I {}

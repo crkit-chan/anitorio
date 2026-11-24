@@ -73,14 +73,14 @@ impl<'a> FrameData<'a> {
         frame_data: ImageFrameData<'a>,
         image_args: &'a ImageArgs,
         on_frame: Option<Rc<FrameCallback>>,
-    ) -> Self {
+    ) -> Result<Self, JsError> {
         #[must_use]
         #[inline]
         const fn expected_output_frames(n_ms: u64, fps: u32) -> usize {
             1 + ((n_ms * fps as u64).div_euclid(1000)) as usize
         }
 
-        let in_dim = frame_data.dimensions();
+        let in_dim = frame_data.info.dimensions.ok_or_js_err("Missing dimensions!")?;
         let scale_factor = (f64::from(image_args.max_size) / f64::from(in_dim.x))
             .min(f64::from(image_args.max_size) / f64::from(in_dim.y))
             .min(1.0);
@@ -89,7 +89,8 @@ impl<'a> FrameData<'a> {
             out_n_frames: match image_args.mode {
                 Mode::Static { .. } => 1,
                 _ => expected_output_frames(
-                    (frame_data.info.duration.unwrap() * 1000.0) as u64,
+                    (frame_data.info.duration.ok_or_js_err("FrameData missing 'duration' field")?
+                        * 1000.0) as u64,
                     u32::from(image_args.target_fps.max(1)),
                 ),
             },
@@ -108,7 +109,8 @@ impl<'a> FrameData<'a> {
             progress_msg: String::new(),
         };
         obj.decoder.dim = obj.out_dim_raw();
-        obj
+
+        Ok(obj)
     }
 
     pub fn with_progress_message(mut self, msg: impl Into<String>) -> Self {
@@ -167,7 +169,7 @@ impl<'a> FrameData<'a> {
                 let args = &self.args;
 
                 if use_js_decode {
-                    duration = args.duration.unwrap();
+                    duration = args.duration.ok_or_js_err("Duration must be provided")?;
                     progress = (self.out_frame_i as f64 / f64::from(args.target_fps)) / duration;
                 } else {
                     duration = self.out_n_frames as f64 / f64::from(args.target_fps);
@@ -235,7 +237,7 @@ impl<'a> FrameData<'a> {
         // 2. Resample after filters, but before grayscale to preserve detail.
         img = match self.args.resampling_filter {
             ResamplingFilter::Thumbnail => img.thumbnail(out_dim.x, out_dim.y),
-            filter => img.resize(out_dim.x, out_dim.y, filter.to_image_filter().unwrap()),
+            filter => img.resize(out_dim.x, out_dim.y, filter.to_image_filter()?),
         };
 
         // 3. Grayscale after resampling
@@ -370,12 +372,6 @@ pub struct ImageFrameData<'a> {
     info:    ImageArgs,
 }
 impl<'a> ImageFrameData<'a> {
-    #[must_use]
-    #[inline]
-    pub const fn dimensions(&self) -> UVec2 {
-        self.info.dimensions.unwrap()
-    }
-
     /// Decodes the provided image data into a vector of frames based on the image type.
     ///
     /// Supported types: "gif" and "webp".
@@ -408,25 +404,27 @@ impl<'a> ImageFrameData<'a> {
                 info.n_frames = Some(1);
                 info.duration = Some(if use_combs { 1000.0 } else { 0.0 });
 
-                let dim = image_args.dimensions.expect("No image size");
+                let dim = image_args.dimensions.ok_or_js_err("No image size")?;
                 let mut data = Vec::new();
                 reader.read_to_end(&mut data)?;
 
                 let frames = image::Frames::new(Box::new(core::iter::once(Ok(image::Frame::new(
                     image::RgbaImage::from_raw(dim.x, dim.y, data)
-                        .expect("buffer length must be width * height * 4"),
+                        .ok_or_js_err("buffer length must be width * height * 4")?,
                 ))))); // bruh
                 FrameDecoderState::NativeFrames(frames)
             }
             t if t.starts_with("video/") => {
                 info.n_frames = None;
-                let get_frame = js_next_frame.expect("JS next frame must be provided for videos");
-                FrameDecoderState::JsFrames(get_frame)
+                FrameDecoderState::JsFrames(
+                    js_next_frame.ok_or_js_err("JS next frame must be provided for videos")?,
+                )
             }
             t => err_js!("Unsupported image type: '{t}'"),
         };
 
-        let decoder = FrameDecoder::new(state, info.dimensions.unwrap());
+        let decoder =
+            FrameDecoder::new(state, info.dimensions.ok_or_js_err("Missing dimensions!")?);
         Ok(ImageFrameData { decoder, info })
     }
 }
@@ -748,14 +746,15 @@ impl<'a> FrameDecoder<'a> {
                     return Ok(None);
                 }
 
-                let duration = Duration::from_secs_f64(info.duration.unwrap());
+                let duration =
+                    Duration::from_secs_f64(info.duration.ok_or_js_err("Missing duration")?);
                 let duration = image::Delay::from_saturating_duration(duration);
-                let img = image::RgbaImage::from_raw(self.dim.x, self.dim.y, in_buf);
-                let img = img.expect("Invalid RGBA frame dimensions");
+                let img = image::RgbaImage::from_raw(self.dim.x, self.dim.y, in_buf)
+                    .ok_or_js_err("Invalid RGBA frame dimensions")?;
 
                 Some(FrameWithTime(
                     image::Frame::from_parts(img, 0, 0, duration),
-                    (info.timestamp.unwrap() * 1000.0 * 1000.0) as u64,
+                    (info.timestamp.ok_or_js_err("Missing timestamp")? * 1000.0 * 1000.0) as u64,
                 ))
             }
         })
@@ -806,10 +805,10 @@ pub async fn encode_gif(
             break;
         }
 
-        let duration = Duration::from_secs_f64(info.duration.unwrap());
+        let duration = Duration::from_secs_f64(info.duration.ok_or_js_err("Missing duration")?);
         let duration = image::Delay::from_saturating_duration(duration);
-        let img = image::RgbaImage::from_raw(args.dim.x, args.dim.y, in_buf.clone());
-        let img = img.expect("Invalid RGBA frame dimensions");
+        let img = image::RgbaImage::from_raw(args.dim.x, args.dim.y, in_buf.clone())
+            .ok_or_js_err("Invalid RGBA frame dimensions")?;
         let f = image::Frame::from_parts(img, 0, 0, duration);
         encoder.encode_frame(f)?;
 
@@ -819,8 +818,8 @@ pub async fn encode_gif(
     Ok(())
 }
 
-#[must_use]
 #[inline]
+#[must_use]
 pub const fn rgb_to_int(r: u8, g: u8, b: u8) -> u32 {
     ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
 }

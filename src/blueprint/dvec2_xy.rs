@@ -10,6 +10,7 @@ pub struct F64XY {
     pub y: f64,
 }
 
+#[allow(clippy::allow_attributes, dead_code, reason = "May not be used")]
 pub fn serialize<S: serde::Serializer>(v: &DVec2, serializer: S) -> Result<S::Ok, S::Error> {
     let xy: &F64XY = bytemuck::cast_ref(v);
     xy.serialize(serializer)

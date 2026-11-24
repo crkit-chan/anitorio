@@ -29,6 +29,7 @@ decimal_literal_representation = "warn"
 deref_by_slicing = "warn"
 empty_enum_variants_with_brackets = "warn"    # Utility
 empty_structs_with_brackets = "warn"
+expect_used = "warn"                          # Yes, I want clean errors
 future_not_send = "allow"                     # Used a lot due to WASM / JS code
 get_unwrap = "warn"
 host_endian_bytes = "warn"
@@ -68,6 +69,7 @@ unimplemented = "warn"                        # Useful
 unneeded_field_pattern = "warn"               # Clarity / brevity
 unseparated_literal_suffix = "warn"           # Readability
 unused_trait_names = "warn"                   # Clarify intent
+unwrap_used = "warn"                          # WE WANT ERRORS
 
 # single_call_fn = "warn" # Useful debug tool
 

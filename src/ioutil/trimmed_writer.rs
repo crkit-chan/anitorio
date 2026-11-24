@@ -23,6 +23,10 @@ impl<W: io::Write> io::Write for TrimmedWriter<'_, W> {
         if !buf.is_empty() {
             let trimmed = if self.is_first { &buf[1..] } else { buf };
             if likely(!trimmed.is_empty()) {
+                // SAFETY: We know this is garunteed to be ``Some()`` in this branch
+                unsafe { assert_unchecked(trimmed.last().is_some()) };
+
+                #[expect(clippy::unwrap_used, reason = "Garunteed safe")]
                 if let Some(prev_last) = self.last.replace(*trimmed.last().unwrap()) {
                     self.writer.write_all(&[prev_last])?;
                 }

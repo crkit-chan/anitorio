@@ -105,10 +105,10 @@ struct FrameInfo<'a> {
     curr_frame:       Arc<image::DynamicImage>,
     frame_data:       FrameData<'a>,
     frames_per_cb:    u32,
-    group_data_combs: Vec<LazyCombinators>,
+    group_data_combs: Box<[LazyCombinators]>,
     n_buf_frames:     u32,
     next_frame:       Option<Arc<image::DynamicImage>>,
-    patch_states:     Vec<GroupPatchState>,
+    patch_states:     Box<[GroupPatchState]>,
     ticks_per_frame:  u8,
     use_delta_comp:   bool,
 }
@@ -158,18 +158,18 @@ impl<'a> BlueprintGenerator<'a> {
             };
             dim = frame_data.out_dim();
             frame_info = Some(FrameInfo {
-                curr_frame: frame_data.next().await?.unwrap(),
+                curr_frame: frame_data.next().await?.ok_or_js_err("Expected at least 1 frame")?,
                 frame_data,
-                group_data_combs: Vec::new(),
+                group_data_combs: boxed_slice![],
                 frames_per_cb,
                 n_buf_frames,
                 next_frame: None,
-                patch_states: Vec::new(),
+                patch_states: boxed_slice![],
                 ticks_per_frame: 60_u8.div_euclid(args.image_args.target_fps),
                 use_delta_comp: comb_comp.is_some_and(|c| c == SignalCompression::Delta),
             });
         } else {
-            dim = args.custom_dim.expect("Must have custom_dim or frame_data.");
+            dim = args.custom_dim.ok_or_js_err("Must have custom_dim or frame_data.")?;
         }
         let use_const_cbs = matches!(args.image_args.mode, Mode::Static { const_cb: true, .. });
         let max_lamp_cols_per_grp = match args.image_args.mode {
@@ -250,7 +250,6 @@ impl<'a> BlueprintGenerator<'a> {
 
     fn get_signal_data(args: &BlueprintArgs) -> Result<SignalDataResult, JsError> {
         let mut signals = crate::blueprint::data::PROTOTYPE_DATA.with_borrow(|data| {
-            let data = data.as_ref().expect("No signal data loaded yet!");
             let mut blacklisted_sigs = data.blacklist_signals.iter().collect::<HashSet<_>>();
 
             if !matches!(
@@ -264,8 +263,8 @@ impl<'a> BlueprintGenerator<'a> {
             }
 
             let filtered = data.signal_ids.iter().filter(|v| !blacklisted_sigs.contains(v));
-            filtered.cloned().collect::<Box<_>>()
-        });
+            Ok::<_, JsError>(filtered.cloned().collect::<Box<_>>())
+        })?;
 
         match args.signal_sorting {
             // Only sort by name (compressor really likes this)
@@ -291,9 +290,14 @@ impl<'a> BlueprintGenerator<'a> {
         }
         signals.sort_by_key(|s| s.name().contains("parameter")); // Push "parameter" signals to end
 
-        let signals_str = (signals.iter())
-            .map(|s| serde_json::value::RawValue::from_string(serde_json::to_string(s).unwrap()))
-            .collect::<Result<Arc<_>, _>>()?;
+        let signals_str = (signals.iter().map(|sig| -> Result<_, JsError> {
+            let s = serde_json::to_string(sig).map_err(|e| {
+                js_err!("Could not convert input signal '{sig:?}' to string: {e:?}")
+            })?;
+            serde_json::value::RawValue::from_string(s)
+                .map_js_err("Could not convert the string into a serde_json::value::RawValue")
+        }))
+        .collect::<Result<Arc<_>, _>>()?;
 
         Ok((signals, signals_str))
     }
@@ -400,16 +404,15 @@ impl<'a> BlueprintGenerator<'a> {
     }
 
     #[inline]
-    #[must_use]
     pub fn get_description(&mut self) -> String {
-        if self.description.is_none() {
-            self.description = Some(self.generate_description());
-        }
-        self.description.as_ref().unwrap().clone()
+        self.description.clone().unwrap_or_else(|| {
+            let description = self.generate_description();
+            self.description = Some(description.clone());
+            description
+        })
     }
 
     /// Gets the description to attach to the blueprint.
-    #[must_use]
     fn generate_description(&self) -> String {
         // Note: we use the `var` font for bold text as the word "var" is short and takes up less space.
         let name = self.args.name.clone();
@@ -459,9 +462,7 @@ impl<'a> BlueprintGenerator<'a> {
             ]);
         }
 
-        if super::data::PROTOTYPE_DATA
-            .with_borrow(|data| data.as_ref().unwrap().signal_types.has_type("space-location"))
-        {
+        if super::data::PROTOTYPE_DATA.with_borrow(|v| v.signal_types.has_type("space-location")) {
             output.push(
                 "\n\n [space-age][font=scenario-message-dialog]  Uses the Space Age DLC.[/font]"
                     .to_owned(),
@@ -482,7 +483,7 @@ impl<'a> BlueprintGenerator<'a> {
         let ent_data = &mut self.entity_data;
 
         if self.generate_cbs && !matches!(args.image_args.mode, Mode::Static { timer: false, .. }) {
-            let info = info.as_mut().unwrap();
+            let info = info.as_mut().ok_or_js_err("Expected frame_info if generate_cbs is true")?;
             let stop = info.frame_data.total_frames() * info.ticks_per_frame as usize;
             let (mut ents, wires) =
                 generate_timer(stop, info.ticks_per_frame, info.frames_per_cb, args)?;
@@ -496,6 +497,7 @@ impl<'a> BlueprintGenerator<'a> {
             ent_data.ents.extend(ents);
             ent_data.wires.extend(wires);
         }
+        let mut group_data_combs = Vec::<LazyCombinators>::new();
         let mut prev_top_right_lamp_ent_n: Option<u32> = None;
         let n_groups = self.n_groups;
 
@@ -515,6 +517,9 @@ impl<'a> BlueprintGenerator<'a> {
             let grp_left = group_i * self.max_cols_per_grp;
             let grp_width = (self.max_cols_per_grp).min(self.dim.x - grp_left);
             let (mut cb_in_ent_n, mut cb_out_ent_n) = (0, 0);
+            let curr_frame =
+                &info.as_ref().ok_or_js_err("Expected frame_info if generate_cbs")?.curr_frame;
+
             let (
                 mut grp_lamps,
                 ObjectGeneratorMetadata {
@@ -526,17 +531,17 @@ impl<'a> BlueprintGenerator<'a> {
                 signals,
                 uvec2(grp_width, self.dim.y),
                 matches!(self.args.image_args.mode, Mode::Static { combs: false, .. })
-                    .then(|| Arc::clone(&info.as_ref().unwrap().curr_frame)), // Pass image data to lamp generation
+                    .then(|| Arc::clone(curr_frame)), // Pass image data to lamp generation
                 occupied,
                 ent_data.next_ent_n,
                 dvec2(f64::from(grp_left), 0.0),
                 args,
-            );
+            )?;
             let (top_left_lamp_ent_n, top_right_lamp_ent_n) = io_ents_n;
             ent_data.next_ent_n = new_next_ent_n;
 
             if self.generate_cbs {
-                let info = info.as_mut().unwrap();
+                let info = info.as_mut().ok_or_js_err("Expected frame_info if generate_cbs")?;
                 let GenerateCombinatorsOutput {
                     metadata: ObjectGeneratorMetadata { wires, next_ent_n: new_base_ent_n },
                     data_cbs: data_combs,
@@ -555,7 +560,7 @@ impl<'a> BlueprintGenerator<'a> {
                 if unlikely(group_i == 0) {
                     ent_data.wires.push([3, WIRE_OUT_R, in_ent_n, WIRE_R]); // Connect timer
                 }
-                info.group_data_combs.push(data_combs);
+                group_data_combs.push(data_combs);
                 ent_data.ents.extend(other_ents);
                 ent_data.wires.extend(wires.into_iter());
 
@@ -603,6 +608,11 @@ impl<'a> BlueprintGenerator<'a> {
             ent_data.wires.extend(grp_lamp_wires.into_iter());
         }
 
+        if self.generate_cbs {
+            info.as_mut()
+                .ok_or_js_err("Expected frame_info if generate_cbs")?
+                .group_data_combs = group_data_combs.into_boxed_slice();
+        }
         ent_data.ents.sort_by_key(|e| e.entity_number);
         self.state = BlueprintState::Data;
 
@@ -610,7 +620,7 @@ impl<'a> BlueprintGenerator<'a> {
     }
 
     async fn populate_data(&mut self, writer: &mut impl io::Write) -> Result<(), JsError> {
-        let info = self.frame_info.as_mut().unwrap();
+        let info = self.frame_info.as_mut().ok_or_js_err("Expected frame_info if generate_cbs")?;
 
         let group_data_combs = &mut info.group_data_combs;
         let frame_data = &mut info.frame_data;
@@ -628,18 +638,17 @@ impl<'a> BlueprintGenerator<'a> {
         let sig_p = self.args.timing_signals.p.clone();
         let mut output_data: Vec<BlueprintEntity> = Vec::new();
 
-        let mk_cb = |range: UVec2, indices: Box<[(usize, i32)]>| -> ControlBehavior {
-            if matches!(mode, Mode::Static { const_cb: true, .. }) {
-                let sections = indices.chunks(1000).enumerate().map(|(i, chunk)| {
-                    let filters = chunk.iter().enumerate().map(|(j, &(sig_i, count))| {
+        let mk_control_behavior = |range: UVec2, indices: Box<[(usize, i32)]>| {
+            Ok::<_, JsError>(if matches!(mode, Mode::Static { const_cb: true, .. }) {
+                let sections = (indices.chunks(1000).enumerate().map(|(i, chunk)| {
+                    let filters = (chunk.iter().enumerate().map(|(j, &(sig_i, count))| {
                         BlueprintLogisticFilter::new(j as u16 + 1, &signals[sig_i], "==", count)
-                    });
-                    LogisticSection {
-                        index:   i as u8 + 1,
-                        filters: filters.collect::<Result<_, JsError>>().unwrap(),
-                    }
-                });
-                let sections = LogisticSections { sections: sections.collect() };
+                    }))
+                    .collect::<Result<_, JsError>>()?;
+                    Ok::<_, JsError>(LogisticSection { index: i as u8 + 1, filters })
+                }))
+                .collect::<Result<_, JsError>>()?;
+                let sections = LogisticSections { sections };
                 ControlBehavior::ConstantCombinator { sections }
             } else {
                 let signal_list = Arc::clone(&self.signals_json);
@@ -653,7 +662,7 @@ impl<'a> BlueprintGenerator<'a> {
                 let decider_conditions =
                     DeciderCombinatorCustomParameters { conditions, indices, signal_list };
                 ControlBehavior::DeciderCombinatorCustom { decider_conditions }
-            }
+            })
         };
 
         loop {
@@ -739,7 +748,7 @@ impl<'a> BlueprintGenerator<'a> {
                         self.entity_data.next_ent_n = next_ent_n;
 
                         let range = uvec2(1, 2) + (ticks_per_grp * state.chunk_i);
-                        let cb = mk_cb(range, target_outputs);
+                        let cb = mk_control_behavior(range, target_outputs)?;
                         output_data.push(en.with_control_behavior(cb));
                         state.sig_buf[0] = frame_sigs; // cache absolute output
                     }
@@ -776,7 +785,7 @@ impl<'a> BlueprintGenerator<'a> {
 
                             let range =
                                 (uvec2(0, 1) + (base_chunk_i + cb_i as u32)) * ticks_per_grp;
-                            let cb = mk_cb(range, target_outputs);
+                            let cb = mk_control_behavior(range, target_outputs)?;
                             output_data.push(en.with_control_behavior(cb));
                         }
                     }
@@ -794,7 +803,7 @@ impl<'a> BlueprintGenerator<'a> {
 
                         let range = ticks_per_grp
                             * uvec2(base_chunk_i, base_chunk_i + state.sig_buf.len() as u32);
-                        let cb = mk_cb(range, target_outputs);
+                        let cb = mk_control_behavior(range, target_outputs)?;
                         output_data.push(en.with_control_behavior(cb));
                     }
                     state.sig_buf.clear();

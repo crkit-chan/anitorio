@@ -1,3 +1,4 @@
+use crate::prelude::*;
 use glam::UVec2;
 use serde::{Deserialize, Serialize};
 use tsify::Tsify;
@@ -96,8 +97,8 @@ pub enum ImageRotate {
 }
 impl ImageRotate {
     /// Returns `true` if `self` is `90` or `270`, otherwise `false`.
-    #[must_use]
     #[inline]
+    #[must_use]
     pub const fn swaps_dimensions(self) -> bool {
         matches!(self, Self::Deg90 | Self::Deg270)
     }
@@ -113,14 +114,14 @@ pub enum ImageFlip {
     Both = 3,
 }
 impl ImageFlip {
-    #[must_use]
     #[inline]
+    #[must_use]
     pub const fn x(self) -> bool {
         matches!(self, Self::X | Self::Both)
     }
 
-    #[must_use]
     #[inline]
+    #[must_use]
     pub const fn y(self) -> bool {
         matches!(self, Self::Y | Self::Both)
     }
@@ -132,17 +133,14 @@ pub enum Mode {
     Full,
     Lamps,
     LampGrid,
-
     #[serde(rename = "staticImage")]
     Static {
         #[serde(rename = "useConstantCombinators")]
         const_cb: bool,
-
         #[serde(rename = "useCombinators")]
-        combs: bool,
-
+        combs:    bool,
         #[serde(rename = "useTimer")]
-        timer: bool,
+        timer:    bool,
     },
 }
 
@@ -165,17 +163,16 @@ pub enum ResamplingFilter {
     Triangle,
 }
 impl ResamplingFilter {
-    #[must_use]
     #[inline]
-    pub const fn to_image_filter(self) -> Option<image::imageops::FilterType> {
-        match self {
-            Self::Catrom => Some(image::imageops::FilterType::CatmullRom),
-            Self::Gaussian => Some(image::imageops::FilterType::Gaussian),
-            Self::Lanczos3 => Some(image::imageops::FilterType::Lanczos3),
-            Self::Nearest => Some(image::imageops::FilterType::Nearest),
-            Self::Triangle => Some(image::imageops::FilterType::Triangle),
-            _ => None,
-        }
+    pub fn to_image_filter(self) -> Result<image::imageops::FilterType, JsError> {
+        Ok(match self {
+            Self::Catrom => image::imageops::FilterType::CatmullRom,
+            Self::Gaussian => image::imageops::FilterType::Gaussian,
+            Self::Lanczos3 => image::imageops::FilterType::Lanczos3,
+            Self::Nearest => image::imageops::FilterType::Nearest,
+            Self::Triangle => image::imageops::FilterType::Triangle,
+            _ => err_js!("Invalid image filter value '{self:?}'"),
+        })
     }
 }
 
@@ -199,12 +196,10 @@ pub enum OutputFormat {
 pub struct JsVideoFrameData {
     #[serde(default)]
     pub is_finished: bool,
-
     #[serde(default)]
-    pub timestamp: Option<f64>,
-
+    pub timestamp:   Option<f64>,
     #[serde(default)]
-    pub duration: Option<f64>,
+    pub duration:    Option<f64>,
 }
 
 #[derive(Tsify, Deserialize)]

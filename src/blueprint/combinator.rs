@@ -35,7 +35,7 @@ pub fn get_bounding_box(en: &BlueprintEntity) -> Result<core::ops::Range<DVec2>,
     Ok((en.position - offset / 2.0)..(en.position + offset / 2.0))
 }
 
-pub fn load_comb_pos_json(data_json_reader: impl std::io::Read) -> Result<(), JsError> {
+pub fn load_comb_pos_json<R: std::io::Read>(data_json_reader: R) -> Result<(), JsError> {
     #[derive(serde::Deserialize)]
     struct CombinatorPositionJson {
         compression: Option<SignalCompression>,
@@ -121,7 +121,7 @@ pub fn generate_combinators(
     // Find the most suitable combinator position data
     COMB_POS_DATA.with_borrow(|data| {
         let mut best_data: Option<&CombinatorPositionData> = None;
-        for d in data.as_ref().expect("No combinator positions data") {
+        for d in data.as_ref().ok_or_else(|| js_err!("No combinator positions data"))? {
             if d.dim.x <= f64::from(max_cols_per_grp)
                 && use_delta_comp == matches!(d.compression, Some(SignalCompression::Delta))
                 && d.grayscale_bits.contains(&bits)
@@ -131,7 +131,9 @@ pub fn generate_combinators(
             }
         }
         best_pos_data = best_data.cloned();
-    });
+
+        Ok::<_, JsError>(())
+    })?;
 
     if let Some(d) = best_pos_data {
         for en in d.blueprint.blueprint.entities {
@@ -189,11 +191,7 @@ pub fn generate_combinators(
         prev_prev_ents_n: vec![None; max_cols_per_grp as usize].into_boxed_slice(),
         target_signal_ref: SignalID::new(
             "entity",
-            if use_const_cbs {
-                constants::CONSTANT_CB
-            } else {
-                DEC_CB
-            },
+            if use_const_cbs { CONSTANT_CB } else { DEC_CB },
         ),
         tick_i: 0_usize,
         wires: Wires::new(),
@@ -221,7 +219,7 @@ pub fn generate_combinators(
 
             en = en.with_control_behavior(ControlBehavior::decider(DeciderCombinatorParameters {
                 conditions: boxed_slice![
-                    decider_cond!(&SIG_EACH, ==, i32::try_from(i).unwrap())
+                    decider_cond!(&SIG_EACH, ==, i32::from(i as u16))
                         .with_first_signal_networks("g"),
                 ],
                 outputs:    boxed_slice![DeciderCombinatorOutput::new(
@@ -358,7 +356,9 @@ pub fn generate_combinators(
                     placed.insert((p.x as i32, p.y as i32));
                 }
 
-                pos_dict.get_mut(tag).unwrap().position = new_pos;
+                (pos_dict.get_mut(tag))
+                    .ok_or_else(|| js_err!("No entry for tag '{tag}'"))?
+                    .position = new_pos;
             } else {
                 // No valid position found for this combinator.
                 // Handle this case rather than silently accepting an overlap.

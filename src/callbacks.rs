@@ -22,11 +22,16 @@ thread_local! {
     #[cfg(feature = "perf_timing")]
     static WEB_SYS_PERFORMANCE: std::sync::LazyLock<web_sys::Performance> = const {
         std::sync::LazyLock::new(|| {
-            let js_global = js_sys::global().dyn_into::<web_sys::WorkerGlobalScope>().unwrap();
-            js_global.performance().unwrap()
+            fn init() -> Result<web_sys::Performance, JsError> {
+                let js_global = js_sys::global().dyn_into::<web_sys::WorkerGlobalScope>()
+                    .map_js_err("Could not access 'global' field on JS")?;
+                js_global.performance().ok_or_else(|| js_err!("No 'performance' field on JS 'global'"))
+            }
+
+            #[expect(clippy::unwrap_used, reason = "For performance-critical access, this returns the value directly instead of wrapping in a Result<>")]
+            init().map_js_err("Could not initialize performance object").unwrap()
         })
     };
-
 }
 
 /// Sets the static callbacks to be used during blueprint generation.
@@ -35,8 +40,11 @@ thread_local! {
 ///
 /// * `callbacks` - An object of JS functions that will be called during the generation process.
 #[wasm_bindgen]
-pub fn set_callbacks(callbacks: &tsify::Ts<Callbacks>) {
-    CALLBACKS.with_borrow_mut(|cbs| *cbs = Some(callbacks.to_rust().unwrap()));
+pub fn set_callbacks(callbacks: &tsify::Ts<Callbacks>) -> Result<(), JsError> {
+    CALLBACKS.with_borrow_mut(|cbs| {
+        *cbs = Some(callbacks.to_rust().map_js_err("Could not convert to Rust")?);
+        Ok(())
+    })
 }
 
 /// Reports progress by calling the registered progress callback.

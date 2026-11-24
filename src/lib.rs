@@ -128,8 +128,8 @@ pub async fn run_blueprint(
 
     const SYNC_TIME_MS: f64 = 1000.0;
 
-    let mut args: BlueprintArgs = args.to_rust().unwrap();
-    let cbs: RunBlueprintCallbacks = callbacks.to_rust().unwrap();
+    let mut args: BlueprintArgs = args.to_rust().map_js_err("Could not parse arguments")?;
+    let cbs: RunBlueprintCallbacks = callbacks.to_rust().map_js_err("Could not callbacks")?;
     let on_frame = Rc::new(cbs.on_frame);
     let should_show_preview = Rc::new(cbs.should_preview);
     let yield_to_js = Rc::new(cbs.js_yield);
@@ -192,7 +192,13 @@ pub async fn run_blueprint(
         let mut palette: Option<ColorPalette> = None;
         let palette_size = args.image_args.color_palette_size;
         let shading_speed = i32::from(args.image_args.shading_speed);
-        let data_len = cbs.get_data_len.call_n(())?.as_f64().unwrap();
+
+        let data_len = {
+            let l = cbs.get_data_len.call_n(())?;
+            l.as_f64().ok_or_else(|| {
+                js_err!("getDataLen() did not return a value parsable as a f64: '{l}'")
+            })?
+        };
         let get_next_frame = (args.image_args.mime_type)
             .starts_with("video/")
             .then(|| cbs.get_next_frame.clone());
@@ -200,7 +206,7 @@ pub async fn run_blueprint(
         if palette_size > 0 {
             let reader = JsFileReader::new(cbs.get_data.clone(), data_len as u64, 1024 * 1024);
             let decoder = ImageFrameData::new(reader, &args.image_args, get_next_frame.clone())?;
-            let generator = FrameData::new(decoder, &args.image_args, on_frame.clone())
+            let generator = FrameData::new(decoder, &args.image_args, on_frame.clone())?
                 .with_progress_message("Scanning colors");
 
             palette = Some(
@@ -211,7 +217,7 @@ pub async fn run_blueprint(
 
         let reader = JsFileReader::new(cbs.get_data.clone(), data_len as u64, 1024 * 1024);
         let decoder = ImageFrameData::new(reader, &args.image_args, get_next_frame.clone())?;
-        let generator = FrameData::new(decoder, &args.image_args, on_frame.clone())
+        let generator = FrameData::new(decoder, &args.image_args, on_frame.clone())?
             .with_progress_message("Processing Frame");
 
         frame_data = Some(generator.with_palette(palette));

@@ -19,7 +19,6 @@ impl PowerPoleOccupied {
         let name = name.map_or_else(|| constants::DEFAULT_POWER_POLE_NAME, |v| v.as_str());
 
         let data = crate::blueprint::data::PROTOTYPE_DATA.with_borrow(|data| {
-            let data = data.as_ref().expect("No power pole data loaded yet!");
             let Some(p) = data.electric_poles.iter().find(|p| *p.name == *name) else {
                 err_js!("No power pole with name '{name}'!");
             };
