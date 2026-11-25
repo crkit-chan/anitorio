@@ -146,7 +146,6 @@ wasm-opt = [
 [package.metadata.wasm-pack.profile.dev]
 wasm-opt = false
 debug-js-glue = true
-demangle-name-section = true
 
 
 [package.metadata.wasm-pack.profile.profiling.wasm-bindgen]

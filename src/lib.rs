@@ -13,7 +13,7 @@
 
 use wasm_bindgen::prelude::*;
 
-pub use anitorio_macros::perf_timed;
+pub use anitorio_macros::perf;
 #[cfg(feature = "perf_timing")]
 pub use callbacks::perf_now;
 
@@ -282,6 +282,7 @@ pub async fn run_blueprint(
 #[wasm_bindgen]
 pub fn set_signal_data(data_json: js_sys::Uint8Array) -> Result<(), JsError> {
     let reader = ioutil::Uint8ArrayReader::new(data_json);
+    let reader = std::io::BufReader::new(reader);
     blueprint::data::load_data(reader)?;
     Ok(())
 }
@@ -294,6 +295,7 @@ pub fn set_signal_data(data_json: js_sys::Uint8Array) -> Result<(), JsError> {
 #[wasm_bindgen]
 pub fn set_comb_pos_data(data_json: js_sys::Uint8Array) -> Result<(), JsError> {
     let reader = ioutil::Uint8ArrayReader::new(data_json);
+    let reader = std::io::BufReader::new(reader);
     blueprint::combinator::load_comb_pos_json(reader)?;
     Ok(())
 }
