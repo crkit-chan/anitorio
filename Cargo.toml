@@ -155,6 +155,7 @@ demangle-name-section = true
 
 
 [features]
+arc_blueprint_generator = []
 default = []
 kiddo = ["dep:kiddo"]
 perf_timing = [

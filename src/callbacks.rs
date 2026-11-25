@@ -19,28 +19,28 @@ pub struct Callbacks {
 thread_local! {
     static CALLBACKS: RefCell<Option<Callbacks>> = const { RefCell::new(None) };
 
-    // #[cfg(feature = "perf_timing")]
-    // static WEB_SYS_PERFORMANCE: std::sync::LazyLock<web_sys::Performance> = std::sync::LazyLock::new(
-    //     || {
-    //         fn init() -> Result<web_sys::Performance, JsError> {
-    //             let performance =
-    //                 if let Ok(js_global) = js_sys::global().dyn_into::<web_sys::WorkerGlobalScope>() {
-    //                     js_global.performance()
-    //                 } else if let Some(window) = web_sys::window() {
-    //                     window.performance()
-    //                 } else {
-    //                     err_js!("Could not access 'global' field on JS");
-    //                 };
-    //             performance.ok_or_else(|| js_err!("No 'performance' field!"))
-    //         }
+    #[cfg(feature = "perf_timing")]
+    static WEB_SYS_PERFORMANCE: std::sync::LazyLock<web_sys::Performance> = std::sync::LazyLock::new(
+        || {
+            fn init() -> Result<web_sys::Performance, JsError> {
+                let performance =
+                    if let Ok(js_global) = js_sys::global().dyn_into::<web_sys::WorkerGlobalScope>() {
+                        js_global.performance()
+                    } else if let Some(window) = web_sys::window() {
+                        window.performance()
+                    } else {
+                        err_js!("Could not access 'global' field on JS");
+                    };
+                performance.ok_or_else(|| js_err!("No 'performance' field!"))
+            }
 
-    //         #[expect(
-    //             clippy::unwrap_used,
-    //             reason = "For performance-critical access, this returns the value directly instead of wrapping in a Result<>"
-    //         )]
-    //         init().map_js_err("Could not initialize performance object").unwrap()
-    //     },
-    // );
+            #[expect(
+                clippy::unwrap_used,
+                reason = "For performance-critical access, this returns the value directly instead of wrapping in a Result<>"
+            )]
+            init().map_js_err("Could not initialize performance object").unwrap()
+        },
+    );
 }
 
 /// Sets the static callbacks to be used during blueprint generation.
@@ -90,14 +90,7 @@ pub fn set_progress(start: f64, end: f64, progress: f64, msg: &str) {
 pub fn perf_now() -> f64 {
     #[cfg(feature = "perf_timing")]
     {
-        // web_sys::window()
-        //     .map_or_else(
-        //         || js_sys::global().dyn_into::<web_sys::WorkerGlobalScope>().unwrap().performance(),
-        //         |w| w.performance(),
-        //     )
-        //     .expect("No 'performance' field on JS 'global'")
-        //     .now()
-        1.0
+        WEB_SYS_PERFORMANCE.with(|perf| perf.now())
     }
 
     #[cfg(not(feature = "perf_timing"))]

@@ -2,7 +2,6 @@
 
 use crate::{blueprint::models::SignalID, prelude::*};
 use glam::{DVec2, dvec2};
-use std::sync::Arc;
 
 /// Timer entity positions.
 pub const TIMER1_POS: DVec2 = dvec2(-2.5, -0.5);
@@ -18,12 +17,38 @@ pub const DIR_R: u8 = 4;
 pub const DIR_D: u8 = 8;
 pub const DIR_L: u8 = 12;
 
-lazy_const!(pub ENT_ARI_CB:      Arc<SignalID> = Arc::new(SignalID::raw("entity", ARI_CB     , DEFAULT_QUALITY)));
-lazy_const!(pub ENT_CONSTANT_CB: Arc<SignalID> = Arc::new(SignalID::raw("entity", CONSTANT_CB, DEFAULT_QUALITY)));
-lazy_const!(pub ENT_DEC_CB:      Arc<SignalID> = Arc::new(SignalID::raw("entity", DEC_CB     , DEFAULT_QUALITY)));
-lazy_const!(pub ENT_LAMP:        Arc<SignalID> = Arc::new(SignalID::raw("entity", LAMP       , DEFAULT_QUALITY)));
+// lazy_const!(pub ENT_ARI_CB:      RC<SignalID> = RC::new(SignalID::raw("entity", ARI_CB     , DEFAULT_QUALITY)));
+// lazy_const!(pub ENT_CONSTANT_CB: RC<SignalID> = RC::new(SignalID::raw("entity", CONSTANT_CB, DEFAULT_QUALITY)));
+// lazy_const!(pub ENT_DEC_CB:      RC<SignalID> = RC::new(SignalID::raw("entity", DEC_CB     , DEFAULT_QUALITY)));
+// lazy_const!(pub ENT_LAMP:        RC<SignalID> = RC::new(SignalID::raw("entity", LAMP       , DEFAULT_QUALITY)));
 
-lazy_const!(pub VIRTUAL_EACH: Arc<SignalID> = Arc::new(SignalID::raw("virtual", EACH, DEFAULT_QUALITY)));
+pub static VIRTUAL_EACH: StaticSignalID =
+    StaticSignalID::new("virtual", "signal-each", DEFAULT_QUALITY);
+
+#[derive(Clone)]
+pub struct StaticSignalID {
+    type_:   &'static str,
+    name:    &'static str,
+    quality: &'static str,
+}
+impl StaticSignalID {
+    const fn new(type_: &'static str, name: &'static str, quality: &'static str) -> Self {
+        Self { type_, name, quality }
+    }
+}
+
+#[expect(clippy::fallible_impl_from, reason = "Utility")]
+impl From<StaticSignalID> for RC<SignalID> {
+    fn from(val: StaticSignalID) -> Self {
+        SignalID::intern_with_quality(val.type_, val.name, Some(val.quality)).unwrap()
+    }
+}
+#[expect(clippy::fallible_impl_from, reason = "Utility")]
+impl From<&StaticSignalID> for RC<SignalID> {
+    fn from(val: &StaticSignalID) -> Self {
+        SignalID::intern_with_quality(val.type_, val.name, Some(val.quality)).unwrap()
+    }
+}
 
 /// Blueprint version constant.
 pub const ARI_CB: &str = "arithmetic-combinator";

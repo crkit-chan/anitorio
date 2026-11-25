@@ -32,17 +32,6 @@ macro_rules! js_err {
     ($($arg:tt)*) => { ::wasm_bindgen::JsError::new(&::std::format!($($arg)*)) };
 }
 
-/// Creates a constant value that is lazily evaluated once.
-#[macro_export]
-macro_rules! lazy_const {
-    (pub $name:ident: $type:ty = $value:expr) => {
-        pub static $name: ::std::sync::LazyLock<$type> = ::std::sync::LazyLock::new(|| $value);
-    };
-    ($name:ident: $type:ty = $value:expr) => {
-        static $name: ::std::sync::LazyLock<$type> = ::std::sync::LazyLock::new(|| $value);
-    };
-}
-
 #[macro_export]
 macro_rules! write_json_trimmed_to {
     ($writer:expr, $buf:expr) => {{
@@ -63,7 +52,6 @@ macro_rules! write_to {
 pub use boxed_slice;
 pub use err_js;
 pub use js_err;
-pub use lazy_const;
 #[allow(
     clippy::allow_attributes,
     unused_imports,

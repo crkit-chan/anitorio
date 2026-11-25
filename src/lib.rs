@@ -5,7 +5,10 @@
     const_destruct,
     const_result_trait_fn,
     const_trait_impl,
-    likely_unlikely
+    hash_set_entry,
+    likely_unlikely,
+    proc_macro_hygiene,
+    stmt_expr_attributes
 )]
 
 use wasm_bindgen::prelude::*;
@@ -122,7 +125,6 @@ pub async fn run_blueprint(
     use std::{
         cell::{Cell, RefCell},
         rc::Rc,
-        sync::Arc,
     };
 
     const SYNC_TIME_MS: f64 = 1000.0;
@@ -141,8 +143,8 @@ pub async fn run_blueprint(
         let ref_sig =
             SignalID::intern_with_quality("entity", name, args.power_pole_quality.as_deref())?;
 
-        args.power_pole_name = Some(Arc::clone(&ref_sig.name));
-        args.power_pole_quality = Some(Arc::clone(&ref_sig.quality));
+        args.power_pole_name = Some(RC::clone(&ref_sig.name));
+        args.power_pole_quality = Some(RC::clone(&ref_sig.quality));
     }
 
     let mut frame_data: Option<FrameData> = None;

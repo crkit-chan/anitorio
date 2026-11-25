@@ -8,7 +8,7 @@ use crate::{
 };
 use glam::{DVec2, UVec2, uvec2};
 use image::{AnimationDecoder as _, GenericImageView as _, imageops};
-use std::{pin::Pin, rc::Rc, sync::Arc, time::Duration};
+use std::{pin::Pin, rc::Rc, time::Duration};
 use wasm_bindgen::JsValue;
 
 pub type FrameCallback = dyn for<'a> Fn(
@@ -29,7 +29,7 @@ pub struct FrameData<'a> {
     out_n_frames: usize,
     palette:      Option<ColorPalette>,
     progress_msg: String,
-    prev_img:     Option<(Arc<image::DynamicImage>, u64)>,
+    prev_img:     Option<(RC<image::DynamicImage>, u64)>,
 }
 impl FrameData<'_> {
     /// Returns the dimensions of the output frames.
@@ -121,15 +121,15 @@ impl<'a> FrameData<'a> {
         self
     }
 
-    pub async fn next(&mut self) -> Result<Option<Arc<image::DynamicImage>>, JsError> {
-        let mut img: Option<Arc<image::DynamicImage>> = None;
+    pub async fn next(&mut self) -> Result<Option<RC<image::DynamicImage>>, JsError> {
+        let mut img: Option<RC<image::DynamicImage>> = None;
         let use_js_decode = matches!(self.decoder.state, FrameDecoderState::JsFrames { .. });
 
         if unlikely(matches!(self.args.mode, Mode::Static { .. })) {
             let Some(FrameWithTime(f, timestamp)) = self.decoder.next_frame().await? else {
                 return Ok(None);
             };
-            img = Some(Arc::new(self.convert_frame(f.into_buffer())?));
+            img = Some(RC::new(self.convert_frame(f.into_buffer())?));
             self.curr_n_us = timestamp;
         } else if unlikely(self.out_frame_i == 0) {
             self.fps_timer = now_ms();
@@ -139,7 +139,7 @@ impl<'a> FrameData<'a> {
             if self.out_t_us() <= self.curr_n_us
                 && let Some(ref prev) = self.prev_img
             {
-                img = Some(Arc::clone(&prev.0)); // Emit duplicate frames if necessary
+                img = Some(RC::clone(&prev.0)); // Emit duplicate frames if necessary
                 self.out_frame_i += 1;
             }
 
@@ -161,7 +161,7 @@ impl<'a> FrameData<'a> {
                 self.curr_n_us = timestamp + Duration::from(frame.delay()).as_micros() as u64;
 
                 let img = self.convert_frame(frame.into_buffer())?;
-                self.prev_img = Some((Arc::new(img), self.curr_n_us));
+                self.prev_img = Some((RC::new(img), self.curr_n_us));
                 self.in_frame_i += 1;
             }
 
@@ -469,7 +469,7 @@ pub async fn build_palette(
 
         while let Some(frame) = generator.next().await? {
             let (w, h) = (frame.width() as usize, frame.height() as usize);
-            let mut qimg = match Arc::unwrap_or_clone(frame) {
+            let mut qimg = match RC::unwrap_or_clone(frame) {
                 image::DynamicImage::ImageRgba8(rgba) => {
                     attr.new_image(bytemuck::cast_slice(&rgba.into_raw()), w, h, 0.0)?
                 }

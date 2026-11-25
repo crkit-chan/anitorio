@@ -32,7 +32,7 @@ pub fn generate_timer(
     let mut wires = Wires::new();
 
     {
-        let mut en = BlueprintEntity::new(1, &ENT_CONSTANT_CB, TIMER1_POS).with_direction(DIR_R);
+        let mut en = BlueprintEntity::new(1, CONSTANT_CB, TIMER1_POS).with_direction(DIR_R);
         let sections = LogisticSections {
             sections: boxed_slice![LogisticSection {
                 index:   1,
@@ -43,11 +43,11 @@ pub fn generate_timer(
         ents.push(en.with_custom_tag("incrementer"));
     };
     {
-        let mut en = BlueprintEntity::new(2, &ENT_DEC_CB, TIMER2_POS).with_direction(DIR_R);
-        let condition = decider_cond!(&sig_t, <, i32::try_from(stop)?);
+        let mut en = BlueprintEntity::new(2, DEC_CB, TIMER2_POS).with_direction(DIR_R);
+        let condition = decider_cond!(RC::clone(sig_t), <, i32::try_from(stop)?);
         let decider_conditions = DeciderCombinatorParameters {
             conditions: boxed_slice![condition],
-            outputs:    boxed_slice![DeciderCombinatorOutput::new(sig_t, None)],
+            outputs:    boxed_slice![DeciderCombinatorOutput::new(RC::clone(sig_t), None)],
         };
         if args.detailed_descriptions {
             en.set_player_description("Increments 60 times per second up to the GIF's frame count, then resets to 0. It determines the current frame.");
@@ -56,8 +56,8 @@ pub fn generate_timer(
         ents.push(en.with_custom_tag("base_timer"));
     };
     {
-        let en = BlueprintEntity::new(3, &ENT_ARI_CB, TIMER3_POS).with_direction(DIR_R);
-        let conds = arithmetic_conds!(sig_t - 1 => sig_p);
+        let en = BlueprintEntity::new(3, ARI_CB, TIMER3_POS).with_direction(DIR_R);
+        let conds = arithmetic_conds!(sig_t, -, 1 => sig_p);
         ents.push(en.with_control_behavior(ControlBehavior::arithmetic(conds)));
     };
 
@@ -67,19 +67,19 @@ pub fn generate_timer(
 
     if bits > 0 {
         {
-            let en = BlueprintEntity::new(4, &ENT_ARI_CB, TIMER4_POS).with_direction(DIR_L);
-            let conds = arithmetic_conds!(sig_t % (u32::from(ticks_per_frame) * frames_per_comb).cast_signed() => sig_s);
+            let en = BlueprintEntity::new(4, ARI_CB, TIMER4_POS).with_direction(DIR_L);
+            let conds = arithmetic_conds!(sig_t, %, (u32::from(ticks_per_frame) * frames_per_comb).cast_signed() => sig_s);
             ents.push(en.with_control_behavior(ControlBehavior::arithmetic(conds)));
         };
         {
-            let en = BlueprintEntity::new(5, &ENT_ARI_CB, TIMER5_POS).with_direction(DIR_U);
+            let en = BlueprintEntity::new(5, ARI_CB, TIMER5_POS).with_direction(DIR_U);
             let conds =
-                arithmetic_conds!(sig_s / u32::from(ticks_per_frame).cast_signed() => sig_f);
+                arithmetic_conds!(sig_s, /, u32::from(ticks_per_frame).cast_signed() => sig_f);
             ents.push(en.with_control_behavior(ControlBehavior::arithmetic(conds)));
         };
         {
-            let mut en = BlueprintEntity::new(6, &ENT_ARI_CB, TIMER6_POS).with_direction(DIR_R);
-            let conds = arithmetic_conds!(VIRTUAL_EACH * bits.cast_signed() => VIRTUAL_EACH);
+            let mut en = BlueprintEntity::new(6, ARI_CB, TIMER6_POS).with_direction(DIR_R);
+            let conds = arithmetic_conds!(VIRTUAL_EACH, *, bits.cast_signed() => VIRTUAL_EACH);
             if args.detailed_descriptions {
                 en.set_player_description("Calculates the bit shift for current frame.");
             }

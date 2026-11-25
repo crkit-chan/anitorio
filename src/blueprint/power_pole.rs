@@ -34,7 +34,7 @@ impl PowerPoleOccupied {
         Ok(Self {
             bounding_box,
             coverage: if args.include_power_poles { cov } else { 0.0 },
-            ref_entity: BlueprintEntity::new(0, &ref_sig, start_pos),
+            ref_entity: BlueprintEntity::new_from_signal(0, ref_sig, start_pos),
             requests: HashSet::new(),
             start_pos,
         })

@@ -7,7 +7,6 @@ use glam::{DVec2, IVec2, dvec2};
 use std::{
     cell::RefCell,
     collections::{BTreeMap, HashSet},
-    sync::Arc,
 };
 
 thread_local! {
@@ -166,8 +165,6 @@ pub fn generate_combinators(
     let mut data_cbs = LazyCombinators {
         base_pos: start_pos,
         cb_midpoint,
-        out_ent_n: None,
-        curr_pos: DVec2::ZERO,
         direction: if use_const_cbs {
             constants::DIR_D
         } else if use_compact_layout {
@@ -176,7 +173,6 @@ pub fn generate_combinators(
             constants::DIR_R
         },
         first_ent_n: (curr_ent_n == base_ent_n).then_some(curr_ent_n),
-        grid_pos: IVec2::ZERO,
         // Calculate the offsets to test for collisions. In Factorio, all collision boxes are rectangular.
         hitbox_offsets: {
             let size = cb_midpoint.abs() * 2.0;
@@ -187,16 +183,11 @@ pub fn generate_combinators(
             deltas.collect::<Box<_>>()
         },
         in_ent_n: curr_ent_n,
-        offset: DVec2::ZERO,
         max_cols_per_grp,
         prev_ents_n: vec![None; max_cols_per_grp as usize].into_boxed_slice(),
         prev_prev_ents_n: vec![None; max_cols_per_grp as usize].into_boxed_slice(),
-        target_signal_ref: SignalID::intern(
-            "entity",
-            if use_const_cbs { CONSTANT_CB } else { DEC_CB },
-        )?,
-        tick_i: 0_usize,
-        wires: Wires::new(),
+        target_name: (if use_const_cbs { CONSTANT_CB } else { DEC_CB }).to_owned(),
+        ..Default::default()
     };
 
     if let Some(palette_colors) = palette_colors {
@@ -206,8 +197,8 @@ pub fn generate_combinators(
         }
 
         let mut best_first_connection_cand: Option<EntityCand> = None;
-        let prev_signal_ref = Arc::clone(&data_cbs.target_signal_ref);
-        data_cbs.target_signal_ref = Arc::clone(&ENT_DEC_CB);
+        let prev_target_name = data_cbs.target_name.clone();
+        DEC_CB.clone_into(&mut data_cbs.target_name);
 
         for (i, &[r, g, b, ..]) in palette_colors.iter().enumerate().skip(1) {
             in_ent_n.get_or_insert(curr_ent_n); // The input timing wire should connect to the first palette combinator
@@ -251,7 +242,7 @@ pub fn generate_combinators(
         data_cbs.reset();
         data_cbs.grid_pos.x = 0;
         data_cbs.grid_pos.y = 0;
-        data_cbs.target_signal_ref = prev_signal_ref;
+        data_cbs.target_name = prev_target_name;
 
         if let Some(cand) = best_first_connection_cand {
             palette_in_ent_n = Some(cand.ent_n);
@@ -394,7 +385,7 @@ pub fn generate_combinators(
     // Note: signal compression is auto-disabled if generating a static image
     if use_delta_comp {
         {
-            let mut en = BlueprintEntity::new(curr_ent_n, &ENT_DEC_CB, get_pos("delay"));
+            let mut en = BlueprintEntity::new(curr_ent_n, DEC_CB, get_pos("delay"));
             en = en.with_custom_tag("delay comb").with_direction(get_dir("delay"));
             en.set_control_behavior(ControlBehavior::decider(DeciderCombinatorParameters {
                 conditions: boxed_slice![decider_cond!(&VIRTUAL_EACH, !=, 0)],
@@ -413,12 +404,12 @@ pub fn generate_combinators(
             curr_ent_n += 1;
         };
         {
-            let mut en = BlueprintEntity::new(curr_ent_n, &ENT_DEC_CB, get_pos("memory"));
+            let mut en = BlueprintEntity::new(curr_ent_n, DEC_CB, get_pos("memory"));
             en = en.with_direction(get_dir("memory")).with_custom_tag("memory comb");
             en.set_control_behavior(ControlBehavior::decider(DeciderCombinatorParameters {
                 conditions: boxed_slice![
                     decider_cond!(&VIRTUAL_EACH, !=, 0).with_first_signal_networks("g"),
-                    decider_cond!(&args.timing_signals["p"], !=, 0)
+                    decider_cond!(RC::clone(&args.timing_signals["p"]), !=, 0)
                         .with_first_signal_networks("r")
                         .with_compare_type("&"),
                 ],
@@ -443,7 +434,7 @@ pub fn generate_combinators(
 
     if bits > 0 {
         {
-            let mut en = BlueprintEntity::new(curr_ent_n, &ENT_ARI_CB, get_pos(">>"));
+            let mut en = BlueprintEntity::new(curr_ent_n, ARI_CB, get_pos(">>"));
             en = en.with_custom_tag(">> comb").with_direction(get_dir(">>"));
             if args.detailed_descriptions {
                 en.set_player_description(
@@ -452,13 +443,13 @@ pub fn generate_combinators(
             }
             other_ents.push(en.with_control_behavior(ControlBehavior::arithmetic(
                 ArithmeticCombinatorParameters {
-                    first_signal:           Some(VIRTUAL_EACH.clone()),
+                    first_signal:           Some((&VIRTUAL_EACH).into()),
                     first_signal_networks:  "g".into(),
                     second_signal:          Some(args.timing_signals["f"].clone()),
                     second_signal_networks: "r".into(),
                     second_constant:        0,
                     operation:              ArithmeticCombinatorParameterOperation::Shr,
-                    output_signal:          Some(VIRTUAL_EACH.clone()),
+                    output_signal:          Some((&VIRTUAL_EACH).into()),
                 },
             )));
 
@@ -467,13 +458,13 @@ pub fn generate_combinators(
             curr_ent_n += 1;
         };
         {
-            let mut en = BlueprintEntity::new(curr_ent_n, &ENT_ARI_CB, get_pos("AND"));
+            let mut en = BlueprintEntity::new(curr_ent_n, ARI_CB, get_pos("AND"));
             en = en.with_custom_tag("AND comb").with_direction(get_dir("AND"));
             if args.detailed_descriptions {
                 en.set_player_description("Filters out the bits that are not relevant for the current frame, after bit-shifting. (The value of each signal encodes multiple frames)");
             }
             other_ents.push(en.with_control_behavior(ControlBehavior::arithmetic(
-                arithmetic_conds!(VIRTUAL_EACH AND ((1_u32 << bits) - 1).cast_signed() => VIRTUAL_EACH),
+                arithmetic_conds!(VIRTUAL_EACH, AND, ((1_u32 << bits) - 1).cast_signed() => VIRTUAL_EACH),
             )));
 
             ent_to_palette_ent_n = Some(curr_ent_n);
@@ -486,10 +477,10 @@ pub fn generate_combinators(
         };
 
         if palette_colors.is_none() && matches!(bits, 1 | 4) {
-            let mut en = BlueprintEntity::new(curr_ent_n, &ENT_ARI_CB, get_pos("*"));
+            let mut en = BlueprintEntity::new(curr_ent_n, ARI_CB, get_pos("*"));
             en = en.with_custom_tag("* comb").with_direction(get_dir("*"));
             other_ents.push(en.with_control_behavior(ControlBehavior::arithmetic(
-                arithmetic_conds!(VIRTUAL_EACH * if bits == 1 { 255 } else { 17 } => VIRTUAL_EACH),
+                arithmetic_conds!(VIRTUAL_EACH, *, if bits == 1 { 255 } else { 17 } => VIRTUAL_EACH),
             )));
             wires.push(mkwires!(G other_ents; OUT "AND comb" => IN "* comb"));
             curr_ent_n += 1;
@@ -518,25 +509,26 @@ pub fn generate_combinators(
     })
 }
 
+#[derive(Default)]
 pub struct LazyCombinators {
-    base_pos:          DVec2,
-    cb_midpoint:       DVec2,
-    curr_pos:          DVec2,
-    direction:         u8,
+    base_pos:         DVec2,
+    cb_midpoint:      DVec2,
+    curr_pos:         DVec2,
+    direction:        u8,
     /// Forces the first entity number for e.g. when ``LazyCombinators.next()`` returns
     /// the first entity a wire should connect to
-    first_ent_n:       Option<u32>,
-    grid_pos:          IVec2,
-    hitbox_offsets:    Box<[DVec2]>,
-    max_cols_per_grp:  u32,
-    offset:            DVec2,
-    out_ent_n:         Option<u32>,
-    prev_ents_n:       Box<[Option<u32>]>,
-    prev_prev_ents_n:  Box<[Option<u32>]>,
-    target_signal_ref: Arc<SignalID>,
-    tick_i:            usize,
-    in_ent_n:          u32,
-    pub wires:         Wires,
+    first_ent_n:      Option<u32>,
+    grid_pos:         IVec2,
+    hitbox_offsets:   Box<[DVec2]>,
+    max_cols_per_grp: u32,
+    offset:           DVec2,
+    out_ent_n:        Option<u32>,
+    prev_ents_n:      Box<[Option<u32>]>,
+    prev_prev_ents_n: Box<[Option<u32>]>,
+    target_name:      String,
+    tick_i:           usize,
+    in_ent_n:         u32,
+    pub wires:        Wires,
 }
 impl LazyCombinators {
     #[inline]
@@ -618,7 +610,7 @@ impl LazyCombinators {
         self.prev_prev_ents_n[x_i] = self.prev_ents_n[x_i];
         self.tick_i += 1;
 
-        let en = BlueprintEntity::new(curr_ent_n, &self.target_signal_ref, self.curr_pos)
+        let en = BlueprintEntity::new(curr_ent_n, &self.target_name, self.curr_pos)
             .with_direction(self.direction);
 
         self.first_ent_n.take(); // Discard ``first_ent_n`

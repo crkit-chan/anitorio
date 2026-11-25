@@ -17,7 +17,6 @@ use crate::{
 };
 use glam::DVec2;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use tsify::Tsify;
 use wasm_bindgen::prelude::*;
 
@@ -48,7 +47,7 @@ pub struct ArithmeticCombinatorParameters {
     /// First signal to use in an operation. If not specified, the second argument will be the
     /// value of ``first_constant``.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub first_signal:           Option<Arc<SignalID>>,
+    pub first_signal:           Option<RC<SignalID>>,
     /// Which circuit networks (red/green) to read ``first_signal`` from. Defaults to both.
     #[serde(default, skip_serializing_if = "is_default")]
     pub first_signal_networks:  CircuitNetworkSelection,
@@ -58,7 +57,7 @@ pub struct ArithmeticCombinatorParameters {
     /// Second signal to use in an operation. If not specified, the second argument will be the
     /// value of ``second_constant``.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub second_signal:          Option<Arc<SignalID>>,
+    pub second_signal:          Option<RC<SignalID>>,
     /// Which circuit networks (red/green) to read ``second_signal`` from. Defaults to both.
     #[serde(default, skip_serializing_if = "is_default")]
     pub second_signal_networks: CircuitNetworkSelection,
@@ -68,7 +67,7 @@ pub struct ArithmeticCombinatorParameters {
     pub second_constant:        i32,
     /// Specifies the signal to output.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output_signal:          Option<Arc<SignalID>>,
+    pub output_signal:          Option<RC<SignalID>>,
 }
 impl ArithmeticCombinatorParameters {
     pub const fn swap_networks(&mut self) {
@@ -194,7 +193,7 @@ pub struct BlueprintEntity {
     /// The entity's unique identifier in the blueprint.
     pub entity_number: u32,
     /// Reference to the prototype name + quality of the Entity
-    signal_ref:        Arc<SignalID>,
+    signal_ref:        RC<SignalID>,
     /// The position of the entity.
     #[serde(with = "dvec2_xy")]
     pub position:      DVec2,
@@ -202,11 +201,28 @@ pub struct BlueprintEntity {
 }
 impl BlueprintEntity {
     /// Create a new entity with default None values for optional fields
-    #[must_use]
     #[inline]
-    pub fn new(entity_number: u32, signal_ref: &Arc<SignalID>, position: DVec2) -> Self {
+    #[must_use]
+    #[expect(
+        clippy::unwrap_used,
+        reason = "Convenience function that should panic!"
+    )]
+    pub fn new(entity_number: u32, name: &str, position: DVec2) -> Self {
         let properties = boxed_slice![];
-        let signal_ref = Arc::clone(signal_ref);
+        let signal_ref = SignalID::intern("entity", name).unwrap();
+        Self { entity_number, signal_ref, position, properties }
+    }
+
+    /// Create a new entity with default None values for optional fields
+    #[inline]
+    #[must_use]
+    pub fn new_from_signal(
+        entity_number: u32,
+        signal: impl Into<RC<SignalID>>,
+        position: DVec2,
+    ) -> Self {
+        let properties = boxed_slice![];
+        let signal_ref = signal.into();
         Self { entity_number, signal_ref, position, properties }
     }
 
@@ -226,8 +242,8 @@ impl BlueprintEntity {
 
     #[must_use]
     #[inline]
-    pub fn name(&self) -> Arc<str> {
-        Arc::clone(&self.signal_ref.name)
+    pub fn name(&self) -> RC<str> {
+        RC::clone(&self.signal_ref.name)
     }
 }
 impl Serialize for BlueprintEntity {
@@ -337,7 +353,7 @@ pub struct BlueprintInner {
 pub struct BlueprintLogisticFilter {
     pub index:      LogisticFilterIndex,
     #[serde(flatten)]
-    signal_ref:     Arc<SignalID>,
+    signal_ref:     RC<SignalID>,
     /// The comparator for quality. nil if any quality.
     #[serde(default)]
     pub comparator: Option<ComparatorString>,
@@ -348,13 +364,13 @@ impl BlueprintLogisticFilter {
     #[inline]
     pub fn new<C: TryInto<ComparatorString>>(
         index: LogisticFilterIndex,
-        signal_ref: &Arc<SignalID>,
+        signal_ref: &RC<SignalID>,
         comparator: C,
         count: i32,
     ) -> Result<Self, C::Error> {
         Ok(Self {
             index,
-            signal_ref: Arc::clone(signal_ref),
+            signal_ref: RC::clone(signal_ref),
             comparator: Some(comparator.try_into()?),
             count,
         })
@@ -477,13 +493,13 @@ pub enum ControlBehavior {
         #[serde(default, skip_serializing_if = "is_default")]
         use_colors:   bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        red_signal:   Option<Arc<SignalID>>,
+        red_signal:   Option<RC<SignalID>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        green_signal: Option<Arc<SignalID>>,
+        green_signal: Option<RC<SignalID>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        blue_signal:  Option<Arc<SignalID>>,
+        blue_signal:  Option<RC<SignalID>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        rgb_signal:   Option<Arc<SignalID>>,
+        rgb_signal:   Option<RC<SignalID>>,
         /// Defaults to ``defines.control_behavior.lamp.color_mapping``.
         color_mode:   i8,
     },
@@ -625,7 +641,7 @@ impl From<&str> for CompareTypeString {
 pub struct DeciderCombinatorCondition {
     /// Defaults to blank
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub first_signal:          Option<Arc<SignalID>>,
+    pub first_signal:          Option<RC<SignalID>>,
     /// Which circuit networks (red/green) to read ``first_signal`` from. Defaults to both.
     #[serde(default, skip_serializing_if = "is_default")]
     pub first_signal_networks: CircuitNetworkSelection,
@@ -644,12 +660,12 @@ pub struct DeciderCombinatorCondition {
 }
 impl DeciderCombinatorCondition {
     pub fn new(
-        first_signal: &Arc<SignalID>,
+        first_signal: impl Into<RC<SignalID>>,
         constant: i32,
         comparator: impl Into<ComparatorString>,
     ) -> Self {
         Self {
-            first_signal:          Some(Arc::clone(first_signal)),
+            first_signal:          Some(first_signal.into()),
             constant:              Some(constant),
             comparator:            comparator.into(),
             compare_type:          const { CompareTypeString::default() },
@@ -681,7 +697,7 @@ impl DeciderCombinatorCondition {
 #[derive(Tsify, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DeciderCombinatorOutput {
     /// Specifies a signal to output.
-    pub signal:                Arc<SignalID>,
+    pub signal:                RC<SignalID>,
     /// Defaults to true. When false, will output the value from constant for the given
     /// ``output_signal``.
     #[serde(
@@ -701,11 +717,11 @@ pub struct DeciderCombinatorOutput {
     pub networks:              CircuitNetworkSelection,
 }
 impl DeciderCombinatorOutput {
-    pub fn new(signal: &Arc<SignalID>, constant: Option<i32>) -> Self {
+    pub fn new(signal: impl Into<RC<SignalID>>, constant: Option<i32>) -> Self {
         Self {
             copy_count_from_input: constant.is_none(),
             constant:              constant.unwrap_or(Self::default_constant()),
-            signal:                Arc::clone(signal),
+            signal:                signal.into(),
             networks:              CircuitNetworkSelection::BOTH,
         }
     }
@@ -758,7 +774,7 @@ impl DeciderCombinatorParameters {
 pub struct DeciderCombinatorCustomParameters {
     pub conditions:  Box<[DeciderCombinatorCondition]>,
     pub indices:     Box<[(usize, i32)]>,
-    pub signal_list: Arc<[RawJsonString]>,
+    pub signal_list: RC<[RawJsonString]>,
 }
 impl PartialEq for DeciderCombinatorCustomParameters {
     fn eq(&self, other: &Self) -> bool {
@@ -820,7 +836,7 @@ struct IndexedDeciderCombinatorOutput<'a> {
 
 #[derive(Tsify, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Icon {
-    pub signal: Arc<SignalID>,
+    pub signal: RC<SignalID>,
     pub index:  u32,
 }
 
@@ -841,20 +857,20 @@ pub struct LogisticSections {
 #[derive(Tsify, Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SignalID {
     /// The type of the signal. If the type is "item", this will be nil when reading.
-    pub type_:   Arc<str>,
+    pub type_:   RC<str>,
     /// The prototype name of the signal's quality. Defaults to normal.
-    pub quality: Arc<str>,
+    pub quality: RC<str>,
     /// Name of the prototype.
-    pub name:    Arc<str>,
+    pub name:    RC<str>,
 }
 impl SignalID {
     #[inline]
     #[must_use]
-    pub const fn new(type_: Arc<str>, name: Arc<str>, quality: Arc<str>) -> Self {
+    pub const fn new(type_: RC<str>, name: RC<str>, quality: RC<str>) -> Self {
         Self { type_, quality, name }
     }
 
-    /// Creates a new ``SignalID`` without any references to static Arc data.
+    /// Creates a new ``SignalID`` without any references to static ``RC`` data.
     #[inline]
     #[must_use]
     pub fn raw(type_: &str, name: &str, quality: &str) -> Self {
@@ -866,8 +882,7 @@ impl SignalID {
     }
 
     #[inline]
-    pub fn intern(type_: &str, name: &str) -> Result<Arc<Self>, JsError> {
-        log!("INTERN, {type_}, {name}");
+    pub fn intern(type_: &str, name: &str) -> Result<RC<Self>, JsError> {
         Self::new(type_.into(), name.into(), DEFAULT_QUALITY.into()).interned()
     }
 
@@ -876,31 +891,31 @@ impl SignalID {
         type_: &str,
         name: &str,
         quality: Option<&str>,
-    ) -> Result<Arc<Self>, JsError> {
+    ) -> Result<RC<Self>, JsError> {
         let quality = quality.unwrap_or(DEFAULT_QUALITY);
         Self::new(type_.into(), name.into(), quality.into()).interned()
     }
 
-    /// Creates data pointed to the static ``Arc`` stored in signals on ``PrototypeData``.
+    /// Creates data pointed to the static ``RC`` stored in signals on ``PrototypeData``.
     #[inline]
-    pub fn interned(self) -> Result<Arc<Self>, JsError> {
+    pub fn interned(self) -> Result<RC<Self>, JsError> {
         with_prototype_data(|data| self.interned_on_prototype_data(data))
     }
 
-    /// Creates data pointed to the static ``Arc`` stored in signals on ``PrototypeData``.
+    /// Creates data pointed to the static ``RC`` stored in signals on ``PrototypeData``.
     #[inline]
-    pub fn with_quality(self, quality: Option<&str>) -> Result<Arc<Self>, JsError> {
+    pub fn with_quality(self, quality: Option<&str>) -> Result<RC<Self>, JsError> {
         let quality = quality.unwrap_or(DEFAULT_QUALITY);
         let sig = Self { quality: quality.into(), ..self };
         with_prototype_data(|data| sig.interned_on_prototype_data(data))
     }
 
-    /// Creates data pointed to the static ``Arc`` stored in signals on ``PrototypeData``.
+    /// Creates data pointed to the static ``RC`` stored in signals on ``PrototypeData``.
     #[inline]
-    pub fn interned_on_prototype_data(self, data: &PrototypeData) -> Result<Arc<Self>, JsError> {
+    pub fn interned_on_prototype_data(self, data: &PrototypeData) -> Result<RC<Self>, JsError> {
         let sig = data.signals.get(&self);
         let sig = sig.ok_or_else(|| js_err!("Could not find signal '{self:?}'"))?;
-        Ok(Arc::clone(sig))
+        Ok(RC::clone(sig))
     }
 
     #[inline]
@@ -948,6 +963,11 @@ impl Serialize for SignalID {
 impl<'de> Deserialize<'de> for SignalID {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         Self::deserialize_fields(deserializer, Some(DEFAULT_SIGNAL_TYPE))
+    }
+}
+impl From<std::rc::Rc<Self>> for SignalID {
+    fn from(val: std::rc::Rc<Self>) -> Self {
+        std::rc::Rc::unwrap_or_clone(val)
     }
 }
 

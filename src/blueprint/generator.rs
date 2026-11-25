@@ -17,7 +17,7 @@ use crate::{
 };
 use glam::{DVec2, UVec2, dvec2, uvec2};
 use image::GenericImageView as _;
-use std::{io, sync::Arc};
+use std::io;
 
 /// How many entities to encode in one go. Encoding more entities at once is faster, but uses more
 /// memory.
@@ -27,7 +27,7 @@ const ENCODE_CHUNK_SIZE: usize = 100;
 /// we can batch more wires together for better speed.
 const WIRE_ENCODE_CHUNK_SIZE: usize = 5000;
 
-type SignalDataResult = (Box<[Arc<SignalID>]>, Arc<[RawJsonString]>);
+type SignalDataResult = (Box<[RC<SignalID>]>, RC<[RawJsonString]>);
 
 /// Precomputed transformation for flipping entities.
 #[derive(Clone, Copy)]
@@ -90,20 +90,20 @@ pub struct BlueprintGenerator<'a> {
     occupied:           PowerPoleOccupied,
     position_transform: PositionTransform,
     /// List of unique signals to use for the blueprint.
-    signals:            Box<[Arc<SignalID>]>,
+    signals:            Box<[RC<SignalID>]>,
     /// Stores the JSON representation of each signal for efficient JSON reproduction
-    signals_json:       Arc<[RawJsonString]>,
+    signals_json:       RC<[RawJsonString]>,
     state:              BlueprintState,
 }
 
 /// Data only used when generating from an image or a video.
 struct FrameInfo<'a> {
-    curr_frame:       Arc<image::DynamicImage>,
+    curr_frame:       RC<image::DynamicImage>,
     frame_data:       FrameData<'a>,
     frames_per_cb:    u32,
     group_data_combs: Box<[LazyCombinators]>,
     n_buf_frames:     u32,
-    next_frame:       Option<Arc<image::DynamicImage>>,
+    next_frame:       Option<RC<image::DynamicImage>>,
     patch_states:     Box<[GroupPatchState]>,
     ticks_per_frame:  u8,
     use_delta_comp:   bool,
@@ -126,7 +126,7 @@ struct EntityData {
 }
 struct GroupPatchState {
     chunk_i:   u32, // which *chunk* we’re patching (not frame)
-    frame_buf: Vec<image::SubImage<Arc<image::DynamicImage>>>,
+    frame_buf: Vec<image::SubImage<RC<image::DynamicImage>>>,
     sig_buf:   Vec<Box<[i32]>>,
 }
 
@@ -286,7 +286,7 @@ impl<'a> BlueprintGenerator<'a> {
             serde_json::value::RawValue::from_string(s)
                 .map_js_err("Could not convert the string into a serde_json::value::RawValue")
         }))
-        .collect::<Result<Arc<_>, _>>()?;
+        .collect::<Result<RC<_>, _>>()?;
 
         Ok((signals, signals_str))
     }
@@ -527,7 +527,7 @@ impl<'a> BlueprintGenerator<'a> {
                 signals,
                 uvec2(grp_width, self.dim.y),
                 matches!(self.args.image_args.mode, Mode::Static { combs: false, .. })
-                    .then(|| Arc::clone(curr_frame)), // Pass image data to lamp generation
+                    .then(|| RC::clone(curr_frame)), // Pass image data to lamp generation
                 occupied,
                 ent_data.next_ent_n,
                 dvec2(f64::from(grp_left), 0.0),
@@ -631,7 +631,7 @@ impl<'a> BlueprintGenerator<'a> {
         let use_delta_comp = info.use_delta_comp;
         let ticks_per_grp = u32::from(ticks_per_frame) * frames_per_cb;
         let mode = self.args.image_args.mode;
-        let sig_p = Arc::clone(&self.args.timing_signals["p"]);
+        let sig_p = RC::clone(&self.args.timing_signals["p"]);
         let mut output_data: Vec<BlueprintEntity> = Vec::new();
 
         let mk_control_behavior = |range: UVec2, indices: Box<[(usize, i32)]>| {
@@ -647,12 +647,13 @@ impl<'a> BlueprintGenerator<'a> {
                 let sections = LogisticSections { sections };
                 ControlBehavior::ConstantCombinator { sections }
             } else {
-                let signal_list = Arc::clone(&self.signals_json);
+                let signal_list = RC::clone(&self.signals_json);
                 let conditions = match range.y - range.x {
-                    1 => boxed_slice![decider_cond!(&sig_p, ==, range.x.cast_signed())],
+                    1 => boxed_slice![decider_cond!(RC::clone(&sig_p), ==, range.x.cast_signed())],
                     _ => boxed_slice![
-                        decider_cond!(&sig_p, >=, range.x.cast_signed()),
-                        decider_cond!(&sig_p, <, range.y.cast_signed()).with_compare_type("&"),
+                        decider_cond!(RC::clone(&sig_p), >=, range.x.cast_signed()),
+                        decider_cond!(RC::clone(&sig_p), <, range.y.cast_signed())
+                            .with_compare_type("&"),
                     ],
                 };
                 let decider_conditions =
@@ -695,7 +696,7 @@ impl<'a> BlueprintGenerator<'a> {
                     target_outputs_len = (w * h) as usize;
 
                     if has_palette || gray_bits > 0 {
-                        state.frame_buf.push(image::SubImage::new(Arc::clone(frame), x, y, w, h));
+                        state.frame_buf.push(image::SubImage::new(RC::clone(frame), x, y, w, h));
                         if state.frame_buf.len() < frames_per_cb as usize && !is_last_frame {
                             continue; // wait until we have a full chunk for this group
                         }

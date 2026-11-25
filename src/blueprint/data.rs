@@ -1,23 +1,29 @@
 use super::prelude::*;
 use crate::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::{cell::RefCell, collections::HashSet, sync::Arc};
+use std::{cell::RefCell, collections::HashSet};
 
 type SignalsHasher = std::hash::BuildHasherDefault<std::collections::hash_map::DefaultHasher>;
 
 thread_local! {
-    static PROTOTYPE_DATA: RefCell<Option<PrototypeData>> = const { RefCell::new(None) };
+    static PROTOTYPE_DATA: RefCell<PrototypeData> = const {
+        RefCell::new(PrototypeData {
+            blacklist_signals: Vec::new(),
+            electric_poles:    Vec::new(),
+            signals:           indexmap::IndexSet::with_hasher(SignalsHasher::new()),
+        })
+    };
 }
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ElectricPoleSupplyAreaDistancePrototypeData {
-    pub quality:              Arc<str>,
+    pub quality:              RC<str>,
     pub supply_area_distance: f64,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ElectricPolePrototypeData {
-    pub name:                  Arc<str>,
+    pub name:                  RC<str>,
     pub supply_area_distances: Box<[ElectricPoleSupplyAreaDistancePrototypeData]>,
     pub tile_width:            i32,
     pub tile_height:           i32,
@@ -25,9 +31,9 @@ pub struct ElectricPolePrototypeData {
 
 #[derive(Clone, Default)]
 pub struct PrototypeData {
-    pub blacklist_signals: Vec<Arc<SignalID>>,
+    pub blacklist_signals: Vec<RC<SignalID>>,
     pub electric_poles:    Vec<ElectricPolePrototypeData>,
-    pub signals:           indexmap::IndexSet<Arc<SignalID>, SignalsHasher>,
+    pub signals:           indexmap::IndexSet<RC<SignalID>, SignalsHasher>,
 }
 
 const DEFAULT_SIGNALS: &[(&str, &[&str])] = &[
@@ -45,85 +51,90 @@ const DEFAULT_SIGNALS: &[(&str, &[&str])] = &[
 ///
 /// A new vector of signal JSON objects with added quality attributes.
 pub fn load_data<R: std::io::Read>(data_json_reader: R) -> Result<(), JsError> {
-    #[derive(Deserialize)]
-    struct PrototypeDataRepr {
-        electric_poles: Vec<ElectricPolePrototypeData>,
-        #[serde(default)]
-        qualities:      Vec<String>,
-        signals:        indexmap::IndexSet<SignalIDRepr, SignalsHasher>,
-    }
+    #[crate::perf_timed("Populate prototype data")]
+    {
+        #[derive(Deserialize)]
+        struct PrototypeDataRepr {
+            electric_poles: Vec<ElectricPolePrototypeData>,
+            #[serde(default)]
+            qualities:      Vec<String>,
+            signals:        indexmap::IndexSet<SignalIDRepr, SignalsHasher>,
+        }
 
-    #[derive(Deserialize, Clone, Hash, PartialEq, Eq)]
-    struct SignalIDRepr {
-        #[serde(rename = "type")]
-        type_: String,
-        name:  String,
-    }
+        #[derive(Deserialize, Clone, Hash, PartialEq, Eq)]
+        struct SignalIDRepr {
+            #[serde(rename = "type")]
+            type_: String,
+            name:  String,
+        }
 
-    let mut data_repr: PrototypeDataRepr = serde_json::from_reader(data_json_reader)?;
-    let mut blacklist_signals = Vec::<SignalIDRepr>::new();
+        let mut data_repr: PrototypeDataRepr = serde_json::from_reader(data_json_reader)?;
 
-    log!("HEREa");
+        PROTOTYPE_DATA.with_borrow_mut(|data| {
+            data.blacklist_signals.clear();
+            data.signals.clear();
 
-    // #[crate::perf_timed("Populate prototype data")]
-    let qualities: Box<_> = data_repr.qualities.into_iter().map(Arc::from).collect();
-    let mut signal_names = HashSet::<Arc<str>>::new();
-    let mut signal_types = HashSet::<Arc<str>>::new();
-    let mut signals = indexmap::IndexSet::with_hasher(SignalsHasher::new());
+            let mut blacklist_signals = Vec::<SignalIDRepr>::new();
 
-    for &(type_, names) in DEFAULT_SIGNALS {
-        for &name in names {
-            let sig_repr = SignalIDRepr { type_: type_.to_owned(), name: name.to_owned() };
-            if data_repr.signals.insert(sig_repr.clone()) {
-                blacklist_signals.push(sig_repr);
+            let signal_qualities: indexmap::IndexSet<_> =
+                data_repr.qualities.into_iter().map(RC::from).collect();
+            let mut signal_names = HashSet::<RC<str>>::new();
+            let mut signal_types = HashSet::<RC<str>>::new();
+
+            for (type_, name) in (DEFAULT_SIGNALS.iter())
+                .flat_map(|&(type_, names)| names.iter().map(move |&name| (type_, name)))
+                .chain(data_repr.electric_poles.iter().map(|pole| ("entity", pole.name.as_ref())))
+            {
+                let sig_repr = SignalIDRepr { type_: type_.to_owned(), name: name.to_owned() };
+                if data_repr.signals.insert(sig_repr.clone()) {
+                    blacklist_signals.push(sig_repr);
+                }
             }
-        }
+
+            for sig in data_repr.signals {
+                let type_ = signal_types.get_or_insert(sig.type_.into());
+                let name = signal_names.get_or_insert(sig.name.into());
+
+                for quality in &signal_qualities {
+                    data.signals.insert(RC::from(SignalID {
+                        type_:   RC::clone(type_),
+                        name:    RC::clone(name),
+                        quality: RC::clone(quality),
+                    }));
+                }
+            }
+
+            data.blacklist_signals = (blacklist_signals.into_iter().map(|sig| {
+                let ref_sig =
+                    SignalID::new(sig.type_.into(), sig.name.into(), DEFAULT_QUALITY.into());
+                let sig = (data.signals.get(&RC::from(ref_sig.clone())))
+                    .ok_or_else(|| js_err!("Could not find blacklisted signal '{ref_sig:?}'"))?;
+                Ok::<_, JsError>(RC::clone(sig))
+            }))
+            .collect::<Result<_, JsError>>()?;
+
+            data.electric_poles = (data_repr.electric_poles.into_iter().map(|mut pole| {
+                pole.name = RC::clone(
+                    #[expect(clippy::unwrap_used, reason = "Garunteed to be populated")]
+                    signal_names.get(&pole.name).unwrap(),
+                );
+
+                for d in &mut pole.supply_area_distances {
+                    d.quality =
+                        RC::clone(signal_qualities.get(&d.quality).ok_or_else(|| {
+                            js_err!("Could not find the quality '{}'", d.quality)
+                        })?);
+                }
+                Ok(pole)
+            }))
+            .collect::<Result<_, JsError>>()?;
+
+            Ok::<_, JsError>(())
+        })
     }
-
-    for sig in data_repr.signals {
-        #[allow(
-            clippy::allow_attributes,
-            clippy::option_if_let_else,
-            reason = "Clippy bug"
-        )]
-        let (type_, name) = (Arc::from(sig.type_), Arc::from(sig.name));
-
-        signal_types.insert(Arc::clone(&type_));
-        signal_names.insert(Arc::clone(&name));
-
-        let type_ = signal_types.get(&type_).unwrap();
-        let name = signal_names.get(&name).unwrap();
-
-        for quality in &qualities {
-            signals.insert(Arc::from(SignalID {
-                type_:   Arc::clone(type_),
-                name:    Arc::clone(name),
-                quality: Arc::clone(quality),
-            }));
-        }
-    }
-
-    let blacklist_signals = (blacklist_signals.into_iter().map(|sig| {
-        let ref_sig = SignalID::new(sig.type_.into(), sig.name.into(), DEFAULT_QUALITY.into());
-        let sig = (signals.get(&Arc::from(ref_sig.clone())))
-            .ok_or_else(|| js_err!("Could not find blacklisted signal '{ref_sig:?}'"))?;
-        Ok(Arc::clone(sig))
-    }))
-    .collect::<Result<Vec<_>, JsError>>()?;
-
-    log!("HERE");
-
-    PROTOTYPE_DATA.replace(Some(PrototypeData {
-        blacklist_signals,
-        electric_poles: data_repr.electric_poles,
-        signals,
-    }));
-
-    Ok(())
 }
 
-#[expect(clippy::expect_used, reason = "Convenience API")]
 #[inline]
 pub fn with_prototype_data<R>(f: impl FnOnce(&PrototypeData) -> R) -> R {
-    PROTOTYPE_DATA.with_borrow(|data| f(data.as_ref().expect("Prototypes not initialized yet!")))
+    PROTOTYPE_DATA.with_borrow(f)
 }

@@ -1,9 +1,14 @@
 use crate::{blueprint::models::SignalID, prelude::*};
 use glam::UVec2;
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, sync::Arc};
+use std::collections::BTreeMap;
 use tsify::Tsify;
 use wasm_bindgen::prelude::*;
+
+#[cfg(feature = "arc_blueprint_generator")]
+pub type RC<T> = std::rc::Rc<T>;
+#[cfg(not(feature = "arc_blueprint_generator"))]
+pub type RC<T> = std::sync::Arc<T>;
 
 #[derive(Tsify, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -23,14 +28,14 @@ pub struct BlueprintArgs {
     pub max_group_size:          Option<u8>,
     pub name:                    String,
     pub output_format:           OutputFormat,
-    pub power_pole_name:         Option<Arc<str>>,
-    pub power_pole_quality:      Option<Arc<str>>,
+    pub power_pole_name:         Option<RC<str>>,
+    pub power_pole_quality:      Option<RC<str>>,
     pub prefer_green_wires:      bool,
     pub prefer_horizontal_wires: bool,
     pub signal_compression:      Option<SignalCompression>,
     pub signal_sorting:          SignalSorting,
     pub streaming_download:      bool,
-    pub timing_signals:          BTreeMap<String, Arc<SignalID>>,
+    pub timing_signals:          BTreeMap<String, RC<SignalID>>,
     pub use_threads:             bool,
 }
 

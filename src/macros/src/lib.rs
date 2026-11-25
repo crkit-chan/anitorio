@@ -39,11 +39,11 @@ pub fn perf_timed(attr: TokenStream, item: TokenStream) -> TokenStream {
     quote! {{
         #[cfg(feature = "perf_timing")]
         {
-            // let #start = crate::perf_now();
+            let #start = crate::perf_now();
             let #result = #expr;
-            // let #elapsed = crate::perf_now() - #start;
+            let #elapsed = crate::perf_now() - #start;
 
-            // crate::log!("{}: {:.3}ms", #label, #elapsed);
+            crate::log!("{}: {:.3}ms", #label, #elapsed);
 
             #result
         }
