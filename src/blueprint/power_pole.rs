@@ -1,34 +1,33 @@
 use super::prelude::*;
 use crate::prelude::*;
-use alloc::collections::{BTreeMap, BTreeSet};
 use glam::{DVec2, IVec2, dvec2, ivec2};
+use std::collections::{HashMap, HashSet};
 
 /// Tracks cells occupied by power poles.
 pub struct PowerPoleOccupied {
     bounding_box: DVec2,
     coverage:     f64,
     ref_entity:   BlueprintEntity,
-    requests:     BTreeSet<(i32, i32)>,
+    requests:     HashSet<(i32, i32)>,
     start_pos:    DVec2,
 }
 impl PowerPoleOccupied {
     pub fn new(mut start_pos: DVec2, args: &BlueprintArgs) -> Result<Self, JsError> {
         let quality = args.power_pole_quality.clone();
-        let quality = quality.filter(|q| *q != *constants::DEFAULT_QUAL_KEY);
         let name = args.power_pole_name.as_ref();
-        let name = name.map_or_else(|| constants::DEFAULT_POWER_POLE_NAME, |v| v.as_str());
+        let name = name.map_or_else(|| constants::DEFAULT_POWER_POLE_NAME, |v| v.as_ref());
 
-        let data = crate::blueprint::data::PROTOTYPE_DATA.with_borrow(|data| {
+        let data = super::data::with_prototype_data(|data| {
             let Some(p) = data.electric_poles.iter().find(|p| *p.name == *name) else {
                 err_js!("No power pole with name '{name}'!");
             };
-            Ok(p.clone())
+            Ok::<_, JsError>(p.clone())
         })?;
         let bounding_box = dvec2(f64::from(data.tile_width), f64::from(data.tile_height));
         let dists = &data.supply_area_distances;
         let half_cov = dists.iter().find(|d| quality == Some(d.quality.clone()));
         let cov = 2.0 * half_cov.unwrap_or(&dists[0]).supply_area_distance;
-        let ref_sig = SignalID::new("entity", name).with_quality(quality.as_deref());
+        let ref_sig = SignalID::intern_with_quality("entity", name, quality.as_deref())?;
 
         start_pos += bounding_box * const { dvec2(-0.5, 0.5) };
 
@@ -36,7 +35,7 @@ impl PowerPoleOccupied {
             bounding_box,
             coverage: if args.include_power_poles { cov } else { 0.0 },
             ref_entity: BlueprintEntity::new(0, &ref_sig, start_pos),
-            requests: BTreeSet::new(),
+            requests: HashSet::new(),
             start_pos,
         })
     }
@@ -66,10 +65,10 @@ impl PowerPoleOccupied {
         }
 
         let horiz = args.prefer_horizontal_wires ^ args.image_args.rotate.swaps_dimensions();
-        let mut pole_pos_map = BTreeMap::<(i32, i32), u32>::new();
+        let mut pole_pos_map = HashMap::<(i32, i32), u32>::new();
         let n_poles = self.requests.len();
-        let mut requests: Vec<_> = self.requests.iter().collect();
-        requests.sort_by(|&a, &b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
+        let mut requests: Box<_> = self.requests.iter().collect();
+        requests.sort_unstable_by(|&a, &b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
 
         for (i, &&req) in requests.iter().enumerate() {
             if unlikely(

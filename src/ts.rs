@@ -31,7 +31,7 @@ pub type TsVoid = js_sys::Undefined;
 #[repr(transparent)]
 pub struct TsIntoRust<T: DeserializeOwned> {
     value:   JsValue,
-    _marker: core::marker::PhantomData<fn() -> T>,
+    _marker: std::marker::PhantomData<fn() -> T>,
 }
 impl<T: DeserializeOwned> TsIntoRust<T> {
     #[expect(clippy::wrong_self_convention, reason = "Matches `tsify` API")]
@@ -41,7 +41,7 @@ impl<T: DeserializeOwned> TsIntoRust<T> {
 }
 impl<T: DeserializeOwned> From<JsValue> for TsIntoRust<T> {
     fn from(value: JsValue) -> Self {
-        Self { value, _marker: core::marker::PhantomData }
+        Self { value, _marker: std::marker::PhantomData }
     }
 }
 impl<T: DeserializeOwned> From<TsIntoRust<T>> for JsValue {
@@ -101,7 +101,7 @@ impl<T: DeserializeOwned> JsCast for TsIntoRust<T> {
         // The `PhantomData` field has no runtime representation, so both types
         // have identical layouts and alignment. The returned reference cannot
         // outlive the input reference.
-        unsafe { &*core::ptr::from_ref::<JsValue>(val).cast::<Self>() }
+        unsafe { &*std::ptr::from_ref::<JsValue>(val).cast::<Self>() }
     }
 }
 

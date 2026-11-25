@@ -24,7 +24,7 @@ pub fn generate_timer(
 ) -> Result<(Vec<BlueprintEntity>, Wires), JsError> {
     let (sig_f, sig_p, sig_s, sig_t) = {
         let s = &args.timing_signals;
-        (&s.f, &s.p, &s.s, &s.t)
+        (&s["f"], &s["p"], &s["s"], &s["t"])
     };
 
     let bits = args.image_args.bits();
@@ -44,7 +44,7 @@ pub fn generate_timer(
     };
     {
         let mut en = BlueprintEntity::new(2, &ENT_DEC_CB, TIMER2_POS).with_direction(DIR_R);
-        let condition = decider_cond!(sig_t, <, i32::try_from(stop)?);
+        let condition = decider_cond!(&sig_t, <, i32::try_from(stop)?);
         let decider_conditions = DeciderCombinatorParameters {
             conditions: boxed_slice![condition],
             outputs:    boxed_slice![DeciderCombinatorOutput::new(sig_t, None)],
@@ -79,7 +79,7 @@ pub fn generate_timer(
         };
         {
             let mut en = BlueprintEntity::new(6, &ENT_ARI_CB, TIMER6_POS).with_direction(DIR_R);
-            let conds = arithmetic_conds!(SIG_EACH * bits.cast_signed() => SIG_EACH);
+            let conds = arithmetic_conds!(VIRTUAL_EACH * bits.cast_signed() => VIRTUAL_EACH);
             if args.detailed_descriptions {
                 en.set_player_description("Calculates the bit shift for current frame.");
             }

@@ -26,7 +26,7 @@ pub fn format_duration<T: Into<u128>>(ms: T) -> String {
 /// Checks if the value is the default value for the type.
 #[inline]
 #[must_use]
-pub const fn is_default<T: [const] Default + [const] PartialEq + [const] core::marker::Destruct>(
+pub const fn is_default<T: [const] Default + [const] PartialEq + [const] std::marker::Destruct>(
     value: &T,
 ) -> bool {
     value == &T::default()
@@ -37,7 +37,7 @@ pub const fn is_default<T: [const] Default + [const] PartialEq + [const] core::m
 #[must_use]
 #[expect(clippy::ref_option, reason = "Use with serde")]
 pub const fn is_none_or_default<
-    T: [const] Default + [const] PartialEq + [const] core::marker::Destruct,
+    T: [const] Default + [const] PartialEq + [const] std::marker::Destruct,
 >(
     value: &Option<T>,
 ) -> bool {
@@ -130,48 +130,9 @@ impl<T> OptionJsExt<T> for Option<T> {
 pub trait ResultJsExt<T, E> {
     fn map_js_err(self, prefix: &str) -> Result<T, JsError>;
 }
-impl<T, E: core::fmt::Debug> ResultJsExt<T, E> for Result<T, E> {
+impl<T, E: std::fmt::Debug> ResultJsExt<T, E> for Result<T, E> {
     #[inline]
     fn map_js_err(self, prefix: &str) -> Result<T, JsError> {
         self.map_err(|e| JsError::new(&format!("{prefix}: {e:?}")))
     }
 }
-
-#[allow(
-    clippy::allow_attributes,
-    dead_code,
-    reason = "Overarching convenience lib"
-)]
-pub trait TryIteratorExt: Iterator {
-    #[inline]
-    fn try_any<E, F: FnMut(Self::Item) -> Result<bool, E>>(&mut self, mut f: F) -> Result<bool, E>
-    where
-        Self: Sized,
-    {
-        match self.try_fold((), |(), item| match f(item) {
-            Ok(true) => ::core::ops::ControlFlow::Break(Ok(true)),
-            Ok(false) => ::core::ops::ControlFlow::Continue(()),
-            Err(err) => ::core::ops::ControlFlow::Break(Err(err)),
-        }) {
-            ::core::ops::ControlFlow::Break(result) => result,
-            ::core::ops::ControlFlow::Continue(..) => Ok(false),
-        }
-    }
-
-    #[inline]
-    fn try_all<E, F: FnMut(Self::Item) -> Result<bool, E>>(&mut self, mut f: F) -> Result<bool, E>
-    where
-        Self: Sized,
-    {
-        match self.try_fold((), |(), item| match f(item) {
-            Ok(true) => ::core::ops::ControlFlow::Continue(()),
-            Ok(false) => ::core::ops::ControlFlow::Break(Ok(false)),
-            Err(err) => ::core::ops::ControlFlow::Break(Err(err)),
-        }) {
-            ::core::ops::ControlFlow::Break(result) => result,
-            ::core::ops::ControlFlow::Continue(..) => Ok(true),
-        }
-    }
-}
-
-impl<I: Iterator + ?Sized> TryIteratorExt for I {}

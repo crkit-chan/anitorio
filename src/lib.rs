@@ -8,9 +8,11 @@
     likely_unlikely
 )]
 
-extern crate alloc;
-
 use wasm_bindgen::prelude::*;
+
+pub use anitorio_macros::perf_timed;
+#[cfg(feature = "perf_timing")]
+pub use callbacks::perf_now;
 
 mod blueprint;
 mod callbacks;
@@ -71,28 +73,21 @@ pub struct OnFrameArgs {
 #[serde(rename_all = "camelCase")]
 pub struct RunBlueprintCallbacks {
     #[serde(with = "serde_wasm_bindgen::preserve")]
-    pub get_data: ts::TsFn<fn(ts::TsNum, ts::TsNum) -> js_sys::Uint8Array>,
-
+    pub get_data:        ts::TsFn<fn(ts::TsNum, ts::TsNum) -> js_sys::Uint8Array>,
     #[serde(with = "serde_wasm_bindgen::preserve")]
-    pub get_data_len: ts::TsFn<fn() -> ts::TsNum>,
-
+    pub get_data_len:    ts::TsFn<fn() -> ts::TsNum>,
     #[serde(with = "serde_wasm_bindgen::preserve")]
-    pub get_next_frame: ts::TsFn<fn(JsValue) -> ts::TsFut<JsValue>>,
-
+    pub get_next_frame:  ts::TsFn<fn(JsValue) -> ts::TsFut<JsValue>>,
     #[serde(with = "serde_wasm_bindgen::preserve")]
-    pub js_yield: ts::TsFn<fn() -> ts::TsFut>,
-
+    pub js_yield:        ts::TsFn<fn() -> ts::TsFut>,
     #[serde(with = "serde_wasm_bindgen::preserve")]
-    pub on_chunk: ts::TsFn<fn(js_sys::Uint8Array) -> ts::TsFut>,
-
+    pub on_chunk:        ts::TsFn<fn(js_sys::Uint8Array) -> ts::TsFut>,
     #[serde(with = "serde_wasm_bindgen::preserve")]
-    pub on_frame: ts::TsFn<fn(ts::TsIntoRust<OnFrameArgs>) -> ts::TsFut>,
-
+    pub on_frame:        ts::TsFn<fn(ts::TsIntoRust<OnFrameArgs>) -> ts::TsFut>,
     #[serde(with = "serde_wasm_bindgen::preserve")]
     pub reset_generator: ts::TsFn<fn() -> ts::TsFut>,
-
     #[serde(with = "serde_wasm_bindgen::preserve")]
-    pub should_preview: ts::TsFn<fn() -> ts::TsBool>,
+    pub should_preview:  ts::TsFn<fn() -> ts::TsBool>,
 }
 
 /// Public entry point for WebAssembly.
@@ -119,13 +114,16 @@ pub async fn run_blueprint(
     callbacks: tsify::Ts<RunBlueprintCallbacks>,
 ) -> Result<JsValue, JsError> {
     use crate::prelude::*;
-    use alloc::rc::Rc;
-    use blueprint::{encoder::BlueprintEncoder, generator::BlueprintGenerator};
-    use core::cell::{Cell, RefCell};
+    use blueprint::{encoder::BlueprintEncoder, generator::BlueprintGenerator, models::SignalID};
     use image_processing::{FrameCallback, FrameData, ImageFrameData};
     use ioutil::JsFileReader;
     use js_sys as js;
     use models::BlueprintArgs;
+    use std::{
+        cell::{Cell, RefCell},
+        rc::Rc,
+        sync::Arc,
+    };
 
     const SYNC_TIME_MS: f64 = 1000.0;
 
@@ -134,6 +132,18 @@ pub async fn run_blueprint(
     let on_frame = Rc::new(cbs.on_frame);
     let should_show_preview = Rc::new(cbs.should_preview);
     let yield_to_js = Rc::new(cbs.js_yield);
+
+    args.timing_signals = (args.timing_signals.into_iter())
+        .map(|(k, sig)| Ok((k, SignalID::intern(sig.type_.as_ref(), sig.name.as_ref())?)))
+        .collect::<Result<_, JsError>>()?;
+
+    if let Some(ref name) = args.power_pole_name {
+        let ref_sig =
+            SignalID::intern_with_quality("entity", name, args.power_pole_quality.as_deref())?;
+
+        args.power_pole_name = Some(Arc::clone(&ref_sig.name));
+        args.power_pole_quality = Some(Arc::clone(&ref_sig.quality));
+    }
 
     let mut frame_data: Option<FrameData> = None;
     let promises = Rc::new(const { RefCell::new(Vec::<ts::TsFut>::new()) });

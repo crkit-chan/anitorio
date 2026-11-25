@@ -57,14 +57,11 @@ redundant_test_prefix = "warn"                # Yes
 renamed_function_params = "warn"              # Useful
 return_and_then = "warn"                      # Cool
 semicolon_outside_block = "warn"              # Allows more compact code
-std_instead_of_alloc = "warn"                 # Possibly useful for future compat
-std_instead_of_core = "warn"                  # Possibly useful for future compat
 str_to_str = "warn"                           # I prefer String::to_owned()
 string_lit_chars_any = "warn"                 # Stylistic preference
 todo = "warn"                                 # Utility
 too_many_lines = "allow"                      # Ya
 try_err = "warn"                              # Readability
-undocumented_unsafe_blocks = "warn"           # Give a good reason to use unsafe blocks
 unimplemented = "warn"                        # Useful
 unneeded_field_pattern = "warn"               # Clarity / brevity
 unseparated_literal_suffix = "warn"           # Readability
@@ -72,9 +69,11 @@ unused_trait_names = "warn"                   # Clarify intent
 unwrap_used = "warn"                          # WE WANT ERRORS
 
 # single_call_fn = "warn" # Useful debug tool
+# undocumented_unsafe_blocks = "warn"           # Give a good reason to use unsafe blocks
 
 
 [dependencies]
+anitorio_macros = { path = "src/macros" }
 async-channel = { version = "2", optional = true }
 base64 = "0.23"
 bytemuck = "1.25.2"
@@ -89,6 +88,7 @@ image = { version = "0.24", default-features = false, features = [
     "webp",
 ] }
 imagequant = { version = "4.4.1", default-features = false }
+indexmap = { version = "2", features = ["serde"] }
 js-sys = "0.3.77"
 kiddo = { version = "6.3.1", optional = true, default-features = false, features = [
     "fixed",
@@ -121,6 +121,7 @@ opt-level = 3
 lto = "fat"
 codegen-units = 1
 debug = false
+incremental = true
 strip = "debuginfo"
 
 
@@ -156,7 +157,11 @@ demangle-name-section = true
 [features]
 default = []
 kiddo = ["dep:kiddo"]
-perf_timing = ["web-sys/WorkerGlobalScope", "web-sys/Performance"]
+perf_timing = [
+    "web-sys/Performance",
+    "web-sys/Window",
+    "web-sys/WorkerGlobalScope",
+]
 profiling = ["dep:wasm-tracing-allocator"]
 release = []
 threads = [

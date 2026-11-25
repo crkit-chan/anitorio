@@ -26,7 +26,7 @@ impl<F: FnMut(Vec<u8>) -> Result<(), JsValue>> StreamingWriter<F> {
     fn emit(&mut self) -> io::Result<()> {
         while self.buffer.len() >= self.threshold {
             let remainder = self.buffer.split_off(self.threshold);
-            let chunk = core::mem::replace(&mut self.buffer, remainder);
+            let chunk = std::mem::replace(&mut self.buffer, remainder);
             self.call_on_chunk(chunk)?;
         }
         Ok(())
@@ -34,7 +34,7 @@ impl<F: FnMut(Vec<u8>) -> Result<(), JsValue>> StreamingWriter<F> {
 
     pub fn finish(&mut self) -> io::Result<()> {
         if !self.buffer.is_empty() {
-            let chunk = core::mem::take(&mut self.buffer);
+            let chunk = std::mem::take(&mut self.buffer);
             self.call_on_chunk(chunk)?;
         }
         Ok(())

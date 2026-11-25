@@ -12,7 +12,8 @@
     "build:vite": "vite build",
     "build:wasm-pack": "sh scripts/build-wasm.sh",
     "build:wasm:opt": "node scripts/run.mjs build:wasm-pack --release --features threads,kiddo",
-    "build:wasm": "cross-env CARGO_TARGET_DIR=target-dev CARGO_PROFILE_DEV_OPT_LEVEL=2 CARGO_PROFILE_DEV_DEBUG=0 CARGO_ENCODED_RUSTFLAGS=-Ctarget-feature=+simd128,+bulk-memory,+mutable-globals,+nontrapping-fptoint node scripts/run.mjs build:wasm-pack --dev",
+    "build:wasm:opt:timed": "node scripts/run.mjs build:wasm-pack --release --features threads,kiddo,perf_timing",
+    "build:wasm": "cross-env CARGO_TARGET_DIR=target-dev CARGO_PROFILE_DEV_OPT_LEVEL=2 CARGO_ENCODED_RUSTFLAGS=-Ctarget-feature=+simd128,+bulk-memory,+mutable-globals,+nontrapping-fptoint node scripts/run.mjs build:wasm-pack --dev --features perf_timing",
     "serve": "vite preview"
   },
   "license": "MIT",

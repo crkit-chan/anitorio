@@ -1,6 +1,7 @@
-use crate::prelude::*;
+use crate::{blueprint::models::SignalID, prelude::*};
 use glam::UVec2;
 use serde::{Deserialize, Serialize};
+use std::{collections::BTreeMap, sync::Arc};
 use tsify::Tsify;
 use wasm_bindgen::prelude::*;
 
@@ -22,14 +23,14 @@ pub struct BlueprintArgs {
     pub max_group_size:          Option<u8>,
     pub name:                    String,
     pub output_format:           OutputFormat,
-    pub power_pole_name:         Option<String>,
-    pub power_pole_quality:      Option<String>,
+    pub power_pole_name:         Option<Arc<str>>,
+    pub power_pole_quality:      Option<Arc<str>>,
     pub prefer_green_wires:      bool,
     pub prefer_horizontal_wires: bool,
     pub signal_compression:      Option<SignalCompression>,
     pub signal_sorting:          SignalSorting,
     pub streaming_download:      bool,
-    pub timing_signals:          TimingSignals,
+    pub timing_signals:          BTreeMap<String, Arc<SignalID>>,
     pub use_threads:             bool,
 }
 
@@ -63,14 +64,6 @@ impl ImageArgs {
             0
         }
     }
-}
-
-#[derive(Tsify, Debug, Serialize, Deserialize)]
-pub struct TimingSignals {
-    pub f: crate::blueprint::models::SignalID,
-    pub p: crate::blueprint::models::SignalID,
-    pub s: crate::blueprint::models::SignalID,
-    pub t: crate::blueprint::models::SignalID,
 }
 
 #[derive(Tsify, Debug, Clone, PartialEq, Serialize, Deserialize)]

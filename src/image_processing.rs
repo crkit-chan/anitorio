@@ -1,12 +1,14 @@
-use crate::constants;
-use crate::palette::ColorPalettePixel;
-use crate::util::wasm_shared_memory;
-use crate::{constants::DEFAULT_FRAME_DELAY, util::format_duration};
-use crate::{prelude::*, ts};
-use alloc::{rc::Rc, sync::Arc};
-use core::{pin::Pin, time::Duration};
+use crate::{
+    constants,
+    constants::DEFAULT_FRAME_DELAY,
+    palette::ColorPalettePixel,
+    prelude::*,
+    ts,
+    util::{format_duration, wasm_shared_memory},
+};
 use glam::{DVec2, UVec2, uvec2};
 use image::{AnimationDecoder as _, GenericImageView as _, imageops};
+use std::{pin::Pin, rc::Rc, sync::Arc, time::Duration};
 use wasm_bindgen::JsValue;
 
 pub type FrameCallback = dyn for<'a> Fn(
@@ -419,7 +421,7 @@ impl<'a> ImageFrameData<'a> {
                 let mut data = Vec::new();
                 reader.read_to_end(&mut data)?;
 
-                let frames = image::Frames::new(Box::new(core::iter::once(Ok(image::Frame::new(
+                let frames = image::Frames::new(Box::new(std::iter::once(Ok(image::Frame::new(
                     image::RgbaImage::from_raw(dim.x, dim.y, data)
                         .ok_or_js_err("buffer length must be width * height * 4")?,
                 ))))); // bruh
@@ -473,7 +475,7 @@ pub async fn build_palette(
                 }
                 image::DynamicImage::ImageLuma8(luma) => {
                     let pixels = luma.into_raw();
-                    let f = move |row: &mut [core::mem::MaybeUninit<RGBA>], y: usize| {
+                    let f = move |row: &mut [std::mem::MaybeUninit<RGBA>], y: usize| {
                         let start = y * w;
                         for (x, pixel) in row.iter_mut().enumerate() {
                             let l = pixels[start + x];
@@ -523,8 +525,8 @@ pub fn color_frame_to_outputs(
 ) -> Result<Box<[i32]>, JsError> {
     #[cfg(target_arch = "wasm32")]
     {
-        use core::arch::wasm32::{i8x16_shuffle, i8x16_splat, v128, v128_load, v128_store};
         use image::GenericImageView as _;
+        use std::arch::wasm32::{i8x16_shuffle, i8x16_splat, v128, v128_load, v128_store};
 
         let Some(rgba) = view.inner().as_rgba8() else {
             err_js!("Expected RGBA8, got '{:?}'", view.inner().color())
@@ -732,7 +734,7 @@ impl<'a> FrameDecoder<'a> {
                 let frame = frames.next().transpose()?.map(|f| {
                     let delay = f.delay();
                     let output = FrameWithTime(f, self.curr_n_us);
-                    let delay: core::time::Duration = if unlikely(delay.numer_denom_ms().0 == 0) {
+                    let delay: std::time::Duration = if unlikely(delay.numer_denom_ms().0 == 0) {
                         DEFAULT_FRAME_DELAY
                     } else {
                         delay.into()
@@ -780,9 +782,8 @@ pub async fn encode_gif(
     args: &EncodeGifArgs,
 ) -> Result<(), JsError> {
     use crate::ioutil::CallbackWriter;
-    use alloc::rc::Rc;
-    use core::cell::RefCell;
     use image::codecs::gif::{GifEncoder, Repeat};
+    use std::{cell::RefCell, rc::Rc};
 
     let promises = Rc::new(const { RefCell::new(Vec::<ts::TsFut>::new()) });
     let promise_q = Rc::clone(&promises);
@@ -799,7 +800,7 @@ pub async fn encode_gif(
 
     let in_buf = vec![0_u8; args.dim.element_product() as usize * 4];
     let flush = async || -> Result<(), JsError> {
-        let pending = core::mem::take(&mut *promises.borrow_mut());
+        let pending = std::mem::take(&mut *promises.borrow_mut());
         for promise in pending {
             promise.await?;
         }

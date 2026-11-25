@@ -1,9 +1,7 @@
-use super::power_pole::PowerPoleOccupied;
-use super::prelude::*;
+use super::{power_pole::PowerPoleOccupied, prelude::*};
 use crate::prelude::*;
-use alloc::sync::Arc;
-use core::ops::Not as _;
 use glam::{DVec2, UVec2, dvec2};
+use std::{ops::Not as _, sync::Arc};
 
 type GenerateLampsOutput = (
     Vec<BlueprintEntity>,
@@ -28,7 +26,7 @@ type GenerateLampsOutput = (
 /// A tuple with lamp entities, lamp wires, the next entity number, and the top-right lamp entity.
 #[expect(clippy::needless_pass_by_value, reason = "Arc")]
 pub fn generate_lamps(
-    signals: &[SignalID],
+    signals: &[Arc<SignalID>],
     grid_dim: UVec2,
     curr_frame: Option<Arc<image::DynamicImage>>,
     occupied: &mut PowerPoleOccupied,
@@ -87,10 +85,10 @@ pub fn generate_lamps(
                 lamp = lamp.with_control_behavior(ControlBehavior::Lamp {
                     use_colors:   true,
                     color_mode:   if grayscale_bits > 0 { 1 } else { 2 },
-                    red_signal:   (grayscale_bits > 0).then(|| sig.clone()),
-                    green_signal: (grayscale_bits > 0).then(|| sig.clone()),
-                    blue_signal:  (grayscale_bits > 0).then(|| sig.clone()),
-                    rgb_signal:   (grayscale_bits > 0).not().then(|| sig.clone()),
+                    red_signal:   (grayscale_bits > 0).then(|| Arc::clone(sig)),
+                    green_signal: (grayscale_bits > 0).then(|| Arc::clone(sig)),
+                    blue_signal:  (grayscale_bits > 0).then(|| Arc::clone(sig)),
+                    rgb_signal:   (grayscale_bits > 0).not().then(|| Arc::clone(sig)),
                 });
             }
 

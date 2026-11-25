@@ -2,13 +2,13 @@
 macro_rules! arithmetic_conds {
     ($in_sig:ident $op:tt $second:expr => $out_sig:ident) => {
         $crate::blueprint::models::ArithmeticCombinatorParameters {
-            first_signal:           ::core::option::Option::Some($in_sig.clone()),
+            first_signal:           ::std::option::Option::Some($in_sig.clone()),
             first_signal_networks:  "both".into(),
-            second_signal:          ::core::option::Option::None,
+            second_signal:          ::std::option::Option::None,
             second_signal_networks: "both".into(),
             second_constant:        $second,
             operation:              $crate::blueprint::macros::arithmetic_cond_op!($op),
-            output_signal:          ::core::option::Option::Some($out_sig.clone()),
+            output_signal:          ::std::option::Option::Some($out_sig.clone()),
         }
     };
 }
