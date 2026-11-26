@@ -655,12 +655,11 @@ input[type="checkbox"]:checked ~ .checkbox {
   --image-height: calc(var(--rows) * var(--pixel-size));
 
   background-image:
-    linear-gradient(to right, rgb(0 0 0) var(--line-width), transparent var(--line-width)),
-    linear-gradient(to bottom, rgb(0 0 0) var(--line-width), transparent var(--line-width));
+    linear-gradient(to right, rgb(0, 255, 0, 10%) var(--line-width), transparent var(--line-width)),
+    linear-gradient(to bottom, rgb(0, 255, 0, 10%) var(--line-width), transparent var(--line-width));
 
   background-size: var(--pixel-size) var(--pixel-size);
-
-  background-position: calc((100vw - var(--image-width)) / 2) calc((100vh - var(--image-height)) / 2);
+  /* background-position: calc(var(--line-width) / 2) 0; */
 }
 
 .progress-container {

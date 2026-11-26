@@ -1,10 +1,10 @@
-pub struct U32Hasher(u64);
+/// An identity hasher for values whose representation fits within a [`u64`].
+///
+/// Performs no actual hashing. Not suitable for untrusted or arbitrary input.
+pub type IdentityHasherBuilder = std::hash::BuildHasherDefault<IdentityHasher>;
 
-impl U32Hasher {
-    #[allow(dead_code, reason = "bug")]
-    pub type BuildDefault = std::hash::BuildHasherDefault<Self>;
-}
-impl std::hash::Hasher for U32Hasher {
+pub struct IdentityHasher(u64);
+impl std::hash::Hasher for IdentityHasher {
     #[inline]
     fn finish(&self) -> u64 {
         self.0
@@ -24,7 +24,7 @@ impl std::hash::Hasher for U32Hasher {
         self.0 = u64::from(i);
     }
 }
-impl const Default for U32Hasher {
+impl const Default for IdentityHasher {
     fn default() -> Self {
         Self(Default::default())
     }

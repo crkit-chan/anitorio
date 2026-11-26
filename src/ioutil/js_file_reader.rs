@@ -16,51 +16,12 @@ pub struct JsFileReader {
     callback: JsFileReaderCallback,
     pos:      u64,
     size:     u64,
-
-    cache:       Vec<u8>,
-    cache_start: u64,
-    chunk_size:  usize,
 }
 impl JsFileReader {
-    pub const fn new(callback: JsFileReaderCallback, size: u64, chunk_size: usize) -> Self {
-        Self {
-            callback,
-            pos: 0,
-            size,
-            cache: Vec::new(),
-            cache_start: 0,
-            chunk_size,
-        }
+    pub const fn new(callback: JsFileReaderCallback, size: u64) -> Self {
+        Self { callback, pos: 0, size }
     }
-
-    fn fetch(&mut self) -> io::Result<()> {
-        let start = self.pos;
-        let end = (start + self.chunk_size as u64).min(self.size);
-
-        if start >= end {
-            self.cache.clear();
-        } else {
-            assert!(
-                start <= MAX_SAFE_F64_INT && end <= MAX_SAFE_F64_INT,
-                "Cannot fetch beyond bounds: {start} - {end}",
-            );
-
-            let array = (self.callback)
-                .call_n((&(start as f64).into(), &(end as f64).into()))
-                .map_err(|e| io::Error::other(format!("JS call error: {e:?}")))?;
-
-            self.cache.resize(array.length() as usize, 0);
-            array.copy_to(&mut self.cache);
-
-            self.cache_start = start;
-        }
-        Ok(())
-    }
-
-    #[allow(dead_code, reason = "api")]
     pub fn reset(&mut self) {
-        self.cache.clear();
-        self.cache_start = 0;
         self.pos = 0;
     }
 }
@@ -70,19 +31,22 @@ impl io::Read for JsFileReader {
             return Ok(0);
         }
 
-        let cache_end = self.cache_start + self.cache.len() as u64;
-        if self.pos < self.cache_start || self.pos >= cache_end {
-            self.fetch()?;
-        }
+        let end = (self.pos + buf.len() as u64).min(self.size);
+        assert!(
+            end <= MAX_SAFE_F64_INT,
+            "Cannot fetch beyond bounds: {} - {end}",
+            self.pos,
+        );
 
-        let offset = (self.pos - self.cache_start) as usize;
-        let available = self.cache.len().saturating_sub(offset);
-        let count = available.min(buf.len());
+        let array = (self.callback)
+            .call_n((&(self.pos as f64).into(), &(end as f64).into()))
+            .map_err(|e| io::Error::other(format!("JS call error: {e:?}")))?;
 
-        if count != 0 {
-            buf[..count].copy_from_slice(&self.cache[offset..offset + count]);
-            self.pos += count as u64;
-        }
+        let count = (array.length() as usize).min(buf.len());
+        array.copy_to(&mut buf[..count]);
+
+        self.pos += count as u64;
+
         Ok(count)
     }
 }
@@ -101,7 +65,6 @@ impl io::Seek for JsFileReader {
             ));
         }
         self.pos = new_position as u64;
-
         Ok(self.pos)
     }
 }

@@ -8,7 +8,6 @@
     const_trait_impl,
     const_slice_make_iter,
     hash_set_entry,
-    inherent_associated_types,
     likely_unlikely,
     proc_macro_hygiene,
     stmt_expr_attributes
@@ -37,7 +36,7 @@ mod util;
 ///
 /// # Errors
 ///
-/// This function will return an error if rayon fails to initialize.
+/// This function will return an error if [`rayon`] fails to initialize.
 #[wasm_bindgen]
 #[allow(
     clippy::unused_async,
@@ -108,8 +107,8 @@ pub struct RunBlueprintCallbacks {
 /// # Parameters
 ///
 /// - `options`: Options dict passed in
-/// - `image_data`: A ``Uint8Array`` passed in from JS. May be empty if `mode`
-///   (specified in ``options``) is not `"full"`.
+/// - `image_data`: A [`Uint8Array`][`js_sys::Uint8Array`] passed in from JS.
+///   May be empty if `mode` (specified in ``options``) is not `"full"`.
 ///
 /// # Returns
 ///
@@ -117,11 +116,11 @@ pub struct RunBlueprintCallbacks {
 ///
 /// # Panics
 ///
-/// Throws ``JsValue`` if any error occurs.
+/// Throws [`JsError`] if any error occurs.
 ///
 /// # Errors
 ///
-/// Returns ``JsValue`` if any error occurs.
+/// Returns [`JsError`] if any error occurs.
 #[wasm_bindgen]
 pub async fn run_blueprint(
     args: tsify::Ts<models::BlueprintArgs>, callbacks: tsify::Ts<RunBlueprintCallbacks>,
@@ -230,44 +229,61 @@ pub async fn run_blueprint(
             .clamp(16 * 1024, 1024 * 1024);
 
         if palette_size > 0 {
+            use image_processing::{color_counts_to_palette, count_gif_colors};
+
             callbacks::set_is_preview(true);
 
-            // For generating the palette (first pass), we reduce resolution and FPS
-            let mut image_args = args.image_args.clone();
+            let reader = JsFileReader::new(cbs.get_data.clone(), u64::from(data_len));
+            let reader = std::io::BufReader::with_capacity(chunk_size, reader);
 
-            if !args.image_args.full_quality_scanning {
-                if let Some(duration) = image_args.duration {
-                    /// Above this number of seconds, we'll start reducing the
-                    /// FPS we sample at for performance.
-                    const SECS_THRESHOLD: f64 = 5.0;
+            if let Ok(p) = count_gif_colors(reader, args.image_args.duration)
+                .and_then(|colors| color_counts_to_palette(colors, palette_size, shading_speed))
+            {
+                palette = Some(p);
+            } else {
+                // For generating the palette (first pass), we reduce resolution and FPS
+                let mut image_args = args.image_args.clone();
 
-                    let fps = f64::from(image_args.target_fps);
+                if !args.image_args.full_quality_scanning {
+                    if let Some(duration) = image_args.duration {
+                        /// Above this number of seconds, we'll start reducing
+                        /// the FPS we sample at for
+                        /// performance.
+                        const SECS_THRESHOLD: f64 = 5.0;
 
-                    image_args.target_fps = fps
-                        // Gradually reduce the FPS in proportion to how long the video is
-                        .min(((SECS_THRESHOLD * fps) / duration).ceil())
-                        .max(1.0) as u8; // Safety fallback
+                        let fps = f64::from(image_args.target_fps);
+
+                        image_args.target_fps = fps
+                            // Gradually reduce the FPS in proportion to how long the video is
+                            .min(((SECS_THRESHOLD * fps) / duration).ceil())
+                            .max(1.0) as u8; // Safety fallback
+                    }
+
+                    if let Some(dimensions) = image_args.dimensions {
+                        const DIM_THRESHOLD: u16 = 50;
+
+                        image_args.max_size = (image_args.max_size)
+                            .min(dimensions.min_element() as u16)
+                            .min(DIM_THRESHOLD);
+                    }
                 }
 
-                if let Some(dimensions) = image_args.dimensions {
-                    const DIM_THRESHOLD: u16 = 50;
+                let reader = JsFileReader::new(cbs.get_data.clone(), u64::from(data_len));
+                let reader = std::io::BufReader::with_capacity(chunk_size, reader);
+                let decoder = ImageFrameData::new(reader, &image_args, get_next_frame.clone())?;
+                let generator = FrameData::new(decoder, &image_args, on_frame.clone())?
+                    .with_progress_message("Scanning colors");
 
-                    image_args.max_size = (dimensions.min_element() as u16).min(DIM_THRESHOLD);
-                }
+                palette = Some(
+                    image_processing::build_palette(generator, palette_size, shading_speed).await?,
+                );
             }
 
-            let reader = JsFileReader::new(cbs.get_data.clone(), u64::from(data_len), chunk_size);
-            let decoder = ImageFrameData::new(reader, &image_args, get_next_frame.clone())?;
-            let generator = FrameData::new(decoder, &image_args, on_frame.clone())?
-                .with_progress_message("Scanning colors");
-
-            palette = Some(
-                image_processing::build_palette(generator, palette_size, shading_speed).await?,
-            );
             cbs.reset_generator.call_n(())?.await?;
         }
 
-        let reader = JsFileReader::new(cbs.get_data.clone(), u64::from(data_len), chunk_size);
+        let reader = JsFileReader::new(cbs.get_data.clone(), u64::from(data_len));
+        let reader = std::io::BufReader::with_capacity(chunk_size, reader);
         let decoder = ImageFrameData::new(reader, &args.image_args, get_next_frame.clone())?;
         let generator = FrameData::new(decoder, &args.image_args, on_frame.clone())?
             .with_progress_message("Processing Frame");
@@ -312,14 +328,14 @@ pub async fn run_blueprint(
 ///
 /// # Arguments
 ///
-/// * `data_json` - The raw JSON data as a ``Uint8Array``.
+/// * `data_json` - The raw JSON data as a [`Uint8Array`][`js_sys::Uint8Array`].
 ///
 /// # Returns
 /// Nothing.
 ///
 /// # Errors
 ///
-/// ``JsError`` if any error occurs.
+/// [`JsError`] if any error occurs.
 #[wasm_bindgen]
 pub fn set_signal_data(data_json: &[u8]) -> Result<(), JsError> {
     blueprint::data::load_data(data_json)?;
@@ -330,7 +346,7 @@ pub fn set_signal_data(data_json: &[u8]) -> Result<(), JsError> {
 ///
 /// # Errors
 ///
-/// ``JsError`` if any error occurs.
+/// [`JsError`] if any error occurs.
 #[wasm_bindgen]
 pub fn set_comb_pos_data(data_json: &[u8]) -> Result<(), JsError> {
     blueprint::combinator::load_comb_pos_json(data_json)?;
@@ -348,7 +364,7 @@ pub struct EncodeGifCallbacks {
 
 /// # Errors
 ///
-/// ``JsValue`` if any error occurs.
+/// [`JsError`] if any error occurs.
 #[wasm_bindgen]
 pub async fn encode_gif(
     args: JsValue, callbacks: tsify::Ts<EncodeGifCallbacks>,

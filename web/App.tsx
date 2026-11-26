@@ -53,6 +53,7 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
   const [wasPreviewPhase, setWasPreviewPhase] = createSignal(false);
   const [isPreviewPhase, setIsPreviewPhase] = createSignal(false);
   const [dimensions, setDimensions] = createSignal([0, 0]);
+  const [useVideoPreview, setUseVideoPreview] = createSignal(false);
 
   let refBackground!: BackgroundApi;
   let refDialogLargeFile!: FactorioDialogDeleteApi;
@@ -133,6 +134,9 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
     } else if (data.isPreview) {
       const { isPreview } = data.isPreview;
       setIsPreviewPhase(isPreview);
+    } else if (data.setUseVideoPreview) {
+      const { useVideoPreview } = data.setUseVideoPreview;
+      setUseVideoPreview(useVideoPreview);
     } else if (data.error) {
       showToast(data.error, { isError: true });
       setIsGenerating(false);
@@ -271,7 +275,18 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
         const { videoInput, videoTrack } = await getVideoData(file!);
         console.log(videoInput, videoTrack);
       }
+      const onFrame: VideoFrameRequestCallback = (now, metadata) => {
+        if (refVideo.src !== src) {
+          console.log("src changed");
+          return;
+        }
 
+        console.log(now, metadata);
+        refVideo.requestVideoFrameCallback(onFrame);
+      };
+
+      // refVideo.playbackRate = 5;
+      refVideo.requestVideoFrameCallback(onFrame);
       refVideo.addEventListener("loadedmetadata", onLoad, { once: true });
       refVideo.addEventListener("error", onError, { once: true });
     } else throw new Error(`Unsupported MIME type "${file.type}"`);
@@ -673,9 +688,7 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
           muted
           loop
           playsinline
-          classList={{
-            "opacity-0": isGenerating() && showPreview(),
-          }}
+          classList={{ "opacity-0": isGenerating() && showPreview() }}
         />
       </div>
 

@@ -6,7 +6,7 @@ use glam::{DVec2, IVec2, dvec2};
 use super::power_pole::PowerPoleOccupied;
 use super::prelude::*;
 use crate::image_processing::rgb_to_int;
-use crate::palette::ColorPalette;
+use crate::palette::ColorPalettePixelSlice;
 use crate::prelude::*;
 use crate::util::bounding_box_midpoints;
 use crate::{arithmetic_conds, decider_cond, mkwires};
@@ -107,7 +107,7 @@ pub struct GenerateCombinatorsOutput {
 /// Does not populate combinators with data.
 pub fn generate_combinators(
     base_ent_n: u32, start_pos: DVec2, max_cols_per_grp: u32, args: &BlueprintArgs,
-    occupied: &PowerPoleOccupied, palette_colors: Option<&ColorPalette::PixelSlice>,
+    occupied: &PowerPoleOccupied, palette_colors: Option<&ColorPalettePixelSlice>,
 ) -> Result<GenerateCombinatorsOutput, JsError> {
     // Positions for combinators, for different widths.
     // TODO: Don't recalculate this for every group

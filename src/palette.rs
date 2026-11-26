@@ -2,22 +2,20 @@ use indexmap::IndexSet;
 #[cfg(feature = "kiddo")]
 use kiddo::{ImmutableKdTree, SquaredEuclidean};
 
-use crate::hash::U32Hasher;
+use crate::hash::IdentityHasherBuilder;
 use crate::prelude::*;
 
+pub type ColorPalettePixel = [u8; 3];
+pub type ColorPalettePixelSlice = indexmap::set::Slice<ColorPalettePixel>;
+
 pub struct ColorPalette {
-    colors: IndexSet<Self::Pixel, U32Hasher::BuildDefault>,
+    colors: IndexSet<ColorPalettePixel, IdentityHasherBuilder>,
     #[cfg(feature = "kiddo")]
     tree:   ImmutableKdTree<u8, 3>,
 }
 impl ColorPalette {
-    #[allow(unused, reason = "bug")]
-    pub type Pixel = [u8; 3];
-    #[allow(unused, reason = "bug")]
-    pub type PixelSlice = indexmap::set::Slice<Self::Pixel>;
-
     #[allow(clippy::unnecessary_wraps, reason = "Result<> used for 'kiddo'")]
-    pub fn new(mut colors: Box<[Self::Pixel]>) -> Result<Self, JsError> {
+    pub fn new(mut colors: Box<[ColorPalettePixel]>) -> Result<Self, JsError> {
         colors.sort_unstable(); // Allows better compression
 
         Ok(Self {
@@ -29,7 +27,7 @@ impl ColorPalette {
 
     #[inline]
     #[must_use]
-    pub fn get_colors(&self) -> &Self::PixelSlice {
+    pub fn get_colors(&self) -> &ColorPalettePixelSlice {
         self.colors.as_slice()
     }
 
@@ -37,14 +35,14 @@ impl ColorPalette {
     /// will error if the pixel colour is not inside the ``HashMap``.
     #[inline]
     #[must_use]
-    pub fn exact_index(&self, target: Self::Pixel) -> u32 {
+    pub fn exact_index(&self, target: ColorPalettePixel) -> u32 {
         #[allow(clippy::unwrap_used, reason = "Convenience function, should panic!")]
         self.colors.get_index_of(&target).unwrap() as u32
     }
 
     #[inline]
     #[must_use]
-    pub fn nearest_index(&self, target: Self::Pixel) -> u32 {
+    pub fn nearest_index(&self, target: ColorPalettePixel) -> u32 {
         #[cfg(feature = "kiddo")]
         {
             self.tree.query(&target).nearest_one::<SquaredEuclidean<f32>>().execute().item

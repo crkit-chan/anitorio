@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+use std::io;
 use std::pin::Pin;
 use std::rc::Rc;
 use std::time::Duration;
@@ -7,6 +9,8 @@ use image::{AnimationDecoder as _, GenericImageView as _, imageops};
 use wasm_bindgen::JsValue;
 
 use crate::constants::DEFAULT_FRAME_DELAY;
+use crate::hash::IdentityHasherBuilder;
+use crate::palette::ColorPalettePixelSlice;
 use crate::prelude::*;
 use crate::util::{format_duration, wasm_shared_memory};
 use crate::{GetNextFrameArgs, constants, ts};
@@ -209,7 +213,7 @@ impl<'a> FrameData<'a> {
 
     #[inline]
     #[must_use]
-    pub fn get_palette_colors(&self) -> Option<&ColorPalette::PixelSlice> {
+    pub fn get_palette_colors(&self) -> Option<&ColorPalettePixelSlice> {
         self.palette.as_ref().map(ColorPalette::get_colors)
     }
 
@@ -408,9 +412,8 @@ impl<'a> ImageFrameData<'a> {
     /// # Returns
     ///
     /// An iterator of `Frame` objects or a JavaScript error.
-    pub fn new(
-        mut reader: impl std::io::Read + 'a, image_args: &'a ImageArgs,
-        js_next_frame: Option<GetJsFrameCallback>,
+    pub fn new<R: io::BufRead + io::Seek + 'a>(
+        mut reader: R, image_args: &'a ImageArgs, js_next_frame: Option<GetJsFrameCallback>,
     ) -> Result<Self, JsError> {
         let mut info: ImageArgs = image_args.clone();
         let state = match image_args.mime_type.as_str() {
@@ -424,8 +427,8 @@ impl<'a> ImageFrameData<'a> {
             },
             t if t.starts_with("image/") || matches!(image_args.mode, Mode::Static { .. }) => {
                 let use_combs = matches!(image_args.mode, Mode::Static { combs: true, .. });
+                info.duration = Some(1000.0 * f64::from(use_combs));
                 info.n_frames = Some(1);
-                info.duration = Some(if use_combs { 1000.0 } else { 0.0 });
 
                 let dim = image_args.dimensions.ok_or_js_err("No image size")?;
                 let mut data = Vec::new();
@@ -452,6 +455,83 @@ impl<'a> ImageFrameData<'a> {
 
         Ok(ImageFrameData { decoder, info })
     }
+}
+
+pub type GifColorCountMap = HashMap<[u8; 4], u32, IdentityHasherBuilder>;
+
+pub fn count_gif_colors<R: io::Read>(
+    reader: R, total_duration: Option<f64>,
+) -> Result<GifColorCountMap, JsError> {
+    let mut options = gif::DecodeOptions::new();
+    options.set_color_output(gif::ColorOutput::Indexed);
+
+    let mut curr_total_duration = 0_u64;
+    let mut decoder = options.read_info(reader)?;
+    let mut colors: GifColorCountMap = HashMap::with_hasher(IdentityHasherBuilder::default());
+
+    while let Some(frame) = decoder.read_next_frame()? {
+        let duration_ms = u64::from(frame.delay) * 10; // `frame.delay` is in units of 10ms
+        let mut counts = [0_u64; 256];
+
+        if let Some(total_duration) = total_duration {
+            set_progress(
+                0.0,
+                1.0,
+                curr_total_duration as f64 / (1000.0 * total_duration),
+                "Finding GIF color palette...",
+            );
+        }
+
+        for &i in frame.buffer.iter() {
+            if likely(frame.transparent != Some(i)) {
+                counts[i as usize] += 1;
+            }
+        }
+
+        let palette = decoder.palette()?;
+        for (i, count) in counts.into_iter().enumerate() {
+            if count == 0 {
+                continue;
+            }
+
+            let i = i * 3;
+            let rgba = [palette[i], palette[i + 1], palette[i + 2], 255];
+
+            *colors.entry(rgba).or_default() += count as u32;
+        }
+
+        curr_total_duration += duration_ms;
+    }
+
+    Ok(colors)
+}
+
+pub fn color_counts_to_palette(
+    color_counts: GifColorCountMap, size: u32, speed: i32,
+) -> Result<ColorPalette, JsError> {
+    let mut attr = imagequant::Attributes::new();
+    attr.set_max_colors(size)?;
+    attr.set_speed(speed)?;
+
+    let color_counts = color_counts
+        .into_iter()
+        .map(|(color, count)| imagequant::HistogramEntry { color: bytemuck::cast(color), count })
+        .collect::<Box<_>>();
+    let mut result = {
+        let mut hist = imagequant::Histogram::new(&attr);
+        hist.add_colors(&color_counts, 0.0)?;
+        hist.quantize(&attr)?
+    };
+    let mut colors = result.palette_vec().into_iter().map(|c| [c.r, c.g, c.b]).collect::<Box<_>>();
+
+    if let Some(darkest) = (0..colors.len()).min_by_key(|&i| {
+        let c = colors[i];
+        c[0].saturating_add(c[1]).saturating_add(c[2])
+    }) {
+        colors.swap(0, darkest);
+    }
+
+    ColorPalette::new(colors)
 }
 
 /// Picks one palette of `size` colors for all frames. Index 0 is always black,
