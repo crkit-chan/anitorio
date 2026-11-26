@@ -1,20 +1,28 @@
 #![feature(
     cold_path,
     const_cmp,
+    const_convert,
     const_default,
     const_destruct,
     const_result_trait_fn,
     const_trait_impl,
-    likely_unlikely
+    const_slice_make_iter,
+    hash_set_entry,
+    inherent_associated_types,
+    likely_unlikely,
+    proc_macro_hygiene,
+    stmt_expr_attributes
 )]
 
-extern crate alloc;
-
+pub use anitorio_macros::perf;
+#[cfg(feature = "perf_timing")]
+pub use callbacks::perf_now;
 use wasm_bindgen::prelude::*;
 
 mod blueprint;
 mod callbacks;
 mod constants;
+mod hash;
 mod image_processing;
 mod image_util;
 mod ioutil;
@@ -32,7 +40,6 @@ mod util;
 /// This function will return an error if rayon fails to initialize.
 #[wasm_bindgen]
 #[allow(
-    clippy::allow_attributes,
     clippy::unused_async,
     unused,
     reason = "n_threads only used when threads feature is enabled"
@@ -71,28 +78,21 @@ pub struct OnFrameArgs {
 #[serde(rename_all = "camelCase")]
 pub struct RunBlueprintCallbacks {
     #[serde(with = "serde_wasm_bindgen::preserve")]
-    pub get_data: ts::TsFn<fn(ts::TsNum, ts::TsNum) -> js_sys::Uint8Array>,
-
+    pub get_data:        ts::TsFn<fn(ts::TsNum, ts::TsNum) -> js_sys::Uint8Array>,
     #[serde(with = "serde_wasm_bindgen::preserve")]
-    pub get_data_len: ts::TsFn<fn() -> ts::TsNum>,
-
+    pub get_data_len:    ts::TsFn<fn() -> ts::TsNum>,
     #[serde(with = "serde_wasm_bindgen::preserve")]
-    pub get_next_frame: ts::TsFn<fn(JsValue) -> ts::TsFut<JsValue>>,
-
+    pub get_next_frame:  ts::TsFn<fn(JsValue) -> ts::TsFut<JsValue>>,
     #[serde(with = "serde_wasm_bindgen::preserve")]
-    pub js_yield: ts::TsFn<fn() -> ts::TsFut>,
-
+    pub js_yield:        ts::TsFn<fn() -> ts::TsFut>,
     #[serde(with = "serde_wasm_bindgen::preserve")]
-    pub on_chunk: ts::TsFn<fn(js_sys::Uint8Array) -> ts::TsFut>,
-
+    pub on_chunk:        ts::TsFn<fn(js_sys::Uint8Array) -> ts::TsFut>,
     #[serde(with = "serde_wasm_bindgen::preserve")]
-    pub on_frame: ts::TsFn<fn(ts::TsIntoRust<OnFrameArgs>) -> ts::TsFut>,
-
+    pub on_frame:        ts::TsFn<fn(ts::TsIntoRust<OnFrameArgs>) -> ts::TsFut>,
     #[serde(with = "serde_wasm_bindgen::preserve")]
     pub reset_generator: ts::TsFn<fn() -> ts::TsFut>,
-
     #[serde(with = "serde_wasm_bindgen::preserve")]
-    pub should_preview: ts::TsFn<fn() -> ts::TsBool>,
+    pub should_preview:  ts::TsFn<fn() -> ts::TsBool>,
 }
 
 /// Public entry point for WebAssembly.
@@ -100,7 +100,8 @@ pub struct RunBlueprintCallbacks {
 /// # Parameters
 ///
 /// - `options`: Options dict passed in
-/// - `image_data`: A ``Uint8Array`` passed in from JS. May be empty if `mode` (specified in ``options``) is not `"full"`.
+/// - `image_data`: A ``Uint8Array`` passed in from JS. May be empty if `mode`
+///   (specified in ``options``) is not `"full"`.
 ///
 /// # Returns
 ///
@@ -115,17 +116,19 @@ pub struct RunBlueprintCallbacks {
 /// Returns ``JsValue`` if any error occurs.
 #[wasm_bindgen]
 pub async fn run_blueprint(
-    args: tsify::Ts<models::BlueprintArgs>,
-    callbacks: tsify::Ts<RunBlueprintCallbacks>,
+    args: tsify::Ts<models::BlueprintArgs>, callbacks: tsify::Ts<RunBlueprintCallbacks>,
 ) -> Result<JsValue, JsError> {
-    use crate::prelude::*;
-    use alloc::rc::Rc;
-    use blueprint::{encoder::BlueprintEncoder, generator::BlueprintGenerator};
-    use core::cell::{Cell, RefCell};
+    use std::cell::{Cell, RefCell};
+    use std::rc::Rc;
+
+    use blueprint::encoder::BlueprintEncoder;
+    use blueprint::generator::BlueprintGenerator;
+    use blueprint::models::SignalID;
     use image_processing::{FrameCallback, FrameData, ImageFrameData};
     use ioutil::JsFileReader;
-    use js_sys as js;
     use models::BlueprintArgs;
+
+    use crate::prelude::*;
 
     const SYNC_TIME_MS: f64 = 1000.0;
 
@@ -134,6 +137,18 @@ pub async fn run_blueprint(
     let on_frame = Rc::new(cbs.on_frame);
     let should_show_preview = Rc::new(cbs.should_preview);
     let yield_to_js = Rc::new(cbs.js_yield);
+
+    args.timing_signals = (args.timing_signals.into_iter())
+        .map(|(k, sig)| Ok((k, SignalID::intern(sig.type_.as_ref(), sig.name.as_ref())?)))
+        .collect::<Result<_, JsError>>()?;
+
+    if let Some(ref name) = args.power_pole_name {
+        let ref_sig =
+            SignalID::intern_with_quality("entity", name, args.power_pole_quality.as_deref())?;
+
+        args.power_pole_name = Some(RC::clone(&ref_sig.name));
+        args.power_pole_quality = Some(RC::clone(&ref_sig.quality));
+    }
 
     let mut frame_data: Option<FrameData> = None;
     let promises = Rc::new(const { RefCell::new(Vec::<ts::TsFut>::new()) });
@@ -236,8 +251,8 @@ pub async fn run_blueprint(
     let mut encoder = BlueprintEncoder::new(generator, &args, writer)?;
 
     let flush = async || -> Result<(), JsError> {
-        let js_promises = js::Array::from(&JsValue::from(promises.take()));
-        (js::Promise::all(&js_promises).await).map_js_err("Could not wait for write")?;
+        let js_promises = js_sys::Array::from(&JsValue::from(promises.take()));
+        (js_sys::Promise::all(&js_promises).await).map_js_err("Could not wait for write")?;
         Ok(())
     };
 
@@ -251,7 +266,7 @@ pub async fn run_blueprint(
 
     flush().await?; // Flush tail
 
-    let obj = js::Object::new();
+    let obj = js_sys::Object::new();
     Ok(JsValue::from(obj))
 }
 
@@ -266,10 +281,11 @@ pub async fn run_blueprint(
 ///
 /// # Errors
 ///
-/// ``JsValue`` if any error occurs.
+/// ``JsError`` if any error occurs.
 #[wasm_bindgen]
 pub fn set_signal_data(data_json: js_sys::Uint8Array) -> Result<(), JsError> {
     let reader = ioutil::Uint8ArrayReader::new(data_json);
+    let reader = std::io::BufReader::new(reader);
     blueprint::data::load_data(reader)?;
     Ok(())
 }
@@ -278,10 +294,11 @@ pub fn set_signal_data(data_json: js_sys::Uint8Array) -> Result<(), JsError> {
 ///
 /// # Errors
 ///
-/// ``JsValue`` if any error occurs.
+/// ``JsError`` if any error occurs.
 #[wasm_bindgen]
 pub fn set_comb_pos_data(data_json: js_sys::Uint8Array) -> Result<(), JsError> {
     let reader = ioutil::Uint8ArrayReader::new(data_json);
+    let reader = std::io::BufReader::new(reader);
     blueprint::combinator::load_comb_pos_json(reader)?;
     Ok(())
 }
@@ -300,8 +317,7 @@ pub struct EncodeGifCallbacks {
 /// ``JsValue`` if any error occurs.
 #[wasm_bindgen]
 pub async fn encode_gif(
-    args: JsValue,
-    callbacks: tsify::Ts<EncodeGifCallbacks>,
+    args: JsValue, callbacks: tsify::Ts<EncodeGifCallbacks>,
 ) -> Result<(), JsError> {
     use image_processing::{JsVideoFrameCallback, encode_gif};
     use util::JsReflectGetSet as _;

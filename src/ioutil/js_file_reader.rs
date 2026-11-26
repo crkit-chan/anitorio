@@ -1,13 +1,15 @@
-use crate::prelude::*;
-use crate::{ts, util::JsCall as _};
 use std::io;
+
+use crate::prelude::*;
+use crate::ts;
+use crate::util::JsCall as _;
 
 pub type JsFileReaderCallback = ts::TsFn<fn(ts::TsNum, ts::TsNum) -> js_sys::Uint8Array>;
 
 const MAX_SAFE_F64_INT: u64 = (1_u64 << 53) - 1;
 
-// Note we use a ``u64`` for the position, because the file size can be larger than 2^32-1.
-// Maximum pointer size for JS is 2^53.
+// Note we use a ``u64`` for the position, because the file size can be larger
+// than 2^32-1. Maximum pointer size for JS is 2^53.
 
 /// A JavaScript file reader.
 pub struct JsFileReader {
@@ -20,7 +22,7 @@ pub struct JsFileReader {
     chunk_size:  usize,
 }
 impl JsFileReader {
-    pub fn new(callback: JsFileReaderCallback, size: u64, chunk_size: usize) -> Self {
+    pub const fn new(callback: JsFileReaderCallback, size: u64, chunk_size: usize) -> Self {
         Self {
             callback,
             pos: 0,
@@ -55,7 +57,7 @@ impl JsFileReader {
         Ok(())
     }
 
-    #[allow(clippy::allow_attributes, dead_code, reason = "api")]
+    #[allow(dead_code, reason = "api")]
     pub fn reset(&mut self) {
         self.cache.clear();
         self.cache_start = 0;

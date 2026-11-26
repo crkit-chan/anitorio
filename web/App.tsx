@@ -388,7 +388,7 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
       },
       maxGroupSize: +formData.maxGroupSize! || undefined,
       name: currFile()!.name,
-      powerPoleQuality: formData.powerPoleQuality ?? undefined,
+      powerPoleQuality: formData.powerPoleQuality === "<default>" ? undefined : (formData.powerPoleQuality ?? undefined),
       preferGreenWires: !!(formData.wireColor === "green"),
       preferHorizontalWires: !!(formData.connectionDirection === "horizontal"),
       signalCompression:

@@ -1,17 +1,17 @@
-use super::generator::BlueprintGenerator;
-use crate::constants::FACTORIO_VERSION_PREFIX;
-use crate::prelude::*;
-use base64::{
-    engine::{GeneralPurpose, general_purpose::STANDARD},
-    write::EncoderWriter,
-};
-use flate2::{Compression, write::ZlibEncoder};
 use std::io::{self, Write};
 
 #[cfg(feature = "threads")]
 use async_channel::{Receiver, Sender};
-#[cfg(feature = "threads")]
-use rayon::spawn;
+use base64::engine::GeneralPurpose;
+use base64::engine::general_purpose::STANDARD;
+use base64::write::EncoderWriter;
+use flate2::Compression;
+use flate2::write::ZlibEncoder;
+#[cfg(feature = "threads")] use rayon::spawn;
+
+use super::generator::BlueprintGenerator;
+use crate::constants::FACTORIO_VERSION_PREFIX;
+use crate::prelude::*;
 
 #[cfg(feature = "threads")]
 enum CompressionMode {
@@ -39,9 +39,7 @@ impl Write for ChannelWriter {
 
 #[cfg(feature = "threads")]
 fn compress(
-    mode: &CompressionMode,
-    input: &Receiver<Vec<u8>>,
-    output: &Sender<Result<Vec<u8>, String>>,
+    mode: &CompressionMode, input: &Receiver<Vec<u8>>, output: &Sender<Result<Vec<u8>, String>>,
 ) -> io::Result<()> {
     let writer = ChannelWriter { tx: output.clone() };
     let writer = io::BufWriter::with_capacity(64 * 1024, writer);
@@ -53,14 +51,14 @@ fn compress(
                 encoder.write_all(&chunk)?;
             }
             encoder.finish()?.finish()
-        }
+        },
         CompressionMode::RawCompressed => {
             let mut encoder = ZlibEncoder::new(writer, Compression::best());
             while let Ok(chunk) = futures_lite::future::block_on(input.recv()) {
                 encoder.write_all(&chunk)?;
             }
             encoder.finish()
-        }
+        },
     }?;
     Ok(())
 }
@@ -176,13 +174,13 @@ impl<W: Write> OutputWriter<'_, W> {
             Self::Json(mut w) => {
                 w.flush()?;
                 w
-            }
+            },
             Self::RawCompressed(z) => z.finish()?,
             #[cfg(feature = "threads")]
             Self::ThreadedCompressed { compressor, writer } => {
                 drop(compressor);
                 writer
-            }
+            },
         })
     }
 }
@@ -193,9 +191,7 @@ pub struct BlueprintEncoder<'a, W: Write> {
 }
 impl<'a, W: Write> BlueprintEncoder<'a, W> {
     pub fn new(
-        generator: BlueprintGenerator<'a>,
-        args: &BlueprintArgs,
-        mut writer: W,
+        generator: BlueprintGenerator<'a>, args: &BlueprintArgs, mut writer: W,
     ) -> Result<Self, JsError> {
         if args.output_format == OutputFormat::Blueprint {
             let prefix = FACTORIO_VERSION_PREFIX.as_bytes();
@@ -205,7 +201,7 @@ impl<'a, W: Write> BlueprintEncoder<'a, W> {
             #[cfg(feature = "threads")]
             OutputFormat::Blueprint if args.use_threads => {
                 OutputWriter::new_threaded_compressed(CompressionMode::Blueprint, writer)
-            }
+            },
             OutputFormat::Blueprint => OutputWriter::Blueprint(Box::new(ZlibEncoder::new(
                 EncoderWriter::new(writer, &STANDARD),
                 Compression::best(),
@@ -213,10 +209,10 @@ impl<'a, W: Write> BlueprintEncoder<'a, W> {
             #[cfg(feature = "threads")]
             OutputFormat::RawCompressed if args.use_threads => {
                 OutputWriter::new_threaded_compressed(CompressionMode::RawCompressed, writer)
-            }
+            },
             OutputFormat::RawCompressed => {
                 OutputWriter::RawCompressed(ZlibEncoder::new(writer, Compression::best()))
-            }
+            },
             _ => OutputWriter::Json(writer),
         };
         Ok(Self { generator, writer })
@@ -237,12 +233,7 @@ impl<'a, W: Write> BlueprintEncoder<'a, W> {
         Ok(Some(()))
     }
 
-    #[allow(
-        clippy::allow_attributes,
-        clippy::unused_async,
-        unused_mut,
-        reason = "Only enabled with threads"
-    )]
+    #[allow(clippy::unused_async, unused_mut, reason = "Only enabled with threads")]
     pub async fn finish(mut self) -> Result<W, JsError> {
         report_progress(1.0, "Finishing...");
 

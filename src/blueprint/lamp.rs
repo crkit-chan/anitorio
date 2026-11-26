@@ -1,9 +1,10 @@
+use std::ops::Not as _;
+
+use glam::{DVec2, UVec2, dvec2};
+
 use super::power_pole::PowerPoleOccupied;
 use super::prelude::*;
 use crate::prelude::*;
-use alloc::sync::Arc;
-use core::ops::Not as _;
-use glam::{DVec2, UVec2, dvec2};
 
 type GenerateLampsOutput = (
     Vec<BlueprintEntity>,
@@ -25,16 +26,12 @@ type GenerateLampsOutput = (
 ///
 /// # Returns
 ///
-/// A tuple with lamp entities, lamp wires, the next entity number, and the top-right lamp entity.
-#[expect(clippy::needless_pass_by_value, reason = "Arc")]
+/// A tuple with lamp entities, lamp wires, the next entity number, and the
+/// top-right lamp entity.
+#[expect(clippy::needless_pass_by_value, reason = "RC")]
 pub fn generate_lamps(
-    signals: &[SignalID],
-    grid_dim: UVec2,
-    curr_frame: Option<Arc<image::DynamicImage>>,
-    occupied: &mut PowerPoleOccupied,
-    base_ent_n: u32,
-    start_pos: DVec2,
-    args: &BlueprintArgs,
+    signals: &[RC<SignalID>], grid_dim: UVec2, curr_frame: Option<RC<image::DynamicImage>>,
+    occupied: &mut PowerPoleOccupied, base_ent_n: u32, start_pos: DVec2, args: &BlueprintArgs,
 ) -> Result<GenerateLampsOutput, JsError> {
     let mut ents = Vec::new();
     let mut wires = Wires::new();
@@ -63,7 +60,7 @@ pub fn generate_lamps(
 
             let curr_ent_n = get_ent_num(r as u32, c as u32);
             let mut lamp =
-                BlueprintEntity::new(curr_ent_n, &constants::ENT_LAMP, pos).with_always_on(true);
+                BlueprintEntity::new(curr_ent_n, constants::LAMP, pos).with_always_on(true);
             let index = r * grid_dim.x as usize + c;
 
             if unlikely(top_right_ent_n.is_none()) {
@@ -87,10 +84,10 @@ pub fn generate_lamps(
                 lamp = lamp.with_control_behavior(ControlBehavior::Lamp {
                     use_colors:   true,
                     color_mode:   if grayscale_bits > 0 { 1 } else { 2 },
-                    red_signal:   (grayscale_bits > 0).then(|| sig.clone()),
-                    green_signal: (grayscale_bits > 0).then(|| sig.clone()),
-                    blue_signal:  (grayscale_bits > 0).then(|| sig.clone()),
-                    rgb_signal:   (grayscale_bits > 0).not().then(|| sig.clone()),
+                    red_signal:   (grayscale_bits > 0).then(|| RC::clone(sig)),
+                    green_signal: (grayscale_bits > 0).then(|| RC::clone(sig)),
+                    blue_signal:  (grayscale_bits > 0).then(|| RC::clone(sig)),
+                    rgb_signal:   (grayscale_bits > 0).not().then(|| RC::clone(sig)),
                 });
             }
 

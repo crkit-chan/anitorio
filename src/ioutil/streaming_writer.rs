@@ -1,19 +1,17 @@
 use std::io::{self, Write};
+
 use wasm_bindgen::prelude::*;
 
-/// Custom writer that buffers data and calls a callback when the buffer reaches a certain threshold.
+/// Custom writer that buffers data and calls a callback when the buffer reaches
+/// a certain threshold.
 pub struct StreamingWriter<F: FnMut(Vec<u8>) -> Result<(), JsValue>> {
     buffer:    Vec<u8>,
     threshold: usize,
     on_chunk:  F,
 }
 impl<F: FnMut(Vec<u8>) -> Result<(), JsValue>> StreamingWriter<F> {
-    pub fn new(threshold: usize, on_chunk: F) -> Self {
-        Self {
-            buffer: Vec::with_capacity(threshold),
-            threshold,
-            on_chunk,
-        }
+    pub const fn new(threshold: usize, on_chunk: F) -> Self {
+        Self { buffer: Vec::new(), threshold, on_chunk }
     }
 
     #[inline]
@@ -26,7 +24,7 @@ impl<F: FnMut(Vec<u8>) -> Result<(), JsValue>> StreamingWriter<F> {
     fn emit(&mut self) -> io::Result<()> {
         while self.buffer.len() >= self.threshold {
             let remainder = self.buffer.split_off(self.threshold);
-            let chunk = core::mem::replace(&mut self.buffer, remainder);
+            let chunk = std::mem::replace(&mut self.buffer, remainder);
             self.call_on_chunk(chunk)?;
         }
         Ok(())
@@ -34,7 +32,7 @@ impl<F: FnMut(Vec<u8>) -> Result<(), JsValue>> StreamingWriter<F> {
 
     pub fn finish(&mut self) -> io::Result<()> {
         if !self.buffer.is_empty() {
-            let chunk = core::mem::take(&mut self.buffer);
+            let chunk = std::mem::take(&mut self.buffer);
             self.call_on_chunk(chunk)?;
         }
         Ok(())

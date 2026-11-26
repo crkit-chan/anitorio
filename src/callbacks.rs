@@ -1,6 +1,9 @@
-use crate::{prelude::*, ts};
-use core::cell::RefCell;
+use std::cell::RefCell;
+
 use wasm_bindgen::prelude::*;
+
+use crate::prelude::*;
+use crate::ts;
 
 #[derive(tsify::Tsify, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -10,35 +13,41 @@ pub struct Callbacks {
 
     #[serde(with = "serde_wasm_bindgen::preserve")]
     pub on_progress: ts::TsFn<fn(ts::TsNum, ts::TsStr) -> ts::TsVoid>,
-
-    #[serde(with = "serde_wasm_bindgen::preserve")]
-    #[allow(clippy::allow_attributes, dead_code, reason = "api")]
-    pub perf_now: ts::TsFn<fn() -> ts::TsNum>,
 }
 
 thread_local! {
     static CALLBACKS: RefCell<Option<Callbacks>> = const { RefCell::new(None) };
 
     #[cfg(feature = "perf_timing")]
-    static WEB_SYS_PERFORMANCE: std::sync::LazyLock<web_sys::Performance> = const {
-        std::sync::LazyLock::new(|| {
+    static WEB_SYS_PERFORMANCE: std::sync::LazyLock<web_sys::Performance> = std::sync::LazyLock::new(
+        || {
             fn init() -> Result<web_sys::Performance, JsError> {
-                let js_global = js_sys::global().dyn_into::<web_sys::WorkerGlobalScope>()
-                    .map_js_err("Could not access 'global' field on JS")?;
-                js_global.performance().ok_or_else(|| js_err!("No 'performance' field on JS 'global'"))
+                let performance =
+                    if let Ok(js_global) = js_sys::global().dyn_into::<web_sys::WorkerGlobalScope>() {
+                        js_global.performance()
+                    } else if let Some(window) = web_sys::window() {
+                        window.performance()
+                    } else {
+                        err_js!("Could not access 'global' field on JS");
+                    };
+                performance.ok_or_else(|| js_err!("No 'performance' field!"))
             }
 
-            #[expect(clippy::unwrap_used, reason = "For performance-critical access, this returns the value directly instead of wrapping in a Result<>")]
+            #[expect(
+                clippy::unwrap_used,
+                reason = "For performance-critical access, this returns the value directly instead of wrapping in a Result<>"
+            )]
             init().map_js_err("Could not initialize performance object").unwrap()
-        })
-    };
+        },
+    );
 }
 
 /// Sets the static callbacks to be used during blueprint generation.
 ///
 /// # Arguments
 ///
-/// * `callbacks` - An object of JS functions that will be called during the generation process.
+/// * `callbacks` - An object of JS functions that will be called during the
+///   generation process.
 #[wasm_bindgen]
 pub fn set_callbacks(callbacks: &tsify::Ts<Callbacks>) -> Result<(), JsError> {
     CALLBACKS.with_borrow_mut(|cbs| {
@@ -75,12 +84,13 @@ pub fn set_progress(start: f64, end: f64, progress: f64, msg: &str) {
     report_progress(progress.mul_add(end - start, start), msg);
 }
 
-#[allow(clippy::allow_attributes, dead_code, reason = "api")]
 #[inline]
+#[must_use]
+#[allow(dead_code, reason = "api")]
 pub fn perf_now() -> f64 {
     #[cfg(feature = "perf_timing")]
     {
-        WEB_SYS_PERFORMANCE.with(|obj| obj.now())
+        WEB_SYS_PERFORMANCE.with(|perf| perf.now())
     }
 
     #[cfg(not(feature = "perf_timing"))]

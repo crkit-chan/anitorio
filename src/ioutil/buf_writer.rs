@@ -1,4 +1,5 @@
 use std::io::{self, Write};
+
 use wasm_bindgen::prelude::*;
 
 enum BufWriterState<F: FnMut(Vec<u8>) -> Result<(), JsValue>> {

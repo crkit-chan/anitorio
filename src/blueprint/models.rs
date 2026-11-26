@@ -1,20 +1,17 @@
 #![allow(dead_code, reason = "Satisfy Factorio Lua API")]
-#![allow(
-    clippy::allow_attributes,
-    clippy::struct_field_names,
-    reason = "Factorio Lua API"
-)]
+#![allow(clippy::struct_field_names, reason = "Factorio Lua API")]
 
-use super::dvec2_xy;
-use crate::blueprint::data::{PROTOTYPE_DATA, SignalIDRepr};
-use crate::blueprint::prelude::{DEFAULT_QUALITY, DEFAULT_SIGNAL_TYPE};
-use crate::models::RawJsonString;
-use crate::prelude::*;
-use crate::util::{is_default, is_none_or_default};
 use glam::DVec2;
 use serde::{Deserialize, Serialize};
 use tsify::Tsify;
 use wasm_bindgen::prelude::*;
+
+use super::dvec2_xy;
+use crate::blueprint::data::{PrototypeData, with_prototype_data};
+use crate::blueprint::prelude::*;
+use crate::models::RawJsonString;
+use crate::prelude::*;
+use crate::util::{is_default, is_none_or_default};
 
 pub struct ObjectGeneratorMetadata {
     pub wires:      Wires,
@@ -40,30 +37,32 @@ pub enum ArithmeticCombinatorParameterOperation {
 
 #[derive(Tsify, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ArithmeticCombinatorParameters {
-    /// First signal to use in an operation. If not specified, the second argument will be the
-    /// value of ``first_constant``.
+    /// First signal to use in an operation. If not specified, the second
+    /// argument will be the value of ``first_constant``.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub first_signal:           Option<SignalID>,
-    /// Which circuit networks (red/green) to read ``first_signal`` from. Defaults to both.
+    pub first_signal:           Option<RC<SignalID>>,
+    /// Which circuit networks (red/green) to read ``first_signal`` from.
+    /// Defaults to both.
     #[serde(default, skip_serializing_if = "is_default")]
     pub first_signal_networks:  CircuitNetworkSelection,
     /// When not specified, defaults to "*".
     #[serde(default, skip_serializing_if = "is_default")]
     pub operation:              ArithmeticCombinatorParameterOperation,
-    /// Second signal to use in an operation. If not specified, the second argument will be the
-    /// value of ``second_constant``.
+    /// Second signal to use in an operation. If not specified, the second
+    /// argument will be the value of ``second_constant``.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub second_signal:          Option<SignalID>,
-    /// Which circuit networks (red/green) to read ``second_signal`` from. Defaults to both.
+    pub second_signal:          Option<RC<SignalID>>,
+    /// Which circuit networks (red/green) to read ``second_signal`` from.
+    /// Defaults to both.
     #[serde(default, skip_serializing_if = "is_default")]
     pub second_signal_networks: CircuitNetworkSelection,
-    /// Constant to use as the second argument of the operation. Has no effect when
-    /// ``second_signal`` is set. Defaults to 0.
+    /// Constant to use as the second argument of the operation. Has no effect
+    /// when ``second_signal`` is set. Defaults to 0.
     #[serde(default, skip_serializing_if = "is_default")]
     pub second_constant:        i32,
     /// Specifies the signal to output.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output_signal:          Option<SignalID>,
+    pub output_signal:          Option<RC<SignalID>>,
 }
 impl ArithmeticCombinatorParameters {
     pub const fn swap_networks(&mut self) {
@@ -78,7 +77,8 @@ pub struct Blueprint {
 }
 impl Blueprint {
     pub fn from_blueprint<T: AsRef<[u8]>>(src: T) -> Result<Self, JsError> {
-        use base64::{Engine as _, engine::general_purpose::STANDARD};
+        use base64::Engine as _;
+        use base64::engine::general_purpose::STANDARD;
 
         // Remove the leading "0" prefix
         let b64 = (STANDARD.decode(&src.as_ref()[1..]))?;
@@ -130,7 +130,7 @@ macro_rules! blueprint_entity_property {
                         return;
                     }
                 }
-                let mut properties = core::mem::take(&mut self.properties).into_vec();
+                let mut properties = std::mem::take(&mut self.properties).into_vec();
                 properties.push(BlueprintEntityProperty::$name(v.to_owned()));
                 self.properties = properties.into();
             }
@@ -169,7 +169,7 @@ macro_rules! blueprint_entity_property {
                         return;
                     }
                 }
-                let mut properties = core::mem::take(&mut self.properties).into_vec();
+                let mut properties = std::mem::take(&mut self.properties).into_vec();
                 properties.push(BlueprintEntityProperty::$name(v.to_owned()));
                 self.properties = properties.into();
             }
@@ -189,7 +189,7 @@ pub struct BlueprintEntity {
     /// The entity's unique identifier in the blueprint.
     pub entity_number: u32,
     /// Reference to the prototype name + quality of the Entity
-    signal_ref:        SignalID,
+    signal_ref:        RC<SignalID>,
     /// The position of the entity.
     #[serde(with = "dvec2_xy")]
     pub position:      DVec2,
@@ -197,11 +197,26 @@ pub struct BlueprintEntity {
 }
 impl BlueprintEntity {
     /// Create a new entity with default None values for optional fields
-    #[must_use]
     #[inline]
-    pub fn new(entity_number: u32, signal: &SignalID, position: DVec2) -> Self {
-        let signal_ref = signal.clone();
+    #[must_use]
+    #[expect(
+        clippy::unwrap_used,
+        reason = "Convenience function that should panic!"
+    )]
+    pub fn new(entity_number: u32, name: &str, position: DVec2) -> Self {
         let properties = boxed_slice![];
+        let signal_ref = SignalID::intern("entity", name).unwrap();
+        Self { entity_number, signal_ref, position, properties }
+    }
+
+    /// Create a new entity with default None values for optional fields
+    #[inline]
+    #[must_use]
+    pub fn new_from_signal(
+        entity_number: u32, signal: impl Into<RC<SignalID>>, position: DVec2,
+    ) -> Self {
+        let properties = boxed_slice![];
+        let signal_ref = signal.into();
         Self { entity_number, signal_ref, position, properties }
     }
 
@@ -221,8 +236,8 @@ impl BlueprintEntity {
 
     #[must_use]
     #[inline]
-    pub fn name(&self) -> String {
-        self.signal_ref.name()
+    pub fn name(&self) -> RC<str> {
+        RC::clone(&self.signal_ref.name)
     }
 }
 impl Serialize for BlueprintEntity {
@@ -241,12 +256,12 @@ impl Serialize for BlueprintEntity {
                 BlueprintEntityProperty::Color(ref v) => map.serialize_entry("color", v),
                 BlueprintEntityProperty::ControlBehavior(ref v) => {
                     map.serialize_entry("control_behavior", v)
-                }
+                },
                 BlueprintEntityProperty::CustomTag(..) => Ok(()),
                 BlueprintEntityProperty::Direction(ref v) => map.serialize_entry("direction", v),
                 BlueprintEntityProperty::PlayerDescription(ref v) => {
                     map.serialize_entry("player_description", v)
-                }
+                },
             }?;
         }
 
@@ -289,14 +304,8 @@ impl<'de> Deserialize<'de> for BlueprintEntity {
         }
 
         Ok(Self {
-            signal_ref:    SignalID::try_from(SignalIDRepr {
-                type_:   Some("entity".to_owned()),
-                name:    en.name,
-                quality: en.quality,
-            })
-            .map_err(|e| {
-                serde::de::Error::custom(format!("Could not deserialize entity: {e:?}"))
-            })?,
+            signal_ref:    SignalID::intern_with_quality("entity", &en.name, en.quality.as_deref())
+                .map_err(|e| serde::de::Error::custom(format!("Could not parse signal: {e:?}")))?,
             entity_number: en.entity_number,
             position:      en.position,
             properties:    properties.into_boxed_slice(),
@@ -311,8 +320,9 @@ pub enum BlueprintEntityProperty {
     ControlBehavior(ControlBehavior),
     #[serde(skip)]
     CustomTag(String),
-    /// The direction the entity is facing. Only present for entities that can face in
-    /// different directions and when the entity is not facing north.
+    /// The direction the entity is facing. Only present for entities that can
+    /// face in different directions and when the entity is not facing
+    /// north.
     Direction(u8),
     PlayerDescription(String),
 }
@@ -338,7 +348,7 @@ pub struct BlueprintInner {
 pub struct BlueprintLogisticFilter {
     pub index:      LogisticFilterIndex,
     #[serde(flatten)]
-    signal_ref:     SignalID,
+    signal_ref:     RC<SignalID>,
     /// The comparator for quality. nil if any quality.
     #[serde(default)]
     pub comparator: Option<ComparatorString>,
@@ -348,14 +358,11 @@ pub struct BlueprintLogisticFilter {
 impl BlueprintLogisticFilter {
     #[inline]
     pub fn new<C: TryInto<ComparatorString>>(
-        index: LogisticFilterIndex,
-        signal_ref: &SignalID,
-        comparator: C,
-        count: i32,
+        index: LogisticFilterIndex, signal_ref: &RC<SignalID>, comparator: C, count: i32,
     ) -> Result<Self, C::Error> {
         Ok(Self {
             index,
-            signal_ref: signal_ref.clone(),
+            signal_ref: RC::clone(signal_ref),
             comparator: Some(comparator.try_into()?),
             count,
         })
@@ -418,8 +425,9 @@ impl Color {
 
 /// A string that specifies how the inputs should be compared.
 ///
-/// While the API accepts both versions for "less/greater than or equal to" and "not equal",
-/// it'll always return "≥", "≤" or "≠" respectively when reading them back.
+/// While the API accepts both versions for "less/greater than or equal to" and
+/// "not equal", it'll always return "≥", "≤" or "≠" respectively when reading
+/// them back.
 #[derive(Tsify, Default, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ComparatorString {
     /// "equal to"
@@ -452,11 +460,7 @@ impl TryFrom<&str> for ComparatorString {
             ">=" | "ge" | "gte" => Self::Ge,
             "<=" | "le" | "lte" => Self::Le,
             "!=" | "^" | "ne" | "neq" => Self::Ne,
-            _ => {
-                return Err(js_err!(
-                    "Attempted to parse unknown ComparatorString '{other}'"
-                ));
-            }
+            _ => err_js!("Attempted to parse unknown ComparatorString '{other}'"),
         })
     }
 }
@@ -478,13 +482,13 @@ pub enum ControlBehavior {
         #[serde(default, skip_serializing_if = "is_default")]
         use_colors:   bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        red_signal:   Option<SignalID>,
+        red_signal:   Option<RC<SignalID>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        green_signal: Option<SignalID>,
+        green_signal: Option<RC<SignalID>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        blue_signal:  Option<SignalID>,
+        blue_signal:  Option<RC<SignalID>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        rgb_signal:   Option<SignalID>,
+        rgb_signal:   Option<RC<SignalID>>,
         /// Defaults to ``defines.control_behavior.lamp.color_mapping``.
         color_mode:   i8,
     },
@@ -494,14 +498,14 @@ pub enum ControlBehavior {
     },
 }
 impl ControlBehavior {
-    #[must_use]
     #[inline]
+    #[must_use]
     pub const fn arithmetic(arithmetic_conditions: ArithmeticCombinatorParameters) -> Self {
         Self::ArithmeticCombinator { arithmetic_conditions }
     }
 
-    #[must_use]
     #[inline]
+    #[must_use]
     pub const fn decider(decider_conditions: DeciderCombinatorParameters) -> Self {
         Self::DeciderCombinator { decider_conditions }
     }
@@ -513,8 +517,8 @@ impl ControlBehavior {
             Self::DeciderCombinator { decider_conditions: ref mut conds } => conds.swap_networks(),
             Self::ArithmeticCombinator { arithmetic_conditions: ref mut conds } => {
                 conds.swap_networks();
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 }
@@ -526,7 +530,7 @@ struct CircuitNetworkSelectionRepr {
     pub green: bool,
 }
 
-impl From<CircuitNetworkSelectionRepr> for CircuitNetworkSelection {
+impl const From<CircuitNetworkSelectionRepr> for CircuitNetworkSelection {
     fn from(value: CircuitNetworkSelectionRepr) -> Self {
         let mut obj = Self::NONE;
         obj.set_green(value.green);
@@ -534,7 +538,7 @@ impl From<CircuitNetworkSelectionRepr> for CircuitNetworkSelection {
         obj
     }
 }
-impl From<CircuitNetworkSelection> for CircuitNetworkSelectionRepr {
+impl const From<CircuitNetworkSelection> for CircuitNetworkSelectionRepr {
     fn from(value: CircuitNetworkSelection) -> Self {
         Self { red: value.red(), green: value.green() }
     }
@@ -542,7 +546,7 @@ impl From<CircuitNetworkSelection> for CircuitNetworkSelectionRepr {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CircuitNetworkSelection(u8);
-impl Default for CircuitNetworkSelection {
+impl const Default for CircuitNetworkSelection {
     fn default() -> Self {
         Self::BOTH
     }
@@ -557,13 +561,16 @@ impl<'de> Deserialize<'de> for CircuitNetworkSelection {
         Ok(CircuitNetworkSelectionRepr::deserialize(deserializer)?.into())
     }
 }
-impl From<&str> for CircuitNetworkSelection {
+impl const From<&str> for CircuitNetworkSelection {
     fn from(value: &str) -> Self {
-        match &*value.to_lowercase() {
-            "both" => Self::BOTH,
-            "g" | "green" => Self::GREEN,
-            "r" | "red" => Self::RED,
-            _ => Self::NONE,
+        if value.eq_ignore_ascii_case("both") {
+            Self::BOTH
+        } else if value.eq_ignore_ascii_case("g") || value.eq_ignore_ascii_case("green") {
+            Self::GREEN
+        } else if value.eq_ignore_ascii_case("r") || value.eq_ignore_ascii_case("red") {
+            Self::RED
+        } else {
+            Self::NONE
         }
     }
 }
@@ -600,23 +607,23 @@ impl CircuitNetworkSelection {
     }
 }
 
-#[derive(Tsify, Default, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Tsify, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompareTypeString {
     #[serde(rename = "and")]
     And,
     #[serde(rename = "or")]
-    #[default]
     Or,
 }
-impl CompareTypeString {
-    pub const fn default() -> Self {
+impl const Default for CompareTypeString {
+    fn default() -> Self {
         Self::Or
     }
 }
-impl From<&str> for CompareTypeString {
+impl const From<&str> for CompareTypeString {
     fn from(value: &str) -> Self {
-        match &*value.to_ascii_lowercase() {
-            "&" | "&&" | "and" => Self::And,
+        match value {
+            "&" | "&&" => Self::And,
+            x if x.eq_ignore_ascii_case("both") => Self::And,
             _ => Self::default(),
         }
     }
@@ -626,31 +633,33 @@ impl From<&str> for CompareTypeString {
 pub struct DeciderCombinatorCondition {
     /// Defaults to blank
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub first_signal:          Option<SignalID>,
-    /// Which circuit networks (red/green) to read ``first_signal`` from. Defaults to both.
+    pub first_signal:          Option<RC<SignalID>>,
+    /// Which circuit networks (red/green) to read ``first_signal`` from.
+    /// Defaults to both.
     #[serde(default, skip_serializing_if = "is_default")]
     pub first_signal_networks: CircuitNetworkSelection,
-    /// Constant to compare ``first_signal`` to. Has no effect when ``second_signal`` is set.
-    /// When neither ``second_signal`` nor constant are specified, the effect is as though
-    /// constant were specified with the value 0.
+    /// Constant to compare ``first_signal`` to. Has no effect when
+    /// ``second_signal`` is set. When neither ``second_signal`` nor
+    /// constant are specified, the effect is as though constant were
+    /// specified with the value 0.
     #[serde(default, skip_serializing_if = "is_default")]
     pub constant:              Option<i32>,
-    /// Specifies how the inputs should be compared. If not specified, defaults to "<".
+    /// Specifies how the inputs should be compared. If not specified, defaults
+    /// to "<".
     #[serde(default, skip_serializing_if = "is_default")]
     pub comparator:            ComparatorString,
-    /// Tells how this condition is compared with the preceding conditions in the
-    /// corresponding conditions array. Defaults to "or".
+    /// Tells how this condition is compared with the preceding conditions in
+    /// the corresponding conditions array. Defaults to "or".
     #[serde(default, skip_serializing_if = "is_default")]
     pub compare_type:          CompareTypeString,
 }
 impl DeciderCombinatorCondition {
     pub fn new(
-        first_signal: &SignalID,
-        constant: i32,
+        first_signal: impl Into<RC<SignalID>>, constant: i32,
         comparator: impl Into<ComparatorString>,
     ) -> Self {
         Self {
-            first_signal:          Some(first_signal.clone()),
+            first_signal:          Some(first_signal.into()),
             constant:              Some(constant),
             comparator:            comparator.into(),
             compare_type:          const { CompareTypeString::default() },
@@ -666,8 +675,7 @@ impl DeciderCombinatorCondition {
 
     #[must_use]
     pub fn with_first_signal_networks(
-        mut self,
-        networks: impl Into<CircuitNetworkSelection>,
+        mut self, networks: impl Into<CircuitNetworkSelection>,
     ) -> Self {
         self.first_signal_networks = networks.into();
         self
@@ -682,9 +690,9 @@ impl DeciderCombinatorCondition {
 #[derive(Tsify, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DeciderCombinatorOutput {
     /// Specifies a signal to output.
-    pub signal:                SignalID,
-    /// Defaults to true. When false, will output the value from constant for the given
-    /// ``output_signal``.
+    pub signal:                RC<SignalID>,
+    /// Defaults to true. When false, will output the value from constant for
+    /// the given ``output_signal``.
     #[serde(
         default = "DeciderCombinatorOutput::default_copy_count_from_input",
         skip_serializing_if = "DeciderCombinatorOutput::is_default_copy_count_from_input"
@@ -696,17 +704,17 @@ pub struct DeciderCombinatorOutput {
         skip_serializing_if = "DeciderCombinatorOutput::is_default_constant"
     )]
     pub constant:              i32,
-    /// Sets which input network to read the value of signal from if ``copy_count_from_input`` is
-    /// true. Defaults to both.
+    /// Sets which input network to read the value of signal from if
+    /// ``copy_count_from_input`` is true. Defaults to both.
     #[serde(default, skip_serializing_if = "is_default")]
     pub networks:              CircuitNetworkSelection,
 }
 impl DeciderCombinatorOutput {
-    pub fn new(signal: &SignalID, constant: Option<i32>) -> Self {
+    pub fn new(signal: impl Into<RC<SignalID>>, constant: Option<i32>) -> Self {
         Self {
             copy_count_from_input: constant.is_none(),
             constant:              constant.unwrap_or(Self::default_constant()),
-            signal:                signal.clone(),
+            signal:                signal.into(),
             networks:              CircuitNetworkSelection::BOTH,
         }
     }
@@ -759,7 +767,7 @@ impl DeciderCombinatorParameters {
 pub struct DeciderCombinatorCustomParameters {
     pub conditions:  Box<[DeciderCombinatorCondition]>,
     pub indices:     Box<[(usize, i32)]>,
-    pub signal_list: ::alloc::sync::Arc<[RawJsonString]>,
+    pub signal_list: RC<[RawJsonString]>,
 }
 impl PartialEq for DeciderCombinatorCustomParameters {
     fn eq(&self, other: &Self) -> bool {
@@ -821,7 +829,7 @@ struct IndexedDeciderCombinatorOutput<'a> {
 
 #[derive(Tsify, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Icon {
-    pub signal: SignalID,
+    pub signal: RC<SignalID>,
     pub index:  u32,
 }
 
@@ -839,202 +847,99 @@ pub struct LogisticSections {
     pub sections: Box<[LogisticSection]>,
 }
 
-#[derive(Tsify, Clone, Hash, PartialEq, Eq)]
-pub struct SignalID(pub ::alloc::sync::Arc<usize>);
+#[derive(Tsify, Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct SignalID {
+    /// The type of the signal. If the type is "item", this will be nil when
+    /// reading.
+    pub type_:   RC<str>,
+    /// The prototype name of the signal's quality. Defaults to normal.
+    pub quality: RC<str>,
+    /// Name of the prototype.
+    pub name:    RC<str>,
+}
 impl SignalID {
     #[inline]
     #[must_use]
-    pub fn new(type_: &str, name: &str) -> Self {
-        Self::from_values(type_, name, None)
+    pub const fn new(type_: RC<str>, name: RC<str>, quality: RC<str>) -> Self {
+        Self { type_, quality, name }
     }
 
+    /// Creates a new ``SignalID`` without any references to static ``RC`` data.
     #[inline]
     #[must_use]
-    #[allow(clippy::unwrap_used, reason = "Convenience method")]
-    pub fn from_values(type_: &str, name: &str, quality: Option<&str>) -> Self {
-        Self::try_from_values(type_, name, quality)
-            .map_js_err("Invalid args for SignalID")
-            .unwrap()
+    pub fn raw(type_: &str, name: &str, quality: &str) -> Self {
+        Self {
+            type_:   RC::from(type_),
+            quality: RC::from(quality),
+            name:    RC::from(name),
+        }
     }
 
     #[inline]
-    #[allow(
-        clippy::needless_pass_by_value,
-        reason = "API pattern should consume value"
-    )]
-    pub fn try_from_repr(
-        signal: SignalIDRepr,
-        default_type: Option<&str>,
-    ) -> Result<Self, JsError> {
-        let type_ = signal.type_.as_deref().unwrap_or_else(|| default_type.unwrap_or("item"));
-        Self::try_from_values(type_, &signal.name, signal.quality.as_deref())
-    }
-
-    pub fn try_from_values(
-        type_: &str,
-        name: &str,
-        quality: Option<&str>,
-    ) -> Result<Self, JsError> {
-        PROTOTYPE_DATA.with_borrow(|data| {
-            let bounds = data.signal_types.get_range(type_);
-            let sig_i = (data.signals[bounds.clone()].iter())
-                .position(|x| x == name)
-                .ok_or_else(|| js_err!("Unknown signal name '{name}'"))?
-                + bounds.start;
-
-            let qual_i = match quality {
-                None => 0,
-                Some(quality) => (data.qualities.iter())
-                    .position(|x| x == quality)
-                    .ok_or_else(|| js_err!("Unknown signal quality '{quality}'"))?,
-            };
-            let n_quals = data.qualities.len().max(1);
-
-            // IMPORTANT: We increment the Arc<usize> handle stored on ``signal_ids``
-            Ok(data.signal_ids[sig_i * n_quals + qual_i].clone())
-        })
-    }
-
-    #[must_use]
-    #[inline]
-    fn as_repr(&self) -> SignalIDRepr {
-        PROTOTYPE_DATA.with_borrow(|data| {
-            let i = *self.0;
-            let modulus = data.qualities.len().max(1);
-
-            SignalIDRepr {
-                name:    data.signals[i.div_euclid(modulus)].clone(),
-                quality: (!data.qualities.is_empty())
-                    .then(|| data.qualities[i.rem_euclid(data.qualities.len())].clone()),
-                type_:   Some(data.signal_types.get_type(i.div_euclid(modulus)).to_owned()),
-            }
-        })
-    }
-
-    #[must_use]
-    #[inline]
-    pub fn name(&self) -> String {
-        PROTOTYPE_DATA.with_borrow(|data| {
-            data.signals[(*self.0).div_euclid(data.qualities.len().max(1))].clone()
-        })
-    }
-    #[must_use]
-    #[inline]
-    pub fn quality(&self) -> Option<String> {
-        PROTOTYPE_DATA.with_borrow(|data| {
-            (!data.qualities.is_empty())
-                .then(|| data.qualities[(*self.0).rem_euclid(data.qualities.len())].clone())
-        })
-    }
-    #[must_use]
-    #[inline]
-    pub fn type_(&self) -> String {
-        PROTOTYPE_DATA.with_borrow(|data| {
-            data.signal_types
-                .get_type((*self.0).div_euclid(data.qualities.len().max(1)))
-                .to_owned()
-        })
+    pub fn intern(type_: &str, name: &str) -> Result<RC<Self>, JsError> {
+        Self::new(type_.into(), name.into(), DEFAULT_QUALITY.into()).interned()
     }
 
     #[inline]
-    pub fn set_name(&mut self, name: &str) {
-        *self = self.with_name(name);
-    }
-    #[inline]
-    pub fn set_quality(&mut self, quality: Option<&str>) {
-        *self = self.with_quality(quality);
-    }
-    #[inline]
-    pub fn set_type_(&mut self, type_: &str) {
-        *self = self.with_type_(type_);
+    pub fn intern_with_quality(
+        type_: &str, name: &str, quality: Option<&str>,
+    ) -> Result<RC<Self>, JsError> {
+        let quality = quality.unwrap_or(DEFAULT_QUALITY);
+        Self::new(type_.into(), name.into(), quality.into()).interned()
     }
 
-    #[must_use]
+    /// Creates data pointed to the static ``RC`` stored in signals on
+    /// ``PrototypeData``.
     #[inline]
-    pub fn with_name(&self, name: &str) -> Self {
-        let repr = self.as_repr();
-        #[allow(clippy::unwrap_used, reason = "Should definitely be known")]
-        Self::from_values(&repr.type_.unwrap(), name, repr.quality.as_deref())
+    pub fn interned(self) -> Result<RC<Self>, JsError> {
+        with_prototype_data(|data| self.interned_on_prototype_data(data))
     }
-    #[must_use]
+
+    /// Creates data pointed to the static ``RC`` stored in signals on
+    /// ``PrototypeData``.
     #[inline]
-    pub fn with_quality(&self, quality: Option<&str>) -> Self {
-        let repr = self.as_repr();
-        #[allow(clippy::unwrap_used, reason = "Should definitely be known")]
-        Self::from_values(&repr.type_.unwrap(), &repr.name, quality)
+    pub fn with_quality(self, quality: Option<&str>) -> Result<RC<Self>, JsError> {
+        let quality = quality.unwrap_or(DEFAULT_QUALITY);
+        let sig = Self { quality: quality.into(), ..self };
+        with_prototype_data(|data| sig.interned_on_prototype_data(data))
     }
-    #[must_use]
+
+    /// Creates data pointed to the static ``RC`` stored in signals on
+    /// ``PrototypeData``.
     #[inline]
-    pub fn with_type_(&self, type_: &str) -> Self {
-        let repr = self.as_repr();
-        Self::from_values(type_, &repr.name, repr.quality.as_deref())
+    pub fn interned_on_prototype_data(self, data: &PrototypeData) -> Result<RC<Self>, JsError> {
+        let sig = data.signals.get(&self);
+        let sig = sig.ok_or_else(|| js_err!("Could not find signal '{self:?}'"))?;
+        Ok(RC::clone(sig))
     }
 
     #[inline]
     fn serialize_fields_into_map<S: serde::ser::SerializeMap>(
-        &self,
-        map: &mut S,
-        default_type: Option<&str>,
-        always_include_quality: bool,
+        &self, map: &mut S, default_type: Option<&str>, always_include_quality: bool,
     ) -> Result<(), S::Error> {
-        PROTOTYPE_DATA.with_borrow(|data| {
-            let i = *self.0;
-            let modulus = data.qualities.len().max(1);
-            let type_ = data.signal_types.get_type(i.div_euclid(modulus));
-            let name = &data.signals[i.div_euclid(modulus)];
-
-            if default_type.is_none_or(|t| t != type_) {
-                map.serialize_entry("type", type_)?;
-            }
-            if !data.qualities.is_empty() {
-                let qual = &data.qualities[i.rem_euclid(modulus)];
-                if always_include_quality || qual != DEFAULT_QUALITY {
-                    map.serialize_entry("quality", qual)?;
-                }
-            }
-            map.serialize_entry("name", &name)
-        })
+        if default_type.is_none_or(|t| t != self.type_.as_ref()) {
+            map.serialize_entry("type", &self.type_)?;
+        }
+        if always_include_quality || self.quality.as_ref() != DEFAULT_QUALITY {
+            map.serialize_entry("quality", &self.quality)?;
+        }
+        map.serialize_entry("name", &self.name)
     }
 
     #[inline]
     fn deserialize_fields<'de, D: serde::Deserializer<'de>>(
-        deserializer: D,
-        default_type: Option<&str>,
+        deserializer: D, default_type: Option<&str>,
     ) -> Result<Self, D::Error> {
-        Self::try_from_repr(SignalIDRepr::deserialize(deserializer)?, default_type)
-            .map_err(|e| serde::de::Error::custom(format!("Could not deserialize SignalID: {e:?}")))
-    }
-}
-impl core::fmt::Debug for SignalID {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(
-            f,
-            r#"SignalID(id={}, strong_count={}) {{ type_: "{}", name: "{}"{} }}"#,
-            *self.0,
-            ::alloc::sync::Arc::strong_count(&self.0),
-            self.type_(),
-            self.name(),
-            self.quality().map_or_else(String::new, |q| format!(r#", quality: "{q}""#)),
-        )
-    }
-}
-impl core::fmt::Display for SignalID {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{}:{}", self.type_(), self.name())
-    }
-}
-impl TryFrom<SignalIDRepr> for SignalID {
-    type Error = JsError;
-
-    #[inline]
-    fn try_from(other: SignalIDRepr) -> Result<Self, Self::Error> {
-        Self::try_from_repr(other, Some(DEFAULT_SIGNAL_TYPE))
-    }
-}
-impl From<SignalID> for SignalIDRepr {
-    #[inline]
-    fn from(val: SignalID) -> Self {
-        val.as_repr()
+        let repr = SignalIDRepr::deserialize(deserializer).map_err(|e| {
+            serde::de::Error::custom(format!("Could not deserialize SignalID: {e:?}"))
+        })?;
+        let type_ =
+            (repr.type_.as_deref()).unwrap_or_else(|| default_type.unwrap_or(DEFAULT_SIGNAL_TYPE));
+        let sig =
+            Self::intern_with_quality(type_, &repr.name, repr.quality.as_deref()).map_err(|e| {
+                serde::de::Error::custom(format!("Could not deserialize SignalID: {e:?}"))
+            })?;
+        Ok((*sig).clone())
     }
 }
 impl Serialize for SignalID {
@@ -1051,20 +956,34 @@ impl<'de> Deserialize<'de> for SignalID {
         Self::deserialize_fields(deserializer, Some(DEFAULT_SIGNAL_TYPE))
     }
 }
+impl From<std::rc::Rc<Self>> for SignalID {
+    fn from(val: std::rc::Rc<Self>) -> Self {
+        std::rc::Rc::unwrap_or_clone(val)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SignalIDRepr {
+    #[serde(default, rename = "type")]
+    pub type_:   Option<String>,
+    #[serde(default)]
+    pub quality: Option<String>,
+    pub name:    String,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WireConnectorId(u8);
 impl WireConnectorId {
-    #[must_use]
     #[inline]
+    #[must_use]
     pub const fn pack(a: u8, b: u8) -> u8 {
         debug_assert!(a >= 1 && a <= 9, "Wire connector ID out of bounds");
         debug_assert!(b >= 1 && b <= 9, "Wire connector ID out of bounds");
         (a << 4) | b
     }
 
-    #[must_use]
     #[inline]
+    #[must_use]
     const fn swap_raw(wire_id: u8) -> u8 {
         match wire_id {
             1 => 2,
@@ -1075,8 +994,8 @@ impl WireConnectorId {
         }
     }
 
-    #[must_use]
     #[inline]
+    #[must_use]
     pub const fn unpack(value: u8) -> (u8, u8) {
         (value >> 4, value & 0x0F)
     }
@@ -1085,7 +1004,8 @@ impl WireConnectorId {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Wires {
     entity_ids:  Vec<[u32; 2]>,
-    should_swap: bool, // We use a flag to determine if we should swap the wires when serializing / converting to iterator
+    should_swap: bool, /* We use a flag to determine if we should swap the wires when
+                        * serializing / converting to iterator */
     wire_ids:    Vec<u8>,
 }
 impl Wires {
@@ -1134,8 +1054,8 @@ impl Wires {
 }
 impl IntoIterator for Wires {
     type Item = [u32; 4];
-    type IntoIter = core::iter::Map<
-        core::iter::Zip<alloc::vec::IntoIter<[u32; 2]>, alloc::vec::IntoIter<u8>>,
+    type IntoIter = std::iter::Map<
+        std::iter::Zip<std::vec::IntoIter<[u32; 2]>, std::vec::IntoIter<u8>>,
         fn(([u32; 2], u8)) -> [u32; 4],
     >;
 
@@ -1165,13 +1085,12 @@ impl<'de> serde::Deserialize<'de> for Wires {
         impl<'de> serde::de::Visitor<'de> for WiresVisitor {
             type Value = Wires;
 
-            fn expecting(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                 formatter.write_str("a sequence of [u32; 4] wire entries")
             }
 
             fn visit_seq<A: serde::de::SeqAccess<'de>>(
-                self,
-                mut seq: A,
+                self, mut seq: A,
             ) -> Result<Self::Value, A::Error> {
                 let mut wires = Wires::new();
                 while let Some([e1, w1, e2, w2]) = seq.next_element::<[u32; 4]>()? {

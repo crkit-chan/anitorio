@@ -1,11 +1,7 @@
 /// Copied from image crate
 #[must_use]
 pub const fn resize_dimensions(
-    width: u32,
-    height: u32,
-    nwidth: u32,
-    nheight: u32,
-    fill: bool,
+    width: u32, height: u32, nwidth: u32, nheight: u32, fill: bool,
 ) -> (u32, u32) {
     let wratio = nwidth as f64 / width as f64;
     let hratio = nheight as f64 / height as f64;

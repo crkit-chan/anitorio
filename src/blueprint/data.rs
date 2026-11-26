@@ -1,203 +1,141 @@
+use std::cell::RefCell;
+use std::collections::HashSet;
+
+use indexmap::IndexSet;
+use serde::{Deserialize, Serialize};
+
 use super::prelude::*;
 use crate::prelude::*;
-use alloc::sync::Arc;
-use core::cell::RefCell;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 thread_local! {
-    pub static PROTOTYPE_DATA: RefCell<PrototypeData> = RefCell::new(PrototypeData {
-        electric_poles: boxed_slice![],
-        qualities:      boxed_slice![],
-
-        blacklist_signals: boxed_slice![],
-        signal_ids:        boxed_slice![],
-        signals:           boxed_slice![],
-        signal_types:      BoundedSignalTypes { types: HashMap::new() },
+    static PROTOTYPE_DATA: RefCell<PrototypeData> = RefCell::new(PrototypeData {
+        blacklist_signals: HashSet::new(),
+        electric_poles:    Vec::new(),
+        signals:           IndexSet::new(),
     });
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct ElectricPoleSupplyAreaDistancePrototypeData {
-    pub quality:              String,
+    pub quality:              RC<str>,
     pub supply_area_distance: f64,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct ElectricPolePrototypeData {
-    pub name:                  String,
+    pub name:                  RC<str>,
     pub supply_area_distances: Box<[ElectricPoleSupplyAreaDistancePrototypeData]>,
     pub tile_width:            i32,
     pub tile_height:           i32,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Default)]
 pub struct PrototypeData {
-    pub electric_poles: Box<[ElectricPolePrototypeData]>,
-    pub qualities:      Box<[String]>,
-
-    /// Tracks signal names added for compatibility (e.g. if the original signal list didn't include
-    /// decider combinators, this list tracks that decider combinators were manually added).
-    /// We need to add our own signals since Entity serialization depends on signals existing.
-    pub blacklist_signals: Box<[SignalID]>,
-    pub signal_ids:        Box<[SignalID]>,
-    pub signals:           Box<[String]>,
-    pub signal_types:      BoundedSignalTypes,
+    pub blacklist_signals: HashSet<RC<SignalID>>,
+    pub electric_poles:    Vec<ElectricPolePrototypeData>,
+    pub signals:           IndexSet<RC<SignalID>>,
 }
 
-#[derive(Clone, Debug)]
-pub struct BoundedSignalTypes {
-    types: HashMap<core::ops::Range<usize>, String>,
-}
-impl BoundedSignalTypes {
-    #[inline]
-    #[must_use]
-    #[expect(clippy::unwrap_used, reason = "Convenience function")]
-    pub fn get_type(&self, index: usize) -> &str {
-        self.try_get_type(index)
-            .ok_or_else(|| js_err!("Invalid signal index '{index}', valid: {:?}", self.types))
-            .unwrap()
-    }
+const DEFAULT_SIGNALS: &[(&str, &[&str])] = &[
+    ("entity", &[ARI_CB, CONSTANT_CB, DEC_CB, LAMP]),
+    ("virtual", &[EACH]),
+];
 
-    #[inline]
-    #[must_use]
-    #[expect(clippy::unwrap_used, reason = "Convenience function")]
-    pub fn get_range(&self, type_: &str) -> core::ops::Range<usize> {
-        self.try_get_range(type_)
-            .ok_or_else(|| js_err!("Unknown signal type '{type_}'"))
-            .unwrap()
-    }
-
-    #[inline]
-    #[must_use]
-    pub fn has_type(&self, type_: &str) -> bool {
-        self.types.values().any(|v| v == type_)
-    }
-
-    #[inline]
-    #[must_use]
-    pub fn try_get_type(&self, index: usize) -> Option<&str> {
-        (self.types.iter())
-            .find_map(|(bounds, type_)| bounds.contains(&index).then_some(type_.as_str()))
-    }
-
-    #[inline]
-    #[must_use]
-    pub fn try_get_range(&self, type_: &str) -> Option<core::ops::Range<usize>> {
-        (self.types.iter()).find_map(|(bounds, t)| (t == type_).then(|| bounds.clone()))
-    }
-}
-
-#[derive(Clone, Debug, Default, Deserialize)]
-pub struct SignalIDRepr {
-    #[serde(rename = "type", default)]
-    pub type_:   Option<String>,
-    pub name:    String,
-    #[serde(default)]
-    pub quality: Option<String>,
-}
-impl SignalIDRepr {
-    #[inline]
-    #[must_use]
-    pub fn new(type_: impl Into<String>, name: impl Into<String>) -> Self {
-        Self {
-            type_:   Some(type_.into()),
-            name:    name.into(),
-            quality: None,
-        }
-    }
-
-    #[inline]
-    #[must_use]
-    pub fn with_quality(mut self, quality: impl Into<Option<String>>) -> Self {
-        self.quality = quality.into();
-        self
-    }
-}
-
-/// Enhances the provided signals by associating quality levels based on DLC usage.
+/// Loads the signals from JSON.
 ///
 /// # Arguments
 ///
 /// * `data_json_reader` - The raw JSON string of signals, as a ``Uint8Array``.
+///
+/// # Returns
+///
+/// A new vector of signal JSON objects with added quality attributes.
+#[crate::perf("Populate prototype data")]
 pub fn load_data<R: std::io::Read>(data_json_reader: R) -> Result<(), JsError> {
     #[derive(Deserialize)]
-    struct PrototypeDataJson {
-        electric_poles: Box<[ElectricPolePrototypeData]>,
+    struct PrototypeDataRepr {
+        electric_poles: Vec<ElectricPolePrototypeData>,
+        #[serde(default)]
         qualities:      Vec<String>,
-        signals:        Vec<SignalIDRepr>,
+        signals:        IndexSet<SignalIDRepr>,
     }
 
-    let mut data_json: PrototypeDataJson = serde_json::from_reader(data_json_reader)?;
-    let mut bounded_types = HashMap::<String, core::ops::Range<usize>>::new();
-    let mut signals = Vec::<String>::with_capacity(data_json.signals.len());
-    let mut blacklist_signals = Vec::<SignalIDRepr>::new();
+    #[derive(Deserialize, Clone, Hash, PartialEq, Eq)]
+    struct SignalIDRepr {
+        #[serde(rename = "type")]
+        type_: String,
+        name:  String,
+    }
 
-    for (type_, names) in [
-        ("virtual", vec![EACH]),
-        ("entity", vec![ARI_CB, CONSTANT_CB, DEC_CB, LAMP]),
-    ] {
-        for name in names {
-            if !data_json.signals.iter().try_any(|s| -> Result<_, JsError> {
-                Ok(s.name == name && {
-                    let t = (s.type_.as_ref())
-                        .ok_or_js_err("Input signal data missing 'type' field")?;
-                    type_ == t
-                })
-            })? {
-                let sig = SignalIDRepr {
-                    name:    name.to_owned(),
-                    type_:   Some(type_.to_owned()),
-                    quality: None, // Default quality
-                };
-                blacklist_signals.push(sig.clone());
-                data_json.signals.push(sig);
+    #[crate::perf("Make data repr")]
+    let mut data_repr: PrototypeDataRepr = serde_json::from_reader(data_json_reader)?;
+
+    PROTOTYPE_DATA.with_borrow_mut(|data| {
+        data.blacklist_signals.clear();
+        data.signals.clear();
+
+        let signal_qualities: IndexSet<_> = data_repr.qualities.into_iter().map(RC::from).collect();
+        let mut blacklist_signals = Vec::<SignalIDRepr>::new();
+        let mut uniq_strings: HashSet<_> = signal_qualities.iter().cloned().collect();
+
+        // Add required signals to signal list + all power poles.
+        // Non-user signals are tracked using ``blacklist-_signals``.
+        for (type_, name) in (DEFAULT_SIGNALS.iter())
+            .flat_map(|&(type_, names)| names.iter().map(move |&name| (type_, name)))
+            .chain(data_repr.electric_poles.iter().map(|pole| ("entity", pole.name.as_ref())))
+        {
+            let sig_repr = SignalIDRepr { type_: type_.to_owned(), name: name.to_owned() };
+
+            // If data_repr.signals did not contain this sig_repr, we add
+            // blacklist_signals to indicate it should be ommitted.
+            if data_repr.signals.insert(sig_repr.clone()) {
+                blacklist_signals.push(sig_repr);
             }
         }
-    }
-    data_json.signals.sort_by(|a, b| a.type_.cmp(&b.type_));
 
-    for (i, sig) in core::mem::take(&mut data_json.signals).into_iter().enumerate() {
-        let type_ = sig.type_.ok_or_else(|| js_err!(""))?;
-        if let Some(bounded_type) = bounded_types.get_mut(&type_) {
-            bounded_type.end = i + 1;
-        } else {
-            bounded_types.insert(type_, i..i);
+        #[crate::perf("Iterate signals")]
+        for sig in data_repr.signals {
+            let type_ = &RC::clone(uniq_strings.get_or_insert(sig.type_.into()));
+            let name = &RC::clone(uniq_strings.get_or_insert(sig.name.into()));
+
+            for quality in &signal_qualities {
+                data.signals.insert(RC::from(SignalID {
+                    type_:   RC::clone(type_),
+                    name:    RC::clone(name),
+                    quality: RC::clone(quality),
+                }));
+            }
         }
-        signals.push(sig.name);
-    }
 
-    PROTOTYPE_DATA.with_borrow_mut(|prev| {
-        for signal_id in core::mem::take(&mut prev.signal_ids) {
-            assert_eq!(
-                Arc::strong_count(&signal_id.0),
-                1,
-                "Too many references to existing prototype data!",
+        data.blacklist_signals = (blacklist_signals.into_iter().map(|sig| {
+            let ref_sig = SignalID::new(sig.type_.into(), sig.name.into(), DEFAULT_QUALITY.into());
+            let sig = (data.signals.get(&RC::from(ref_sig.clone())))
+                .ok_or_else(|| js_err!("Could not find blacklisted signal '{ref_sig:?}'"))?;
+            Ok(RC::clone(sig))
+        }))
+        .collect::<Result<_, JsError>>()?;
+
+        data.electric_poles = (data_repr.electric_poles.into_iter().map(|mut pole| {
+            pole.name = RC::clone(
+                #[expect(clippy::unwrap_used, reason = "Garunteed to be populated")]
+                uniq_strings.get(&pole.name).unwrap(),
             );
-        }
 
-        *prev = PrototypeData {
-            signal_ids:   (0..signals.len() * data_json.qualities.len().max(1))
-                .map(|i| SignalID(Arc::new(i)))
-                .collect(),
-            signals:      signals.into_boxed_slice(),
-            signal_types: BoundedSignalTypes {
-                types: bounded_types.iter().map(|(k, v)| (v.clone(), k.clone())).collect(),
-            },
+            for d in &mut pole.supply_area_distances {
+                d.quality = RC::clone(
+                    (signal_qualities.get(&d.quality))
+                        .ok_or_else(|| js_err!("Could not find the quality '{}'", d.quality))?,
+                );
+            }
+            Ok(pole)
+        }))
+        .collect::<Result<_, JsError>>()?;
 
-            blacklist_signals: vec![].into(), // We'll assign this just afterwards
-            electric_poles:    core::mem::take(&mut data_json.electric_poles),
-            qualities:         core::mem::take(&mut data_json.qualities).into_boxed_slice(),
-        };
-    });
+        Ok(())
+    })
+}
 
-    // Note: we must create this OUTSIDE of the mutable borrow, since SignalID::try_from
-    // will need access to the PROTOTYPE_DATA
-    let blacklist_signals = (blacklist_signals.into_iter())
-        .map(SignalID::try_from)
-        .collect::<Result<Box<_>, _>>()?;
-
-    PROTOTYPE_DATA.with_borrow_mut(|data| data.blacklist_signals = blacklist_signals);
-
-    Ok(())
+#[inline]
+pub fn with_prototype_data<R>(f: impl FnOnce(&PrototypeData) -> R) -> R {
+    PROTOTYPE_DATA.with_borrow(f)
 }

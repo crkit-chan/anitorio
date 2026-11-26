@@ -1,10 +1,8 @@
 use serde::de::DeserializeOwned;
-use wasm_bindgen::{
-    ErasableGeneric,
-    convert::{FromWasmAbi, IntoWasmAbi, UpcastFrom},
-    describe::WasmDescribe,
-    prelude::*,
-};
+use wasm_bindgen::ErasableGeneric;
+use wasm_bindgen::convert::{FromWasmAbi, IntoWasmAbi, UpcastFrom};
+use wasm_bindgen::describe::WasmDescribe;
+use wasm_bindgen::prelude::*;
 
 /// Typed as `boolean` in TypeScript
 pub type TsBool = js_sys::Boolean;
@@ -22,7 +20,8 @@ pub type TsNum = js_sys::Number;
 pub type TsStr = js_sys::JsString;
 
 /// Typed as a `Uint8ClampedArray<ArrayBuffer>` in TypeScript.
-/// Note that this should be used to represent a buffer whose memory is backed in Rust.
+/// Note that this should be used to represent a buffer whose memory is backed
+/// in Rust.
 pub type TsUint8ClampedArrayBacked = js_sys::Uint8ClampedArray;
 
 /// Typed as `void` in TypeScript.
@@ -31,7 +30,7 @@ pub type TsVoid = js_sys::Undefined;
 #[repr(transparent)]
 pub struct TsIntoRust<T: DeserializeOwned> {
     value:   JsValue,
-    _marker: core::marker::PhantomData<fn() -> T>,
+    _marker: std::marker::PhantomData<fn() -> T>,
 }
 impl<T: DeserializeOwned> TsIntoRust<T> {
     #[expect(clippy::wrong_self_convention, reason = "Matches `tsify` API")]
@@ -39,9 +38,9 @@ impl<T: DeserializeOwned> TsIntoRust<T> {
         serde_wasm_bindgen::from_value(self.value)
     }
 }
-impl<T: DeserializeOwned> From<JsValue> for TsIntoRust<T> {
+impl<T: DeserializeOwned> const From<JsValue> for TsIntoRust<T> {
     fn from(value: JsValue) -> Self {
-        Self { value, _marker: core::marker::PhantomData }
+        Self { value, _marker: std::marker::PhantomData }
     }
 }
 impl<T: DeserializeOwned> From<TsIntoRust<T>> for JsValue {
@@ -63,7 +62,8 @@ impl<T: DeserializeOwned> WasmDescribe for TsIntoRust<T> {
     }
 }
 // SAFETY: `TsIntoRust<T>` is `#[repr(transparent)]` over `JsValue`.
-// Its only additional field is `PhantomData`, which has no runtime representation.
+// Its only additional field is `PhantomData`, which has no runtime
+// representation.
 unsafe impl<T: DeserializeOwned> ErasableGeneric for TsIntoRust<T> {
     type Repr = JsValue;
 }
@@ -75,12 +75,12 @@ impl<T: DeserializeOwned> IntoWasmAbi for TsIntoRust<T> {
     }
 }
 
-#[allow(clippy::use_self, clippy::allow_attributes, reason = "clippy bug")]
+#[allow(clippy::use_self, reason = "clippy bug")]
 impl<T: DeserializeOwned> UpcastFrom<TsIntoRust<T>> for TsIntoRust<T> {} // A wrapper can upcast to itself.
 impl<T: DeserializeOwned> UpcastFrom<TsIntoRust<T>> for JsValue {} // A wrapper can upcast to JsValue.
 
 // JsValue access.
-impl<T: DeserializeOwned> AsRef<JsValue> for TsIntoRust<T> {
+impl<T: DeserializeOwned> const AsRef<JsValue> for TsIntoRust<T> {
     fn as_ref(&self) -> &JsValue {
         &self.value
     }
@@ -101,7 +101,7 @@ impl<T: DeserializeOwned> JsCast for TsIntoRust<T> {
         // The `PhantomData` field has no runtime representation, so both types
         // have identical layouts and alignment. The returned reference cannot
         // outlive the input reference.
-        unsafe { &*core::ptr::from_ref::<JsValue>(val).cast::<Self>() }
+        unsafe { &*std::ptr::from_ref::<JsValue>(val).cast::<Self>() }
     }
 }
 

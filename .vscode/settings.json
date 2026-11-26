@@ -3,5 +3,6 @@
   "rust-analyzer.cargo.features": "all",
   "rust-analyzer.cargo.target": "wasm32-unknown-unknown",
   "rust-analyzer.check.command": "clippy",
-  "rust-analyzer.rustfmt.extraArgs": ["+nightly"]
+  "rust-analyzer.rustfmt.extraArgs": [],
+  "rust-analyzer.rustfmt.overrideCommand": ["rustup", "run", "nightly-2025-11-15", "rustfmt"]
 }

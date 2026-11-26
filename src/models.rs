@@ -1,13 +1,22 @@
-use crate::prelude::*;
+use std::collections::BTreeMap;
+
 use glam::UVec2;
 use serde::{Deserialize, Serialize};
 use tsify::Tsify;
 use wasm_bindgen::prelude::*;
 
+use crate::blueprint::models::SignalID;
+use crate::prelude::*;
+
+// Switch backends based on selected flags
+#[cfg(not(feature = "arc_blueprint_generator"))]
+pub type RC<T> = std::rc::Rc<T>;
+#[cfg(feature = "arc_blueprint_generator")]
+pub type RC<T> = std::sync::Arc<T>;
+
 #[derive(Tsify, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[allow(
-    clippy::allow_attributes,
     clippy::struct_excessive_bools,
     reason = "API may change in the future"
 )]
@@ -22,14 +31,14 @@ pub struct BlueprintArgs {
     pub max_group_size:          Option<u8>,
     pub name:                    String,
     pub output_format:           OutputFormat,
-    pub power_pole_name:         Option<String>,
-    pub power_pole_quality:      Option<String>,
+    pub power_pole_name:         Option<RC<str>>,
+    pub power_pole_quality:      Option<RC<str>>,
     pub prefer_green_wires:      bool,
     pub prefer_horizontal_wires: bool,
     pub signal_compression:      Option<SignalCompression>,
     pub signal_sorting:          SignalSorting,
     pub streaming_download:      bool,
-    pub timing_signals:          TimingSignals,
+    pub timing_signals:          BTreeMap<String, RC<SignalID>>,
     pub use_threads:             bool,
 }
 
@@ -63,14 +72,6 @@ impl ImageArgs {
             0
         }
     }
-}
-
-#[derive(Tsify, Debug, Serialize, Deserialize)]
-pub struct TimingSignals {
-    pub f: crate::blueprint::models::SignalID,
-    pub p: crate::blueprint::models::SignalID,
-    pub s: crate::blueprint::models::SignalID,
-    pub t: crate::blueprint::models::SignalID,
 }
 
 #[derive(Tsify, Debug, Clone, PartialEq, Serialize, Deserialize)]

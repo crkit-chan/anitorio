@@ -1,6 +1,9 @@
-use crate::blueprint::models::SignalID;
+#![allow(clippy::unwrap_used, reason = "Utility")]
+
 use glam::{DVec2, dvec2};
-use std::sync::LazyLock;
+
+use crate::blueprint::models::SignalID;
+use crate::prelude::*;
 
 /// Timer entity positions.
 pub const TIMER1_POS: DVec2 = dvec2(-2.5, -0.5);
@@ -16,13 +19,33 @@ pub const DIR_R: u8 = 4;
 pub const DIR_D: u8 = 8;
 pub const DIR_L: u8 = 12;
 
-pub static SIG_EACH: LazyLock<SignalID> = LazyLock::new(|| SignalID::new("virtual", EACH));
+pub static VIRTUAL_EACH: StaticSignalID =
+    StaticSignalID::new("virtual", "signal-each", DEFAULT_QUALITY);
 
-pub static ENT_ARI_CB: LazyLock<SignalID> = LazyLock::new(|| SignalID::new("entity", ARI_CB));
-pub static ENT_CONSTANT_CB: LazyLock<SignalID> =
-    LazyLock::new(|| SignalID::new("entity", CONSTANT_CB));
-pub static ENT_DEC_CB: LazyLock<SignalID> = LazyLock::new(|| SignalID::new("entity", DEC_CB));
-pub static ENT_LAMP: LazyLock<SignalID> = LazyLock::new(|| SignalID::new("entity", LAMP));
+#[derive(Clone)]
+pub struct StaticSignalID {
+    type_:   &'static str,
+    name:    &'static str,
+    quality: &'static str,
+}
+impl StaticSignalID {
+    const fn new(type_: &'static str, name: &'static str, quality: &'static str) -> Self {
+        Self { type_, name, quality }
+    }
+}
+
+#[expect(clippy::fallible_impl_from, reason = "Utility")]
+impl From<StaticSignalID> for RC<SignalID> {
+    fn from(val: StaticSignalID) -> Self {
+        SignalID::intern_with_quality(val.type_, val.name, Some(val.quality)).unwrap()
+    }
+}
+#[expect(clippy::fallible_impl_from, reason = "Utility")]
+impl From<&StaticSignalID> for RC<SignalID> {
+    fn from(val: &StaticSignalID) -> Self {
+        SignalID::intern_with_quality(val.type_, val.name, Some(val.quality)).unwrap()
+    }
+}
 
 /// Blueprint version constant.
 pub const ARI_CB: &str = "arithmetic-combinator";
@@ -34,7 +57,6 @@ pub const LAMP: &str = "small-lamp";
 pub const BLUEPRINT_VERSION: u64 = 562_949_955_518_464;
 pub const BLUEPRINT: &str = "blueprint";
 pub const DEFAULT_POWER_POLE_NAME: &str = "substation";
-pub const DEFAULT_QUAL_KEY: &str = "<default>";
 pub const DEFAULT_QUALITY: &str = "normal";
 pub const DEFAULT_SIGNAL_TYPE: &str = "item";
 
