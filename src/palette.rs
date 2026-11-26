@@ -6,7 +6,7 @@ use crate::hash::U32Hasher;
 use crate::prelude::*;
 
 pub struct ColorPalette {
-    colors: IndexSet<Self::Pixel>,
+    colors: IndexSet<Self::Pixel, U32Hasher::BuildDefault>,
     #[cfg(feature = "kiddo")]
     tree:   ImmutableKdTree<u8, 3>,
 }
@@ -38,6 +38,7 @@ impl ColorPalette {
     #[inline]
     #[must_use]
     pub fn exact_index(&self, target: Self::Pixel) -> u32 {
+        #[allow(clippy::unwrap_used, reason = "Convenience function, should panic!")]
         self.colors.get_index_of(&target).unwrap() as u32
     }
 

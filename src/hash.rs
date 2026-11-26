@@ -26,6 +26,6 @@ impl std::hash::Hasher for U32Hasher {
 }
 impl const Default for U32Hasher {
     fn default() -> Self {
-        Self(0)
+        Self(Default::default())
     }
 }
