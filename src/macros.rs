@@ -1,9 +1,5 @@
 /// Logs a message to the web console.
-#[allow(
-    clippy::allow_attributes,
-    unused_macros,
-    reason = "Might not necessarily be used"
-)]
+#[allow(unused_macros, reason = "Might not necessarily be used")]
 #[macro_export]
 macro_rules! log {
     ($($arg:tt)*) => { ::web_sys::console::log_1(&::std::format!($($arg)*).into()) };
@@ -49,14 +45,6 @@ macro_rules! write_to {
     }};
 }
 
-pub use boxed_slice;
-pub use err_js;
-pub use js_err;
-#[allow(
-    clippy::allow_attributes,
-    unused_imports,
-    reason = "Might not necessarily be used"
-)]
+#[allow(unused_imports, reason = "Might not necessarily be used")]
 pub use log;
-pub use write_json_trimmed_to;
-pub use write_to;
+pub use {boxed_slice, err_js, js_err, write_json_trimmed_to, write_to};

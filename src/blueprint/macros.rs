@@ -111,7 +111,4 @@ macro_rules! entity_idx_by_tag {
     };
 }
 
-pub use arithmetic_cond_op;
-pub use decider_cond_op;
-pub use entity_idx_by_tag;
-pub use mkwires;
+pub use {arithmetic_cond_op, decider_cond_op, entity_idx_by_tag, mkwires};

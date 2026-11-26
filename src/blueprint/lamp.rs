@@ -1,7 +1,10 @@
-use super::{power_pole::PowerPoleOccupied, prelude::*};
-use crate::prelude::*;
-use glam::{DVec2, UVec2, dvec2};
 use std::ops::Not as _;
+
+use glam::{DVec2, UVec2, dvec2};
+
+use super::power_pole::PowerPoleOccupied;
+use super::prelude::*;
+use crate::prelude::*;
 
 type GenerateLampsOutput = (
     Vec<BlueprintEntity>,
@@ -23,16 +26,12 @@ type GenerateLampsOutput = (
 ///
 /// # Returns
 ///
-/// A tuple with lamp entities, lamp wires, the next entity number, and the top-right lamp entity.
+/// A tuple with lamp entities, lamp wires, the next entity number, and the
+/// top-right lamp entity.
 #[expect(clippy::needless_pass_by_value, reason = "RC")]
 pub fn generate_lamps(
-    signals: &[RC<SignalID>],
-    grid_dim: UVec2,
-    curr_frame: Option<RC<image::DynamicImage>>,
-    occupied: &mut PowerPoleOccupied,
-    base_ent_n: u32,
-    start_pos: DVec2,
-    args: &BlueprintArgs,
+    signals: &[RC<SignalID>], grid_dim: UVec2, curr_frame: Option<RC<image::DynamicImage>>,
+    occupied: &mut PowerPoleOccupied, base_ent_n: u32, start_pos: DVec2, args: &BlueprintArgs,
 ) -> Result<GenerateLampsOutput, JsError> {
     let mut ents = Vec::new();
     let mut wires = Wires::new();

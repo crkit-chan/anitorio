@@ -1,6 +1,9 @@
-use crate::{prelude::*, ts};
 use std::cell::RefCell;
+
 use wasm_bindgen::prelude::*;
+
+use crate::prelude::*;
+use crate::ts;
 
 #[derive(tsify::Tsify, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -10,10 +13,6 @@ pub struct Callbacks {
 
     #[serde(with = "serde_wasm_bindgen::preserve")]
     pub on_progress: ts::TsFn<fn(ts::TsNum, ts::TsStr) -> ts::TsVoid>,
-
-    #[serde(with = "serde_wasm_bindgen::preserve")]
-    #[allow(clippy::allow_attributes, dead_code, reason = "api")]
-    pub perf_now: ts::TsFn<fn() -> ts::TsNum>,
 }
 
 thread_local! {
@@ -47,7 +46,8 @@ thread_local! {
 ///
 /// # Arguments
 ///
-/// * `callbacks` - An object of JS functions that will be called during the generation process.
+/// * `callbacks` - An object of JS functions that will be called during the
+///   generation process.
 #[wasm_bindgen]
 pub fn set_callbacks(callbacks: &tsify::Ts<Callbacks>) -> Result<(), JsError> {
     CALLBACKS.with_borrow_mut(|cbs| {
@@ -86,7 +86,7 @@ pub fn set_progress(start: f64, end: f64, progress: f64, msg: &str) {
 
 #[inline]
 #[must_use]
-#[allow(clippy::allow_attributes, dead_code, reason = "api")]
+#[allow(dead_code, reason = "api")]
 pub fn perf_now() -> f64 {
     #[cfg(feature = "perf_timing")]
     {

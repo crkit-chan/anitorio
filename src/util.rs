@@ -83,9 +83,7 @@ impl<T> OneOrMany<T> {
     #[must_use]
     #[inline]
     pub fn to_vec(&self) -> Vec<T>
-    where
-        T: Clone,
-    {
+    where T: Clone {
         match *self {
             Self::One(ref v) => vec![v.clone()],
             Self::Many(ref v) => v.clone(),

@@ -1,16 +1,18 @@
-use super::{power_pole::PowerPoleOccupied, prelude::*};
-use crate::{
-    arithmetic_conds, decider_cond, image_processing::rgb_to_int, mkwires,
-    palette::ColorPalettePixel, prelude::*, util::bounding_box_midpoints,
-};
+use std::cell::RefCell;
+use std::collections::{BTreeMap, HashSet};
+
 use glam::{DVec2, IVec2, dvec2};
-use std::{
-    cell::RefCell,
-    collections::{BTreeMap, HashSet},
-};
+
+use super::power_pole::PowerPoleOccupied;
+use super::prelude::*;
+use crate::image_processing::rgb_to_int;
+use crate::palette::ColorPalette;
+use crate::prelude::*;
+use crate::util::bounding_box_midpoints;
+use crate::{arithmetic_conds, decider_cond, mkwires};
 
 thread_local! {
-    static COMB_POS_DATA: RefCell<Option<Box<[CombinatorPositionData]>>> = const { RefCell::new(None) };
+    static COMB_POS_DATA: RefCell<Box<[CombinatorPositionData]>> = RefCell::new(Box::new([]));
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -72,7 +74,7 @@ pub fn load_comb_pos_json<R: std::io::Read>(data_json_reader: R) -> Result<(), J
             })
         })
     });
-    COMB_POS_DATA.replace(Some(data_iter.collect::<Result<_, JsError>>()?));
+    COMB_POS_DATA.replace(data_iter.collect::<Result<_, JsError>>()?);
     Ok(())
 }
 
@@ -93,23 +95,19 @@ pub struct GenerateCombinatorsOutput {
 /// * `occupied` - Tracks cells occupied by power poles.
 /// * `base_ent_n` - Starting entity number.
 /// * `start_pos` - Starting X and Y coordinates.
-/// * `max_cols_per_grp` - Maximum columns per group. Used to detect if compact layout should be
-///   used.
+/// * `max_cols_per_grp` - Maximum columns per group. Used to detect if compact
+///   layout should be used.
 /// * `args` Blueprint arguments.
 ///
 /// # Returns
 ///
-/// ``ObjectGeneratorOutput`` (containing data comb entities), and (``other_entities``, first
-/// connection entity, target output entity).
+/// ``ObjectGeneratorOutput`` (containing data comb entities), and
+/// (``other_entities``, first connection entity, target output entity).
 ///
 /// Does not populate combinators with data.
 pub fn generate_combinators(
-    base_ent_n: u32,
-    start_pos: DVec2,
-    max_cols_per_grp: u32,
-    args: &BlueprintArgs,
-    occupied: &PowerPoleOccupied,
-    palette_colors: Option<&[ColorPalettePixel]>,
+    base_ent_n: u32, start_pos: DVec2, max_cols_per_grp: u32, args: &BlueprintArgs,
+    occupied: &PowerPoleOccupied, palette_colors: Option<&ColorPalette::PixelSlice>,
 ) -> Result<GenerateCombinatorsOutput, JsError> {
     // Positions for combinators, for different widths.
     // TODO: Don't recalculate this for every group
@@ -122,7 +120,7 @@ pub fn generate_combinators(
     // Find the most suitable combinator position data
     COMB_POS_DATA.with_borrow(|data| {
         let mut best_data: Option<&CombinatorPositionData> = None;
-        for d in data.as_ref().ok_or_else(|| js_err!("No combinator positions data"))? {
+        for d in data {
             if d.dim.x <= f64::from(max_cols_per_grp)
                 && use_delta_comp == matches!(d.compression, Some(SignalCompression::Delta))
                 && d.grayscale_bits.contains(&bits)
@@ -173,12 +171,13 @@ pub fn generate_combinators(
             constants::DIR_R
         },
         first_ent_n: (curr_ent_n == base_ent_n).then_some(curr_ent_n),
-        // Calculate the offsets to test for collisions. In Factorio, all collision boxes are rectangular.
+        // Calculate the offsets to test for collisions. In Factorio, all collision boxes are
+        // rectangular.
         hitbox_offsets: {
             let size = cb_midpoint.abs() * 2.0;
             let dx = (0..size.x as usize).map(|v| v as f64 + 0.5 - size.x / 2.0);
             let dy = (0..size.y as usize).map(|v| v as f64 + 0.5 - size.y / 2.0);
-            let dy = dy.collect::<Vec<_>>();
+            let dy = dy.collect::<Box<_>>();
             let deltas = dx.flat_map(|x| dy.iter().map(move |&y| dvec2(x, y)));
             deltas.collect::<Box<_>>()
         },
@@ -221,11 +220,21 @@ pub fn generate_combinators(
             }));
 
             if args.detailed_descriptions {
-                en = en.with_player_description(&[
-                    // Note: not i + 1 because we already skip the first colour (black)
-                    format!("[font=var]Index combinator {} / {}.", i, palette_colors.len() - 1),
-                    format!("\nMaps the index '{i}' to the colour [color=#{color:06X}]●[/color] #{color:06X}.[/font]"),
-                ].join("\n"));
+                en = en.with_player_description(
+                    &[
+                        // Note: not i + 1 because we already skip the first colour (black)
+                        format!(
+                            "[font=var]Index combinator {} / {}.",
+                            i,
+                            palette_colors.len() - 1
+                        ),
+                        format!(
+                            "\nMaps the index '{i}' to the colour [color=#{color:06X}]●[/color] \
+                             #{color:06X}.[/font]"
+                        ),
+                    ]
+                    .join("\n"),
+                );
             }
             other_ents.push(en);
 
@@ -267,7 +276,8 @@ pub fn generate_combinators(
 
         let placement_origin = start_pos - dvec2(0.0, layout_height);
 
-        // Find the used entities so we can jiggle around the positions until they fit in between the power poles
+        // Find the used entities so we can jiggle around the positions until they fit
+        // in between the power poles
         let mut used_tags = Vec::new();
         if use_delta_comp {
             used_tags.extend(["delay", "memory"]);
@@ -376,8 +386,8 @@ pub fn generate_combinators(
         (bounds.end - bounds.start).y
     } + palette_cb_height_diff;
 
-    // Finds the position for the combinator with the given tag, based off the blueprint string we
-    // decoded earlier
+    // Finds the position for the combinator with the given tag, based off the
+    // blueprint string we decoded earlier
     let get_pos =
         |tag: &str| -> DVec2 { pos_dict[tag].position + base_offset - dvec2(0.0, height) };
     let get_dir = |tag: &str| -> u8 { pos_dict[tag].direction().unwrap_or_default() };
@@ -418,7 +428,11 @@ pub fn generate_combinators(
                 ],
             }));
             if args.detailed_descriptions {
-                en.set_player_description("Memory cell for delta compression. This holds all the signal values, then allows us to set any signal value by applying a delta. We can reach any number in one tick using overflow logic.");
+                en.set_player_description(
+                    "Memory cell for delta compression. This holds all the signal values, then \
+                     allows us to set any signal value by applying a delta. We can reach any \
+                     number in one tick using overflow logic.",
+                );
             }
             other_ents.push(en);
             data_cbs.out_ent_n = Some(curr_ent_n); // data combinators should output to the memory combinator
@@ -461,7 +475,10 @@ pub fn generate_combinators(
             let mut en = BlueprintEntity::new(curr_ent_n, ARI_CB, get_pos("AND"));
             en = en.with_custom_tag("AND comb").with_direction(get_dir("AND"));
             if args.detailed_descriptions {
-                en.set_player_description("Filters out the bits that are not relevant for the current frame, after bit-shifting. (The value of each signal encodes multiple frames)");
+                en.set_player_description(
+                    "Filters out the bits that are not relevant for the current frame, after \
+                     bit-shifting. (The value of each signal encodes multiple frames)",
+                );
             }
             other_ents.push(en.with_control_behavior(ControlBehavior::arithmetic(
                 arithmetic_conds!(VIRTUAL_EACH, AND, ((1_u32 << bits) - 1).cast_signed() => VIRTUAL_EACH),
@@ -515,8 +532,8 @@ pub struct LazyCombinators {
     cb_midpoint:      DVec2,
     curr_pos:         DVec2,
     direction:        u8,
-    /// Forces the first entity number for e.g. when ``LazyCombinators.next()`` returns
-    /// the first entity a wire should connect to
+    /// Forces the first entity number for e.g. when ``LazyCombinators.next()``
+    /// returns the first entity a wire should connect to
     first_ent_n:      Option<u32>,
     grid_pos:         IVec2,
     hitbox_offsets:   Box<[DVec2]>,
@@ -533,18 +550,13 @@ pub struct LazyCombinators {
 impl LazyCombinators {
     #[inline]
     pub fn next(
-        &mut self,
-        curr_ent_n: u32,
-        occupied: &PowerPoleOccupied,
+        &mut self, curr_ent_n: u32, occupied: &PowerPoleOccupied,
     ) -> (u32, BlueprintEntity) {
         self.next_entity(curr_ent_n, occupied, false)
     }
 
     fn next_entity(
-        &mut self,
-        mut curr_ent_n: u32,
-        occupied: &PowerPoleOccupied,
-        connect_inputs: bool,
+        &mut self, mut curr_ent_n: u32, occupied: &PowerPoleOccupied, connect_inputs: bool,
     ) -> (u32, BlueprintEntity) {
         if let Some(ent_n) = self.first_ent_n {
             curr_ent_n = ent_n; // Forcibly use a custom ent_n for wiring if first

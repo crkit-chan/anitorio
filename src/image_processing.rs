@@ -1,15 +1,15 @@
-use crate::{
-    constants,
-    constants::DEFAULT_FRAME_DELAY,
-    palette::ColorPalettePixel,
-    prelude::*,
-    ts,
-    util::{format_duration, wasm_shared_memory},
-};
+use std::pin::Pin;
+use std::rc::Rc;
+use std::time::Duration;
+
 use glam::{DVec2, UVec2, uvec2};
 use image::{AnimationDecoder as _, GenericImageView as _, imageops};
-use std::{pin::Pin, rc::Rc, time::Duration};
 use wasm_bindgen::JsValue;
+
+use crate::constants::DEFAULT_FRAME_DELAY;
+use crate::prelude::*;
+use crate::util::{format_duration, wasm_shared_memory};
+use crate::{constants, ts};
 
 pub type FrameCallback = dyn for<'a> Fn(
     &'a image::DynamicImage,
@@ -73,8 +73,7 @@ impl FrameData<'_> {
 }
 impl<'a> FrameData<'a> {
     pub fn new(
-        frame_data: ImageFrameData<'a>,
-        image_args: &'a ImageArgs,
+        frame_data: ImageFrameData<'a>, image_args: &'a ImageArgs,
         on_frame: Option<Rc<FrameCallback>>,
     ) -> Result<Self, JsError> {
         #[must_use]
@@ -207,18 +206,20 @@ impl<'a> FrameData<'a> {
 
     #[inline]
     #[must_use]
-    pub fn get_palette_colors(&self) -> Option<&[ColorPalettePixel]> {
+    pub fn get_palette_colors(&self) -> Option<&ColorPalette::PixelSlice> {
         self.palette.as_ref().map(ColorPalette::get_colors)
     }
 
     //// Returns the current output time in microseconds.
     #[inline]
     #[must_use]
-    fn out_t_us(&self) -> u64 {
+    const fn out_t_us(&self) -> u64 {
         (self.out_frame_i as u64 * 1000 * 1000).div_euclid(u64::from(self.args.target_fps))
     }
 
-    /// Converts the input frame to the target output using the specified settings.
+    /// Converts the input frame to the target output using the specified
+    /// settings.
+    #[crate::perf("")]
     pub fn convert_frame(&self, buf: image::RgbaImage) -> Result<image::DynamicImage, JsError> {
         let mut img = image::DynamicImage::ImageRgba8(buf);
         let out_dim = self.out_dim_raw.round().as_uvec2();
@@ -248,13 +249,13 @@ impl<'a> FrameData<'a> {
                     for p in luma.as_mut() {
                         *p = 255 * u8::from(*p >= constants::GRAYSCALE_THRESH);
                     }
-                }
+                },
                 4 => {
                     for p in luma.as_mut() {
                         *p &= 0xF0;
                     }
-                }
-                8 => {}
+                },
+                8 => {},
                 _ => unreachable!(),
             }
             img = image::DynamicImage::ImageLuma8(luma);
@@ -275,10 +276,13 @@ impl<'a> FrameData<'a> {
         }
 
         // 5. Palette at the very end
+        #[crate::perf("Image palette (convert_frame())")]
         if let Some(palette) = self.palette.as_ref() {
+            #[crate::perf("Quantise")]
             let indexes =
                 quantized_frame_to_outputs(&img.view(0, 0, img.width(), img.height()), palette);
 
+            #[crate::perf("Outputs")]
             match img {
                 image::DynamicImage::ImageRgba8(ref mut inner) => {
                     let colors = palette.get_colors();
@@ -286,13 +290,13 @@ impl<'a> FrameData<'a> {
                         let [r, g, b] = colors[v as usize];
                         *pixel = image::Rgba([r, g, b, 255]);
                     }
-                }
+                },
                 image::DynamicImage::ImageLuma8(ref mut inner) => {
                     let colors = palette.get_colors();
                     for (pixel, v) in inner.iter_mut().zip(indexes) {
                         *pixel = colors[v as usize][0];
                     }
-                }
+                },
                 _ => err_js!("Expected Rgba8 or Luma8, got '{:?}'", img.color()),
             }
         }
@@ -317,8 +321,7 @@ impl<'a> FrameData<'a> {
     /// A vector of packed palette indices. Each group of frames produces
     /// `width * height` outputs, in row-major order.
     pub fn palette_frames_to_outputs(
-        &self,
-        frames: &[image::SubImage<&image::DynamicImage>],
+        &self, frames: &[image::SubImage<&image::DynamicImage>],
     ) -> Result<Box<[i32]>, JsError> {
         let Some(ref palette) = self.palette else {
             err_js!("palette_frames_to_outputs() called without a palette!");
@@ -385,7 +388,8 @@ pub struct ImageFrameData<'a> {
     info:    ImageArgs,
 }
 impl<'a> ImageFrameData<'a> {
-    /// Decodes the provided image data into a vector of frames based on the image type.
+    /// Decodes the provided image data into a vector of frames based on the
+    /// image type.
     ///
     /// Supported types: "gif" and "webp".
     ///
@@ -398,8 +402,7 @@ impl<'a> ImageFrameData<'a> {
     ///
     /// An iterator of `Frame` objects or a JavaScript error.
     pub fn new(
-        mut reader: impl std::io::Read + 'a,
-        image_args: &'a ImageArgs,
+        mut reader: impl std::io::Read + 'a, image_args: &'a ImageArgs,
         js_next_frame: Option<JsVideoFrameCallback>,
     ) -> Result<Self, JsError> {
         let mut info: ImageArgs = image_args.clone();
@@ -407,11 +410,11 @@ impl<'a> ImageFrameData<'a> {
             "image/gif" => {
                 let decoder = image::codecs::gif::GifDecoder::new(reader)?;
                 FrameDecoderState::NativeFrames(decoder.into_frames())
-            }
+            },
             "image/webp" => {
                 let decoder = image::codecs::webp::WebPDecoder::new(reader)?;
                 FrameDecoderState::NativeFrames(decoder.into_frames())
-            }
+            },
             t if t.starts_with("image/") || matches!(image_args.mode, Mode::Static { .. }) => {
                 let use_combs = matches!(image_args.mode, Mode::Static { combs: true, .. });
                 info.n_frames = Some(1);
@@ -426,13 +429,13 @@ impl<'a> ImageFrameData<'a> {
                         .ok_or_js_err("buffer length must be width * height * 4")?,
                 ))))); // bruh
                 FrameDecoderState::NativeFrames(frames)
-            }
+            },
             t if t.starts_with("video/") => {
                 info.n_frames = None;
                 FrameDecoderState::JsFrames(
                     js_next_frame.ok_or_js_err("JS next frame must be provided for videos")?,
                 )
-            }
+            },
             t => err_js!("Unsupported image type: '{t}'"),
         };
 
@@ -442,8 +445,8 @@ impl<'a> ImageFrameData<'a> {
     }
 }
 
-/// Picks one palette of `size` colors for all frames. Index 0 is always black, since black
-/// pixels are left out of the blueprint entirely.
+/// Picks one palette of `size` colors for all frames. Index 0 is always black,
+/// since black pixels are left out of the blueprint entirely.
 ///
 /// # Arguments
 ///
@@ -454,9 +457,7 @@ impl<'a> ImageFrameData<'a> {
 ///
 /// The palette colors as RGB triples.
 pub async fn build_palette(
-    mut generator: FrameData<'_>,
-    size: u32,
-    speed: i32,
+    mut generator: FrameData<'_>, size: u32, speed: i32,
 ) -> Result<ColorPalette, JsError> {
     use imagequant::RGBA;
 
@@ -472,7 +473,7 @@ pub async fn build_palette(
             let mut qimg = match RC::unwrap_or_clone(frame) {
                 image::DynamicImage::ImageRgba8(rgba) => {
                     attr.new_image(bytemuck::cast_slice(&rgba.into_raw()), w, h, 0.0)?
-                }
+                },
                 image::DynamicImage::ImageLuma8(luma) => {
                     let pixels = luma.into_raw();
                     let f = move |row: &mut [std::mem::MaybeUninit<RGBA>], y: usize| {
@@ -489,7 +490,7 @@ pub async fn build_palette(
                     // `y` is a valid row index, so `start + x` is in bounds for every
                     // pixel written.
                     unsafe { imagequant::Image::new_fn(&attr, f, w, h, 0.0)? }
-                }
+                },
                 _ => unreachable!("Expected RGBA8 or LumaA8"),
             };
             hist.add_image(&attr, &mut qimg)?;
@@ -525,8 +526,9 @@ pub fn color_frame_to_outputs(
 ) -> Result<Box<[i32]>, JsError> {
     #[cfg(target_arch = "wasm32")]
     {
-        use image::GenericImageView as _;
         use std::arch::wasm32::{i8x16_shuffle, i8x16_splat, v128, v128_load, v128_store};
+
+        use image::GenericImageView as _;
 
         let Some(rgba) = view.inner().as_rgba8() else {
             err_js!("Expected RGBA8, got '{:?}'", view.inner().color())
@@ -573,7 +575,8 @@ pub fn color_frame_to_outputs(
             while i < width {
                 let j = i * 4;
 
-                // SAFETY: `i < width` guarantees the pointer is within the allocated output capacity.
+                // SAFETY: `i < width` guarantees the pointer is within the allocated output
+                // capacity.
                 let pixel_ptr = unsafe { output_ptr.add(i) };
 
                 // SAFETY: `pixel_ptr` points to a valid, properly aligned, writable
@@ -607,7 +610,8 @@ pub fn color_frame_to_outputs(
 
 /// Packs grayscale frames into output signals by bit-packing pixel values.
 ///
-/// A single output represents the value of a single pixel across multiple frames.
+/// A single output represents the value of a single pixel across multiple
+/// frames.
 ///
 /// # Arguments
 ///
@@ -619,8 +623,7 @@ pub fn color_frame_to_outputs(
 ///
 /// A vector of JSON objects representing output filters.
 pub fn grayscale_frames_to_outputs(
-    frames: &[image::SubImage<&image::DynamicImage>],
-    bits: u32,
+    frames: &[image::SubImage<&image::DynamicImage>], bits: u32,
 ) -> Result<Box<[i32]>, JsError> {
     assert!(!frames.is_empty(), "No frames provided for packing");
 
@@ -650,7 +653,7 @@ pub fn grayscale_frames_to_outputs(
 
                 *output = packed.cast_signed();
             }
-        }
+        },
         _ => err_js!("Unsupported grayscale bit depth '{bits}'"),
     }
 
@@ -668,8 +671,7 @@ pub fn grayscale_frames_to_outputs(
 ///
 /// The index of the closest palette entry.
 pub fn quantized_frame_to_outputs(
-    frame: &image::SubImage<&image::DynamicImage>,
-    palette: &ColorPalette,
+    frame: &image::SubImage<&image::DynamicImage>, palette: &ColorPalette,
 ) -> Box<[u8]> {
     let (x, y) = frame.offsets();
     let (width, height) = (frame.width() as usize, frame.height() as usize);
@@ -688,7 +690,7 @@ pub fn quantized_frame_to_outputs(
                         .map(|&[r, g, b, ..]| palette.nearest_index([r, g, b]) as u8),
                 );
             }
-        }
+        },
         image::DynamicImage::ImageLuma8(ref img) => {
             let luma = img.as_raw();
             for row in 0..height {
@@ -698,7 +700,7 @@ pub fn quantized_frame_to_outputs(
                     luma[start..end].iter().map(|&l| palette.nearest_index([l, l, l]) as u8),
                 );
             }
-        }
+        },
         _ => unreachable!("Expected RGBA8 or Luma8"),
     }
 
@@ -744,7 +746,7 @@ impl<'a> FrameDecoder<'a> {
                 });
                 self.finished = frame.is_none();
                 frame
-            }
+            },
             FrameDecoderState::JsFrames(ref mut get_next_frame) => {
                 let args_obj = js_sys::Object::new();
                 let in_buf = vec![0_u8; self.dim.element_product() as usize * 4];
@@ -769,7 +771,7 @@ impl<'a> FrameDecoder<'a> {
                     image::Frame::from_parts(img, 0, 0, duration),
                     (info.timestamp.ok_or_js_err("Missing timestamp")? * 1000.0 * 1000.0) as u64,
                 ))
-            }
+            },
         })
     }
 }
@@ -778,12 +780,14 @@ pub type JsVideoFrameCallback = js_sys::Function<fn(JsValue) -> ts::TsFut<JsValu
 
 pub async fn encode_gif(
     get_next_frame: JsVideoFrameCallback,
-    on_chunk: js_sys::Function<fn(js_sys::Uint8Array) -> ts::TsFut>,
-    args: &EncodeGifArgs,
+    on_chunk: js_sys::Function<fn(js_sys::Uint8Array) -> ts::TsFut>, args: &EncodeGifArgs,
 ) -> Result<(), JsError> {
-    use crate::ioutil::CallbackWriter;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
     use image::codecs::gif::{GifEncoder, Repeat};
-    use std::{cell::RefCell, rc::Rc};
+
+    use crate::ioutil::CallbackWriter;
 
     let promises = Rc::new(const { RefCell::new(Vec::<ts::TsFut>::new()) });
     let promise_q = Rc::clone(&promises);

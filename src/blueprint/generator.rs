@@ -1,26 +1,23 @@
-use super::{
-    combinator::{GenerateCombinatorsOutput, LazyCombinators, generate_combinators},
-    lamp::generate_lamps,
-    power_pole::PowerPoleOccupied,
-    prelude::*,
-    timer::generate_timer,
-};
-use crate::{
-    blueprint::data::with_prototype_data,
-    boxed_slice,
-    callbacks::report_lamp_group,
-    decider_cond,
-    image_processing::{FrameData, color_frame_to_outputs, grayscale_frames_to_outputs},
-    models::RawJsonString,
-    prelude::*,
-    util::format_duration,
-};
-use glam::{DVec2, UVec2, dvec2, uvec2};
-use image::GenericImageView as _;
 use std::io;
 
-/// How many entities to encode in one go. Encoding more entities at once is faster, but uses more
-/// memory.
+use glam::{DVec2, UVec2, dvec2, uvec2};
+use image::GenericImageView as _;
+
+use super::combinator::{GenerateCombinatorsOutput, LazyCombinators, generate_combinators};
+use super::lamp::generate_lamps;
+use super::power_pole::PowerPoleOccupied;
+use super::prelude::*;
+use super::timer::generate_timer;
+use crate::blueprint::data::with_prototype_data;
+use crate::callbacks::report_lamp_group;
+use crate::image_processing::{FrameData, color_frame_to_outputs, grayscale_frames_to_outputs};
+use crate::models::RawJsonString;
+use crate::prelude::*;
+use crate::util::format_duration;
+use crate::{boxed_slice, decider_cond};
+
+/// How many entities to encode in one go. Encoding more entities at once is
+/// faster, but uses more memory.
 const ENCODE_CHUNK_SIZE: usize = 100;
 
 /// Number of wires to encode per chunk. Since wires generate much less data,
@@ -80,18 +77,21 @@ pub struct BlueprintGenerator<'a> {
     generate_cbs:       bool,
     /// Target dimensions of the image or video.
     dim:                UVec2,
-    /// Maximum number of lamp columns per group. Groups are always divided split vertically.
+    /// Maximum number of lamp columns per group. Groups are always divided
+    /// split vertically.
     max_cols_per_grp:   u32,
-    /// Total number of groups to generate. Each group is a vertical split of the lamps, with no
-    /// data connections. Timing wires still connect each group.
+    /// Total number of groups to generate. Each group is a vertical split of
+    /// the lamps, with no data connections. Timing wires still connect each
+    /// group.
     n_groups:           u32,
-    /// Keeps track of positions currently occupied by power poles, and used to request powerage
-    /// for generated entities.
+    /// Keeps track of positions currently occupied by power poles, and used to
+    /// request powerage for generated entities.
     occupied:           PowerPoleOccupied,
     position_transform: PositionTransform,
     /// List of unique signals to use for the blueprint.
     signals:            Box<[RC<SignalID>]>,
-    /// Stores the JSON representation of each signal for efficient JSON reproduction
+    /// Stores the JSON representation of each signal for efficient JSON
+    /// reproduction
     signals_json:       RC<[RawJsonString]>,
     state:              BlueprintState,
 }
@@ -132,8 +132,7 @@ struct GroupPatchState {
 
 impl<'a> BlueprintGenerator<'a> {
     pub async fn new(
-        data: Option<FrameData<'a>>,
-        args: &'a BlueprintArgs,
+        data: Option<FrameData<'a>>, args: &'a BlueprintArgs,
     ) -> Result<Self, JsError> {
         let (signals, signals_json) = Self::get_signal_data(args)?;
         let comb_comp = args.signal_compression;
@@ -214,9 +213,7 @@ impl<'a> BlueprintGenerator<'a> {
 
     #[inline]
     fn transform_entity(
-        args: &BlueprintArgs,
-        position_transform: &PositionTransform,
-        en: &mut BlueprintEntity,
+        args: &BlueprintArgs, position_transform: &PositionTransform, en: &mut BlueprintEntity,
     ) {
         if !args.prefer_green_wires
             && let Some(cb) = en.control_behavior_mut()
@@ -255,7 +252,7 @@ impl<'a> BlueprintGenerator<'a> {
                 blacklisted_sigs.extend(args.timing_signals.values().cloned());
             }
 
-            let filtered = data.signals.iter().filter(|v| !blacklisted_sigs.contains(v));
+            let filtered = data.signals.iter().filter(|&v| !blacklisted_sigs.contains(v));
             Ok::<_, JsError>(filtered.cloned().collect::<Box<_>>())
         })?;
 
@@ -264,7 +261,7 @@ impl<'a> BlueprintGenerator<'a> {
             SignalSorting::Compression => {
                 signals.sort_by(|a, b| a.type_.cmp(&b.type_).then_with(|| a.name.cmp(&b.name)));
                 signals.sort_by_key(|s| s.type_.len());
-            }
+            },
             // Sort by total length of the type + name + quality (actual smallest JSON)
             SignalSorting::Json => signals.sort_by_key(|s| {
                 (match s.quality.as_ref() {
@@ -275,7 +272,7 @@ impl<'a> BlueprintGenerator<'a> {
                     t => t.len() + const { r#""type":"","#.len() },
                 }) + s.name.len()
             }),
-            _ => {}
+            _ => {},
         }
         signals.sort_by_key(|s| s.name.contains("parameter")); // Push "parameter" signals to end
 
@@ -297,7 +294,8 @@ impl<'a> BlueprintGenerator<'a> {
         self.state == BlueprintState::Finished
     }
 
-    /// Generates the next chunk of the blueprint and writes it to the given writer.
+    /// Generates the next chunk of the blueprint and writes it to the given
+    /// writer.
     pub async fn next_chunk(&mut self, writer: &mut impl io::Write) -> Result<(), JsError> {
         let old_state = self.state;
         match old_state {
@@ -331,7 +329,7 @@ impl<'a> BlueprintGenerator<'a> {
 
                 write_json_trimmed_to!(writer, &bp)?;
                 self.state = BlueprintState::Entities;
-            }
+            },
             BlueprintState::Entities => self.place_entities(writer)?,
             BlueprintState::Data => {
                 if self.generate_cbs {
@@ -339,7 +337,7 @@ impl<'a> BlueprintGenerator<'a> {
                 } else {
                     self.state = BlueprintState::Wires;
                 }
-            }
+            },
             BlueprintState::Wires => self.make_wires(writer)?,
             BlueprintState::Finished => err_js!("Already processed all chunks"),
         }
@@ -378,15 +376,15 @@ impl<'a> BlueprintGenerator<'a> {
                     }
 
                     write_to!(writer, br#"],"wires":["#)?;
-                }
+                },
                 BlueprintState::Finished => {
                     write_to!(writer, b"]")?;
                     write_to!(writer, br#","description":""#)?;
                     write_json_trimmed_to!(writer, &self.get_description()?)?;
                     write_to!(writer, br#"""#)?;
                     write_to!(writer, b"}}")?;
-                }
-                _ => {}
+                },
+                _ => {},
             }
         }
         Ok(())
@@ -404,13 +402,10 @@ impl<'a> BlueprintGenerator<'a> {
     }
 
     /// Gets the description to attach to the blueprint.
-    #[allow(
-        clippy::allow_attributes,
-        clippy::unnecessary_wraps,
-        reason = "API may change in the future"
-    )]
+    #[allow(clippy::unnecessary_wraps, reason = "API may change in the future")]
     fn generate_description(&self) -> Result<String, JsError> {
-        // Note: we use the `var` font for bold text as the word "var" is short and takes up less space.
+        // Note: we use the `var` font for bold text as the word "var" is short and
+        // takes up less space.
         let name = self.args.name.clone();
         let info = self.frame_info.as_ref();
         let dim = self.dim;
@@ -669,10 +664,10 @@ impl<'a> BlueprintGenerator<'a> {
             let is_last_frame = info.next_frame.is_none();
 
             for group_i in 0..n_groups {
-                if matches!(
-                    self.args.image_args.mode,
-                    Mode::Static { const_cb: true, .. }
-                ) {
+                if matches!(self.args.image_args.mode, Mode::Static {
+                    const_cb: true,
+                    ..
+                }) {
                     let thresh = 0.60;
                     set_progress(
                         thresh,

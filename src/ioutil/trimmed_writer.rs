@@ -1,5 +1,6 @@
-use crate::prelude::*;
 use std::io;
+
+use crate::prelude::*;
 
 pub struct TrimmedWriter<'a, W: io::Write> {
     last:     Option<u8>,

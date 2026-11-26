@@ -1,5 +1,6 @@
 use super::prelude::*;
-use crate::{arithmetic_conds, boxed_slice, decider_cond, prelude::*};
+use crate::prelude::*;
+use crate::{arithmetic_conds, boxed_slice, decider_cond};
 
 /// Generates timer entities and wires for the blueprint's timing mechanism.
 ///
@@ -9,18 +10,17 @@ use crate::{arithmetic_conds, boxed_slice, decider_cond, prelude::*};
 ///
 /// * `stop` - Maximum tick value before reset.
 /// * `ticks_per_frame` - Ticks per frame (derived from FPS).
-/// * `frames_per_combinator` - Number of frames processed per combinator (derived from
-///   compression).
-/// * `args` - Uses ``BlueprintArgs.grayscale_bits`` (affects extra combinators).
+/// * `frames_per_combinator` - Number of frames processed per combinator
+///   (derived from compression).
+/// * `args` - Uses ``BlueprintArgs.grayscale_bits`` (affects extra
+///   combinators).
 ///
 /// # Returns
 ///
-/// A tuple with entities, wires, and the timer reset entity (which is not included in entities)
+/// A tuple with entities, wires, and the timer reset entity (which is not
+/// included in entities)
 pub fn generate_timer(
-    stop: usize,
-    ticks_per_frame: u8,
-    frames_per_comb: u32,
-    args: &BlueprintArgs,
+    stop: usize, ticks_per_frame: u8, frames_per_comb: u32, args: &BlueprintArgs,
 ) -> Result<(Vec<BlueprintEntity>, Wires), JsError> {
     let (sig_f, sig_p, sig_s, sig_t) = {
         let s = &args.timing_signals;
@@ -50,7 +50,10 @@ pub fn generate_timer(
             outputs:    boxed_slice![DeciderCombinatorOutput::new(RC::clone(sig_t), None)],
         };
         if args.detailed_descriptions {
-            en.set_player_description("Increments 60 times per second up to the GIF's frame count, then resets to 0. It determines the current frame.");
+            en.set_player_description(
+                "Increments 60 times per second up to the GIF's frame count, then resets to 0. It \
+                 determines the current frame.",
+            );
         }
         en.set_control_behavior(ControlBehavior::DeciderCombinator { decider_conditions });
         ents.push(en.with_custom_tag("base_timer"));

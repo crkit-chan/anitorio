@@ -1,18 +1,18 @@
+use std::cell::RefCell;
+use std::collections::HashSet;
+
+use indexmap::IndexSet;
+use serde::{Deserialize, Serialize};
+
 use super::prelude::*;
 use crate::prelude::*;
-use serde::{Deserialize, Serialize};
-use std::{cell::RefCell, collections::HashSet};
-
-type SignalsHasher = std::hash::BuildHasherDefault<std::collections::hash_map::DefaultHasher>;
 
 thread_local! {
-    static PROTOTYPE_DATA: RefCell<PrototypeData> = const {
-        RefCell::new(PrototypeData {
-            blacklist_signals: Vec::new(),
-            electric_poles:    Vec::new(),
-            signals:           indexmap::IndexSet::with_hasher(SignalsHasher::new()),
-        })
-    };
+    static PROTOTYPE_DATA: RefCell<PrototypeData> = RefCell::new(PrototypeData {
+        blacklist_signals: HashSet::new(),
+        electric_poles:    Vec::new(),
+        signals:           IndexSet::new(),
+    });
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -31,9 +31,9 @@ pub struct ElectricPolePrototypeData {
 
 #[derive(Clone, Default)]
 pub struct PrototypeData {
-    pub blacklist_signals: Vec<RC<SignalID>>,
+    pub blacklist_signals: HashSet<RC<SignalID>>,
     pub electric_poles:    Vec<ElectricPolePrototypeData>,
-    pub signals:           indexmap::IndexSet<RC<SignalID>, SignalsHasher>,
+    pub signals:           IndexSet<RC<SignalID>>,
 }
 
 const DEFAULT_SIGNALS: &[(&str, &[&str])] = &[
@@ -41,7 +41,7 @@ const DEFAULT_SIGNALS: &[(&str, &[&str])] = &[
     ("virtual", &[EACH]),
 ];
 
-/// Enhances the provided signals by associating quality levels based on DLC usage.
+/// Loads the signals from JSON.
 ///
 /// # Arguments
 ///
@@ -57,7 +57,7 @@ pub fn load_data<R: std::io::Read>(data_json_reader: R) -> Result<(), JsError> {
         electric_poles: Vec<ElectricPolePrototypeData>,
         #[serde(default)]
         qualities:      Vec<String>,
-        signals:        indexmap::IndexSet<SignalIDRepr, SignalsHasher>,
+        signals:        IndexSet<SignalIDRepr>,
     }
 
     #[derive(Deserialize, Clone, Hash, PartialEq, Eq)]
@@ -74,18 +74,20 @@ pub fn load_data<R: std::io::Read>(data_json_reader: R) -> Result<(), JsError> {
         data.blacklist_signals.clear();
         data.signals.clear();
 
+        let signal_qualities: IndexSet<_> = data_repr.qualities.into_iter().map(RC::from).collect();
         let mut blacklist_signals = Vec::<SignalIDRepr>::new();
+        let mut uniq_strings: HashSet<_> = signal_qualities.iter().cloned().collect();
 
-        let signal_qualities: indexmap::IndexSet<_> =
-            data_repr.qualities.into_iter().map(RC::from).collect();
-        let mut signal_names = HashSet::<RC<str>>::new();
-        let mut signal_types = HashSet::<RC<str>>::new();
-
+        // Add required signals to signal list + all power poles.
+        // Non-user signals are tracked using ``blacklist-_signals``.
         for (type_, name) in (DEFAULT_SIGNALS.iter())
             .flat_map(|&(type_, names)| names.iter().map(move |&name| (type_, name)))
             .chain(data_repr.electric_poles.iter().map(|pole| ("entity", pole.name.as_ref())))
         {
             let sig_repr = SignalIDRepr { type_: type_.to_owned(), name: name.to_owned() };
+
+            // If data_repr.signals did not contain this sig_repr, we add
+            // blacklist_signals to indicate it should be ommitted.
             if data_repr.signals.insert(sig_repr.clone()) {
                 blacklist_signals.push(sig_repr);
             }
@@ -93,8 +95,8 @@ pub fn load_data<R: std::io::Read>(data_json_reader: R) -> Result<(), JsError> {
 
         #[crate::perf("Iterate signals")]
         for sig in data_repr.signals {
-            let type_ = signal_types.get_or_insert(sig.type_.into());
-            let name = signal_names.get_or_insert(sig.name.into());
+            let type_ = &RC::clone(uniq_strings.get_or_insert(sig.type_.into()));
+            let name = &RC::clone(uniq_strings.get_or_insert(sig.name.into()));
 
             for quality in &signal_qualities {
                 data.signals.insert(RC::from(SignalID {
@@ -109,20 +111,19 @@ pub fn load_data<R: std::io::Read>(data_json_reader: R) -> Result<(), JsError> {
             let ref_sig = SignalID::new(sig.type_.into(), sig.name.into(), DEFAULT_QUALITY.into());
             let sig = (data.signals.get(&RC::from(ref_sig.clone())))
                 .ok_or_else(|| js_err!("Could not find blacklisted signal '{ref_sig:?}'"))?;
-            Ok::<_, JsError>(RC::clone(sig))
+            Ok(RC::clone(sig))
         }))
         .collect::<Result<_, JsError>>()?;
 
         data.electric_poles = (data_repr.electric_poles.into_iter().map(|mut pole| {
             pole.name = RC::clone(
                 #[expect(clippy::unwrap_used, reason = "Garunteed to be populated")]
-                signal_names.get(&pole.name).unwrap(),
+                uniq_strings.get(&pole.name).unwrap(),
             );
 
             for d in &mut pole.supply_area_distances {
                 d.quality = RC::clone(
-                    signal_qualities
-                        .get(&d.quality)
+                    (signal_qualities.get(&d.quality))
                         .ok_or_else(|| js_err!("Could not find the quality '{}'", d.quality))?,
                 );
             }
@@ -130,7 +131,7 @@ pub fn load_data<R: std::io::Read>(data_json_reader: R) -> Result<(), JsError> {
         }))
         .collect::<Result<_, JsError>>()?;
 
-        Ok::<_, JsError>(())
+        Ok(())
     })
 }
 

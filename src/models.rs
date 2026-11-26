@@ -1,19 +1,22 @@
-use crate::{blueprint::models::SignalID, prelude::*};
+use std::collections::BTreeMap;
+
 use glam::UVec2;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use tsify::Tsify;
 use wasm_bindgen::prelude::*;
 
-#[cfg(feature = "arc_blueprint_generator")]
-pub type RC<T> = std::rc::Rc<T>;
+use crate::blueprint::models::SignalID;
+use crate::prelude::*;
+
+// Switch backends based on selected flags
 #[cfg(not(feature = "arc_blueprint_generator"))]
+pub type RC<T> = std::rc::Rc<T>;
+#[cfg(feature = "arc_blueprint_generator")]
 pub type RC<T> = std::sync::Arc<T>;
 
 #[derive(Tsify, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[allow(
-    clippy::allow_attributes,
     clippy::struct_excessive_bools,
     reason = "API may change in the future"
 )]

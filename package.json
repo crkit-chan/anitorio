@@ -8,6 +8,7 @@
     "dev": "vite --debug",
     "build": "node scripts/run.mjs build:wasm && node scripts/run.mjs build:vite",
     "build:opt": "cross-env CARGO_UNSTABLE_BUILD_STD=panic_abort,std node scripts/run.mjs build:wasm:opt && node scripts/run.mjs build:vite",
+    "build:opt:timed": "cross-env CARGO_UNSTABLE_BUILD_STD=panic_abort,std node scripts/run.mjs build:wasm:opt:timed && npm start",
     "build:start": "node scripts/run.mjs build:wasm && npm start",
     "build:vite": "vite build",
     "build:wasm-pack": "sh scripts/build-wasm.sh",

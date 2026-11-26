@@ -1,4 +1,5 @@
 use std::io::{self, Write};
+
 use wasm_bindgen::prelude::*;
 
 /// Custom writer that invokes a callback on every write

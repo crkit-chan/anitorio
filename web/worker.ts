@@ -133,7 +133,6 @@ async function main() {
       set_callbacks({
         onProgress: (percentage: number, status: string) => postMessage({ progress: { percentage, status } }),
         onLampGroup: (percentage) => postMessage({ lampProgress: { percentage } }),
-        perfNow: performance.now,
       });
     })(),
     setCombPosData: null as Promise<void> | null,

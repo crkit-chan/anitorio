@@ -1,25 +1,28 @@
 #![feature(
     cold_path,
     const_cmp,
+    const_convert,
     const_default,
     const_destruct,
     const_result_trait_fn,
     const_trait_impl,
+    const_slice_make_iter,
     hash_set_entry,
+    inherent_associated_types,
     likely_unlikely,
     proc_macro_hygiene,
     stmt_expr_attributes
 )]
 
-use wasm_bindgen::prelude::*;
-
 pub use anitorio_macros::perf;
 #[cfg(feature = "perf_timing")]
 pub use callbacks::perf_now;
+use wasm_bindgen::prelude::*;
 
 mod blueprint;
 mod callbacks;
 mod constants;
+mod hash;
 mod image_processing;
 mod image_util;
 mod ioutil;
@@ -37,7 +40,6 @@ mod util;
 /// This function will return an error if rayon fails to initialize.
 #[wasm_bindgen]
 #[allow(
-    clippy::allow_attributes,
     clippy::unused_async,
     unused,
     reason = "n_threads only used when threads feature is enabled"
@@ -98,7 +100,8 @@ pub struct RunBlueprintCallbacks {
 /// # Parameters
 ///
 /// - `options`: Options dict passed in
-/// - `image_data`: A ``Uint8Array`` passed in from JS. May be empty if `mode` (specified in ``options``) is not `"full"`.
+/// - `image_data`: A ``Uint8Array`` passed in from JS. May be empty if `mode`
+///   (specified in ``options``) is not `"full"`.
 ///
 /// # Returns
 ///
@@ -113,19 +116,19 @@ pub struct RunBlueprintCallbacks {
 /// Returns ``JsValue`` if any error occurs.
 #[wasm_bindgen]
 pub async fn run_blueprint(
-    args: tsify::Ts<models::BlueprintArgs>,
-    callbacks: tsify::Ts<RunBlueprintCallbacks>,
+    args: tsify::Ts<models::BlueprintArgs>, callbacks: tsify::Ts<RunBlueprintCallbacks>,
 ) -> Result<JsValue, JsError> {
-    use crate::prelude::*;
-    use blueprint::{encoder::BlueprintEncoder, generator::BlueprintGenerator, models::SignalID};
+    use std::cell::{Cell, RefCell};
+    use std::rc::Rc;
+
+    use blueprint::encoder::BlueprintEncoder;
+    use blueprint::generator::BlueprintGenerator;
+    use blueprint::models::SignalID;
     use image_processing::{FrameCallback, FrameData, ImageFrameData};
     use ioutil::JsFileReader;
-    use js_sys as js;
     use models::BlueprintArgs;
-    use std::{
-        cell::{Cell, RefCell},
-        rc::Rc,
-    };
+
+    use crate::prelude::*;
 
     const SYNC_TIME_MS: f64 = 1000.0;
 
@@ -248,8 +251,8 @@ pub async fn run_blueprint(
     let mut encoder = BlueprintEncoder::new(generator, &args, writer)?;
 
     let flush = async || -> Result<(), JsError> {
-        let js_promises = js::Array::from(&JsValue::from(promises.take()));
-        (js::Promise::all(&js_promises).await).map_js_err("Could not wait for write")?;
+        let js_promises = js_sys::Array::from(&JsValue::from(promises.take()));
+        (js_sys::Promise::all(&js_promises).await).map_js_err("Could not wait for write")?;
         Ok(())
     };
 
@@ -263,7 +266,7 @@ pub async fn run_blueprint(
 
     flush().await?; // Flush tail
 
-    let obj = js::Object::new();
+    let obj = js_sys::Object::new();
     Ok(JsValue::from(obj))
 }
 
@@ -278,7 +281,7 @@ pub async fn run_blueprint(
 ///
 /// # Errors
 ///
-/// ``JsValue`` if any error occurs.
+/// ``JsError`` if any error occurs.
 #[wasm_bindgen]
 pub fn set_signal_data(data_json: js_sys::Uint8Array) -> Result<(), JsError> {
     let reader = ioutil::Uint8ArrayReader::new(data_json);
@@ -291,7 +294,7 @@ pub fn set_signal_data(data_json: js_sys::Uint8Array) -> Result<(), JsError> {
 ///
 /// # Errors
 ///
-/// ``JsValue`` if any error occurs.
+/// ``JsError`` if any error occurs.
 #[wasm_bindgen]
 pub fn set_comb_pos_data(data_json: js_sys::Uint8Array) -> Result<(), JsError> {
     let reader = ioutil::Uint8ArrayReader::new(data_json);
@@ -314,8 +317,7 @@ pub struct EncodeGifCallbacks {
 /// ``JsValue`` if any error occurs.
 #[wasm_bindgen]
 pub async fn encode_gif(
-    args: JsValue,
-    callbacks: tsify::Ts<EncodeGifCallbacks>,
+    args: JsValue, callbacks: tsify::Ts<EncodeGifCallbacks>,
 ) -> Result<(), JsError> {
     use image_processing::{JsVideoFrameCallback, encode_gif};
     use util::JsReflectGetSet as _;

@@ -1,7 +1,9 @@
+use std::collections::{HashMap, HashSet};
+
+use glam::{DVec2, IVec2, dvec2, ivec2};
+
 use super::prelude::*;
 use crate::prelude::*;
-use glam::{DVec2, IVec2, dvec2, ivec2};
-use std::collections::{HashMap, HashSet};
 
 /// Tracks cells occupied by power poles.
 pub struct PowerPoleOccupied {
@@ -49,12 +51,10 @@ impl PowerPoleOccupied {
     ///
     /// # Returns
     ///
-    /// A tuple with power pole entities, their wires, occupied grid cells, and the next entity
-    /// number.
+    /// A tuple with power pole entities, their wires, occupied grid cells, and
+    /// the next entity number.
     pub fn generate_power_poles(
-        &self,
-        base_ent_n: u32,
-        args: &BlueprintArgs,
+        &self, base_ent_n: u32, args: &BlueprintArgs,
     ) -> (Vec<BlueprintEntity>, Wires, u32) {
         let mut poles: Vec<BlueprintEntity> = Vec::new();
         let mut wires = Wires::new();
@@ -123,12 +123,13 @@ impl PowerPoleOccupied {
         (poles, wires, curr_ent_n)
     }
 
-    /// Tests if it is possible to place an entity at the given point, without overlapping with a
-    /// power pole.
+    /// Tests if it is possible to place an entity at the given point, without
+    /// overlapping with a power pole.
     ///
     /// # Returns
     ///
-    /// A `bool` indicating whether the power pole would NOT occupy the given point.
+    /// A `bool` indicating whether the power pole would NOT occupy the given
+    /// point.
     pub fn test(&self, point: DVec2) -> bool {
         self.test_center(point).0
     }
@@ -151,7 +152,8 @@ impl PowerPoleOccupied {
     ///
     /// # Returns
     ///
-    /// A `bool` indicating whether the power pole would NOT occupy the given point.
+    /// A `bool` indicating whether the power pole would NOT occupy the given
+    /// point.
     pub fn request(&mut self, point: DVec2) -> bool {
         let (hit, center) = self.test_center(point);
         self.requests.insert(center.as_ivec2().into());

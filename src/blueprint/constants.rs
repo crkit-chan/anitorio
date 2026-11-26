@@ -1,7 +1,9 @@
 #![allow(clippy::unwrap_used, reason = "Utility")]
 
-use crate::{blueprint::models::SignalID, prelude::*};
 use glam::{DVec2, dvec2};
+
+use crate::blueprint::models::SignalID;
+use crate::prelude::*;
 
 /// Timer entity positions.
 pub const TIMER1_POS: DVec2 = dvec2(-2.5, -0.5);
@@ -16,11 +18,6 @@ pub const DIR_U: u8 = 0;
 pub const DIR_R: u8 = 4;
 pub const DIR_D: u8 = 8;
 pub const DIR_L: u8 = 12;
-
-// lazy_const!(pub ENT_ARI_CB:      RC<SignalID> = RC::new(SignalID::raw("entity", ARI_CB     , DEFAULT_QUALITY)));
-// lazy_const!(pub ENT_CONSTANT_CB: RC<SignalID> = RC::new(SignalID::raw("entity", CONSTANT_CB, DEFAULT_QUALITY)));
-// lazy_const!(pub ENT_DEC_CB:      RC<SignalID> = RC::new(SignalID::raw("entity", DEC_CB     , DEFAULT_QUALITY)));
-// lazy_const!(pub ENT_LAMP:        RC<SignalID> = RC::new(SignalID::raw("entity", LAMP       , DEFAULT_QUALITY)));
 
 pub static VIRTUAL_EACH: StaticSignalID =
     StaticSignalID::new("virtual", "signal-each", DEFAULT_QUALITY);

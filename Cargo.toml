@@ -18,7 +18,7 @@ all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
 
-allow_attributes = "warn"
+
 allow_attributes_without_reason = "warn"
 big_endian_bytes = "warn"
 bool_to_int_with_if = "warn"                  # More concise
@@ -62,6 +62,7 @@ string_lit_chars_any = "warn"                 # Stylistic preference
 todo = "warn"                                 # Utility
 too_many_lines = "allow"                      # Ya
 try_err = "warn"                              # Readability
+undocumented_unsafe_blocks = "warn"           # Give a good reason to use unsafe blocks
 unimplemented = "warn"                        # Useful
 unneeded_field_pattern = "warn"               # Clarity / brevity
 unseparated_literal_suffix = "warn"           # Readability
@@ -69,7 +70,6 @@ unused_trait_names = "warn"                   # Clarify intent
 unwrap_used = "warn"                          # WE WANT ERRORS
 
 # single_call_fn = "warn" # Useful debug tool
-# undocumented_unsafe_blocks = "warn"           # Give a good reason to use unsafe blocks
 
 
 [dependencies]

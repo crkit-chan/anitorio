@@ -1,19 +1,17 @@
 use std::io::{self, Write};
+
 use wasm_bindgen::prelude::*;
 
-/// Custom writer that buffers data and calls a callback when the buffer reaches a certain threshold.
+/// Custom writer that buffers data and calls a callback when the buffer reaches
+/// a certain threshold.
 pub struct StreamingWriter<F: FnMut(Vec<u8>) -> Result<(), JsValue>> {
     buffer:    Vec<u8>,
     threshold: usize,
     on_chunk:  F,
 }
 impl<F: FnMut(Vec<u8>) -> Result<(), JsValue>> StreamingWriter<F> {
-    pub fn new(threshold: usize, on_chunk: F) -> Self {
-        Self {
-            buffer: Vec::with_capacity(threshold),
-            threshold,
-            on_chunk,
-        }
+    pub const fn new(threshold: usize, on_chunk: F) -> Self {
+        Self { buffer: Vec::new(), threshold, on_chunk }
     }
 
     #[inline]
