@@ -67,11 +67,19 @@ pub fn init() {
 
 #[derive(tsify::Tsify, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct GetNextFrameArgs {
+    dimensions:          Option<glam::UVec2>,
+    #[serde(with = "serde_wasm_bindgen::preserve")]
+    in_buffer:           util::WasmSharedMemory,
+    use_sparse_decoding: Option<bool>,
+}
+
+#[derive(tsify::Tsify, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct OnFrameArgs {
     dimensions: glam::UVec2,
-
     #[serde(with = "serde_wasm_bindgen::preserve")]
-    frame: ts::TsUint8ClampedArrayBacked,
+    frame:      ts::TsUint8ClampedArrayBacked,
 }
 
 #[derive(tsify::Tsify, serde::Deserialize)]
@@ -82,7 +90,7 @@ pub struct RunBlueprintCallbacks {
     #[serde(with = "serde_wasm_bindgen::preserve")]
     pub get_data_len:    ts::TsFn<fn() -> ts::TsNum>,
     #[serde(with = "serde_wasm_bindgen::preserve")]
-    pub get_next_frame:  ts::TsFn<fn(JsValue) -> ts::TsFut<JsValue>>,
+    pub get_next_frame:  ts::TsFn<fn(ts::TsIntoRust<GetNextFrameArgs>) -> ts::TsFut<JsValue>>,
     #[serde(with = "serde_wasm_bindgen::preserve")]
     pub js_yield:        ts::TsFn<fn() -> ts::TsFut>,
     #[serde(with = "serde_wasm_bindgen::preserve")]
@@ -188,18 +196,15 @@ pub async fn run_blueprint(
                     Some(rgba) => rgba,
                     _ => &img.to_rgba8(),
                 };
-                let frame = js_sys::Uint8ClampedArray::new_with_byte_offset_and_length(
-                    &wasm_memory().buffer(),
-                    rgba.as_ptr() as u32,
-                    rgba.len() as u32,
-                );
-                let dimensions = serde_wasm_bindgen::to_value(&rgba.dimensions())?;
-                let js_args = js_sys::Object::new();
-                js_args.reflect_set("frame", &frame)?;
-                js_args.reflect_set("dimensions", &dimensions)?;
-
-                let js_args: JsValue = js_args.into();
-                on_frame.call_n((&js_args.into(),))?.await?;
+                let js_args = &ts::TsIntoRust::new(&OnFrameArgs {
+                    dimensions: rgba.dimensions().into(),
+                    frame:      js_sys::Uint8ClampedArray::new_with_byte_offset_and_length(
+                        &wasm_memory().buffer(),
+                        rgba.as_ptr() as u32,
+                        rgba.len() as u32,
+                    ),
+                })?;
+                on_frame.call_n((js_args,))?.await?;
 
                 Ok(())
             })
@@ -218,11 +223,42 @@ pub async fn run_blueprint(
         let get_next_frame = (args.image_args.mime_type)
             .starts_with("video/")
             .then(|| cbs.get_next_frame.clone());
+        let data_len = data_len as u32;
+
+        let chunk_size = (1 << (usize::BITS - 1 - data_len.max(1).leading_zeros()))
+            // Set chunk size to the largest power of 2 <= data_len, clamped between 16 KiB - 1 MiB
+            .clamp(16 * 1024, 1024 * 1024);
 
         if palette_size > 0 {
-            let reader = JsFileReader::new(cbs.get_data.clone(), data_len as u64, 1024 * 1024);
-            let decoder = ImageFrameData::new(reader, &args.image_args, get_next_frame.clone())?;
-            let generator = FrameData::new(decoder, &args.image_args, on_frame.clone())?
+            callbacks::set_is_preview(true);
+
+            // For generating the palette (first pass), we reduce resolution and FPS
+            let mut image_args = args.image_args.clone();
+
+            if !args.image_args.full_quality_scanning {
+                if let Some(duration) = image_args.duration {
+                    /// Above this number of seconds, we'll start reducing the
+                    /// FPS we sample at for performance.
+                    const SECS_THRESHOLD: f64 = 5.0;
+
+                    let fps = f64::from(image_args.target_fps);
+
+                    image_args.target_fps = fps
+                        // Gradually reduce the FPS in proportion to how long the video is
+                        .min(((SECS_THRESHOLD * fps) / duration).ceil())
+                        .max(1.0) as u8; // Safety fallback
+                }
+
+                if let Some(dimensions) = image_args.dimensions {
+                    const DIM_THRESHOLD: u16 = 50;
+
+                    image_args.max_size = (dimensions.min_element() as u16).min(DIM_THRESHOLD);
+                }
+            }
+
+            let reader = JsFileReader::new(cbs.get_data.clone(), u64::from(data_len), chunk_size);
+            let decoder = ImageFrameData::new(reader, &image_args, get_next_frame.clone())?;
+            let generator = FrameData::new(decoder, &image_args, on_frame.clone())?
                 .with_progress_message("Scanning colors");
 
             palette = Some(
@@ -231,13 +267,15 @@ pub async fn run_blueprint(
             cbs.reset_generator.call_n(())?.await?;
         }
 
-        let reader = JsFileReader::new(cbs.get_data.clone(), data_len as u64, 1024 * 1024);
+        let reader = JsFileReader::new(cbs.get_data.clone(), u64::from(data_len), chunk_size);
         let decoder = ImageFrameData::new(reader, &args.image_args, get_next_frame.clone())?;
         let generator = FrameData::new(decoder, &args.image_args, on_frame.clone())?
             .with_progress_message("Processing Frame");
 
         frame_data = Some(generator.with_palette(palette));
     }
+
+    callbacks::set_is_preview(false);
 
     // Custom writer that invokes a callback whenever chunk size is reached.
     let writer = ioutil::BufWriter::new(1024 * 1024, !args.low_mem_usage, |chunk| {
@@ -283,10 +321,8 @@ pub async fn run_blueprint(
 ///
 /// ``JsError`` if any error occurs.
 #[wasm_bindgen]
-pub fn set_signal_data(data_json: js_sys::Uint8Array) -> Result<(), JsError> {
-    let reader = ioutil::Uint8ArrayReader::new(data_json);
-    let reader = std::io::BufReader::new(reader);
-    blueprint::data::load_data(reader)?;
+pub fn set_signal_data(data_json: &[u8]) -> Result<(), JsError> {
+    blueprint::data::load_data(data_json)?;
     Ok(())
 }
 
@@ -296,17 +332,15 @@ pub fn set_signal_data(data_json: js_sys::Uint8Array) -> Result<(), JsError> {
 ///
 /// ``JsError`` if any error occurs.
 #[wasm_bindgen]
-pub fn set_comb_pos_data(data_json: js_sys::Uint8Array) -> Result<(), JsError> {
-    let reader = ioutil::Uint8ArrayReader::new(data_json);
-    let reader = std::io::BufReader::new(reader);
-    blueprint::combinator::load_comb_pos_json(reader)?;
+pub fn set_comb_pos_data(data_json: &[u8]) -> Result<(), JsError> {
+    blueprint::combinator::load_comb_pos_json(data_json)?;
     Ok(())
 }
 
 #[derive(tsify::Tsify, serde::Deserialize)]
 pub struct EncodeGifCallbacks {
     #[serde(with = "serde_wasm_bindgen::preserve")]
-    pub get_next_frame: image_processing::JsVideoFrameCallback,
+    pub get_next_frame: image_processing::GetJsFrameCallback,
 
     #[serde(with = "serde_wasm_bindgen::preserve")]
     pub on_chunk: ts::TsFn<fn(js_sys::Uint8Array) -> ts::TsFut>,
@@ -319,11 +353,11 @@ pub struct EncodeGifCallbacks {
 pub async fn encode_gif(
     args: JsValue, callbacks: tsify::Ts<EncodeGifCallbacks>,
 ) -> Result<(), JsError> {
-    use image_processing::{JsVideoFrameCallback, encode_gif};
+    use image_processing::{GetJsFrameCallback, encode_gif};
     use util::JsReflectGetSet as _;
 
     let args: models::EncodeGifArgs = serde_wasm_bindgen::from_value(args)?;
-    let get_next_frame = callbacks.reflect_get::<JsVideoFrameCallback>("getFrameData")?;
+    let get_next_frame = callbacks.reflect_get::<GetJsFrameCallback>("getFrameData")?;
     let on_chunk = callbacks
         .reflect_get::<js_sys::Function<fn(js_sys::Uint8Array) -> ts::TsFut>>("onChunk")?;
 

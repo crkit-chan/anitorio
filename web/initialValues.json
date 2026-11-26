@@ -8,6 +8,7 @@
   "displayMarginY": 2,
   "dryRun": false,
   "flippedAxes": "none",
+  "fullQualityScanning": false,
   "imageFilters": [],
   "imageRotation": "deg270",
   "includePowerPoles": true,

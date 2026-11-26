@@ -9,10 +9,11 @@ use crate::ts;
 #[serde(rename_all = "camelCase")]
 pub struct Callbacks {
     #[serde(with = "serde_wasm_bindgen::preserve")]
-    pub on_lamp_group: ts::TsFn<fn(ts::TsNum) -> ts::TsVoid>,
-
+    pub on_lamp_group:  ts::TsFn<fn(ts::TsNum) -> ts::TsVoid>,
     #[serde(with = "serde_wasm_bindgen::preserve")]
-    pub on_progress: ts::TsFn<fn(ts::TsNum, ts::TsStr) -> ts::TsVoid>,
+    pub on_progress:    ts::TsFn<fn(ts::TsNum, ts::TsStr) -> ts::TsVoid>,
+    #[serde(with = "serde_wasm_bindgen::preserve")]
+    pub set_is_preview: ts::TsFn<fn(ts::TsBool) -> ts::TsVoid>,
 }
 
 thread_local! {
@@ -62,20 +63,29 @@ pub fn set_callbacks(callbacks: &tsify::Ts<Callbacks>) -> Result<(), JsError> {
 ///
 /// * `percentage` - A value between 0 and 1 representing the progress.
 /// * `status` - A status message indicating the current stage.
+#[inline]
 pub fn report_progress<T: Into<f64>>(percentage: T, status: &str) {
     CALLBACKS.with_borrow(|cbs| {
-        if let Some(cbs) = cbs.as_ref() {
-            let pct = 100.0 * percentage.into();
-            _ = cbs.on_progress.call_n((&pct.into(), &status.into()));
-        }
+        let Some(cbs) = cbs.as_ref() else { return };
+        let pct = 100.0 * percentage.into();
+        _ = cbs.on_progress.call_n((&pct.into(), &status.into()));
     });
 }
+
+#[inline]
 pub fn report_lamp_group<T: Into<f64>>(percentage: T) {
     CALLBACKS.with_borrow(|cbs| {
-        if let Some(cbs) = cbs.as_ref() {
-            let pct = 100.0 * percentage.into();
-            _ = cbs.on_lamp_group.call_n((&pct.into(),));
-        }
+        let Some(cbs) = cbs.as_ref() else { return };
+        let pct = 100.0 * percentage.into();
+        _ = cbs.on_lamp_group.call_n((&pct.into(),));
+    });
+}
+
+#[inline]
+pub fn set_is_preview(is_preview: bool) {
+    CALLBACKS.with_borrow(|cbs| {
+        let Some(cbs) = cbs.as_ref() else { return };
+        _ = cbs.set_is_preview.call_n((&is_preview.into(),));
     });
 }
 

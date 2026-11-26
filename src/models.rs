@@ -6,7 +6,6 @@ use tsify::Tsify;
 use wasm_bindgen::prelude::*;
 
 use crate::blueprint::models::SignalID;
-use crate::prelude::*;
 
 // Switch backends based on selected flags
 #[cfg(not(feature = "arc_blueprint_generator"))]
@@ -45,20 +44,21 @@ pub struct BlueprintArgs {
 #[derive(Tsify, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImageArgs {
-    pub color_palette_size: u32,
-    pub dimensions:         Option<UVec2>,
-    pub duration:           Option<f64>,
-    pub flip:               ImageFlip,
-    pub grayscale_bits:     u8,
-    pub filters:            Box<[ImageFilter]>,
-    pub max_size:           u16,
-    pub mime_type:          String,
-    pub mode:               Mode,
-    pub n_frames:           Option<u32>,
-    pub resampling_filter:  ResamplingFilter,
-    pub rotate:             ImageRotate,
-    pub shading_speed:      u8,
-    pub target_fps:         u8,
+    pub color_palette_size:    u32,
+    pub dimensions:            Option<UVec2>,
+    pub duration:              Option<f64>,
+    pub filters:               Box<[ImageFilter]>,
+    pub flip:                  ImageFlip,
+    pub full_quality_scanning: bool,
+    pub grayscale_bits:        u8,
+    pub max_size:              u16,
+    pub mime_type:             String,
+    pub mode:                  Mode,
+    pub n_frames:              Option<u32>,
+    pub resampling_filter:     ResamplingFilter,
+    pub rotate:                ImageRotate,
+    pub shading_speed:         u8,
+    pub target_fps:            u8,
 }
 impl ImageArgs {
     #[must_use]
@@ -162,19 +162,6 @@ pub enum ResamplingFilter {
     Nearest,
     Thumbnail,
     Triangle,
-}
-impl ResamplingFilter {
-    #[inline]
-    pub fn to_image_filter(self) -> Result<image::imageops::FilterType, JsError> {
-        Ok(match self {
-            Self::Catrom => image::imageops::FilterType::CatmullRom,
-            Self::Gaussian => image::imageops::FilterType::Gaussian,
-            Self::Lanczos3 => image::imageops::FilterType::Lanczos3,
-            Self::Nearest => image::imageops::FilterType::Nearest,
-            Self::Triangle => image::imageops::FilterType::Triangle,
-            _ => err_js!("Invalid image filter value '{self:?}'"),
-        })
-    }
 }
 
 #[derive(Tsify, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -9,11 +9,14 @@ use wasm_bindgen::JsValue;
 use crate::constants::DEFAULT_FRAME_DELAY;
 use crate::prelude::*;
 use crate::util::{format_duration, wasm_shared_memory};
-use crate::{constants, ts};
+use crate::{GetNextFrameArgs, constants, ts};
 
 pub type FrameCallback = dyn for<'a> Fn(
     &'a image::DynamicImage,
 ) -> Pin<Box<dyn Future<Output = Result<(), JsError>> + 'a>>;
+
+pub type GetJsFrameCallback =
+    js_sys::Function<fn(ts::TsIntoRust<GetNextFrameArgs>) -> ts::TsFut<JsValue>>;
 
 pub struct FrameData<'a> {
     args:         &'a ImageArgs,
@@ -178,7 +181,7 @@ impl<'a> FrameData<'a> {
                     progress = self.out_frame_i as f64 / self.out_n_frames as f64;
                 }
 
-                if !self.progress_msg.is_empty() {
+                if likely(!self.progress_msg.is_empty()) {
                     set_progress(
                         0.10,
                         0.90,
@@ -238,7 +241,14 @@ impl<'a> FrameData<'a> {
         // 2. Resample after filters, but before grayscale to preserve detail.
         img = match self.args.resampling_filter {
             ResamplingFilter::Thumbnail => img.thumbnail(out_dim.x, out_dim.y),
-            filter => img.resize(out_dim.x, out_dim.y, filter.to_image_filter()?),
+            filter => img.resize(out_dim.x, out_dim.y, match filter {
+                ResamplingFilter::Catrom => image::imageops::CatmullRom,
+                ResamplingFilter::Gaussian => image::imageops::Gaussian,
+                ResamplingFilter::Lanczos3 => image::imageops::Lanczos3,
+                ResamplingFilter::Nearest => image::imageops::Nearest,
+                ResamplingFilter::Triangle => image::imageops::Triangle,
+                _ => err_js!("Invalid image filter '{filter:?}'"),
+            }),
         };
 
         // 3. Grayscale after resampling
@@ -276,13 +286,10 @@ impl<'a> FrameData<'a> {
         }
 
         // 5. Palette at the very end
-        #[crate::perf("Image palette (convert_frame())")]
         if let Some(palette) = self.palette.as_ref() {
-            #[crate::perf("Quantise")]
             let indexes =
                 quantized_frame_to_outputs(&img.view(0, 0, img.width(), img.height()), palette);
 
-            #[crate::perf("Outputs")]
             match img {
                 image::DynamicImage::ImageRgba8(ref mut inner) => {
                     let colors = palette.get_colors();
@@ -403,7 +410,7 @@ impl<'a> ImageFrameData<'a> {
     /// An iterator of `Frame` objects or a JavaScript error.
     pub fn new(
         mut reader: impl std::io::Read + 'a, image_args: &'a ImageArgs,
-        js_next_frame: Option<JsVideoFrameCallback>,
+        js_next_frame: Option<GetJsFrameCallback>,
     ) -> Result<Self, JsError> {
         let mut info: ImageArgs = image_args.clone();
         let state = match image_args.mime_type.as_str() {
@@ -439,8 +446,10 @@ impl<'a> ImageFrameData<'a> {
             t => err_js!("Unsupported image type: '{t}'"),
         };
 
-        let decoder =
+        let mut decoder =
             FrameDecoder::new(state, info.dimensions.ok_or_js_err("Missing dimensions!")?);
+        decoder = decoder.with_use_sparse_decoding((image_args.target_fps <= 10).then_some(true));
+
         Ok(ImageFrameData { decoder, info })
     }
 }
@@ -706,26 +715,42 @@ pub fn quantized_frame_to_outputs(
 
     outputs.into_boxed_slice()
 }
+
 enum FrameDecoderState<'a> {
     NativeFrames(image::Frames<'a>),
-    JsFrames(JsVideoFrameCallback),
+    JsFrames(GetJsFrameCallback),
 }
 
 #[derive(Clone)]
 struct FrameWithTime(image::Frame, u64);
+
 struct FrameDecoder<'a> {
-    curr_n_us: u64,
-    dim:       UVec2,
-    finished:  bool,
-    state:     FrameDecoderState<'a>,
+    curr_n_us:           u64,
+    dim:                 UVec2,
+    finished:            bool,
+    state:               FrameDecoderState<'a>,
+    use_sparse_decoding: Option<bool>,
 }
 impl<'a> FrameDecoder<'a> {
     const fn new(state: FrameDecoderState<'a>, dim: UVec2) -> Self {
-        FrameDecoder { curr_n_us: 0, dim, finished: false, state }
+        FrameDecoder {
+            curr_n_us: 0,
+            dim,
+            finished: false,
+            state,
+            use_sparse_decoding: None,
+        }
     }
 
-    #[must_use]
     #[inline]
+    #[must_use]
+    const fn with_use_sparse_decoding(mut self, use_sparse_decoding: Option<bool>) -> Self {
+        self.use_sparse_decoding = use_sparse_decoding;
+        self
+    }
+
+    #[inline]
+    #[must_use]
     const fn is_finished(&self) -> bool {
         self.finished
     }
@@ -748,12 +773,13 @@ impl<'a> FrameDecoder<'a> {
                 frame
             },
             FrameDecoderState::JsFrames(ref mut get_next_frame) => {
-                let args_obj = js_sys::Object::new();
                 let in_buf = vec![0_u8; self.dim.element_product() as usize * 4];
-                args_obj.reflect_set("inBuffer", wasm_shared_memory(&in_buf)?)?;
-                args_obj.reflect_set("dimensions", serde_wasm_bindgen::to_value(&self.dim)?)?;
-
-                let result = get_next_frame.call_n((&args_obj.into(),))?.await?;
+                let js_args = ts::TsIntoRust::new(&GetNextFrameArgs {
+                    dimensions:          Some(self.dim),
+                    in_buffer:           wasm_shared_memory(&in_buf)?,
+                    use_sparse_decoding: self.use_sparse_decoding,
+                })?;
+                let result = get_next_frame.call_n((&js_args,))?.await?;
                 let info: JsVideoFrameData = serde_wasm_bindgen::from_value(result)?;
 
                 if unlikely(info.is_finished) {
@@ -776,10 +802,8 @@ impl<'a> FrameDecoder<'a> {
     }
 }
 
-pub type JsVideoFrameCallback = js_sys::Function<fn(JsValue) -> ts::TsFut<JsValue>>;
-
 pub async fn encode_gif(
-    get_next_frame: JsVideoFrameCallback,
+    get_next_frame: GetJsFrameCallback,
     on_chunk: js_sys::Function<fn(js_sys::Uint8Array) -> ts::TsFut>, args: &EncodeGifArgs,
 ) -> Result<(), JsError> {
     use std::cell::RefCell;
@@ -815,6 +839,8 @@ pub async fn encode_gif(
         let info: JsVideoFrameData = serde_wasm_bindgen::from_value({
             let js_args = js_sys::Object::new();
             js_args.reflect_set("inBuffer", wasm_shared_memory(&in_buf)?)?;
+
+            let js_args: JsValue = js_args.into();
             get_next_frame.call_n((&js_args.into(),))?.await?
         })?;
         if unlikely(info.is_finished) {

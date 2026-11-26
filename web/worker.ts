@@ -1,6 +1,5 @@
 import type { BlueprintArgs, InitOutput } from "@/../pkg/anitorio_wasm";
 import { WASM_BUILD_ARGS } from "@/../pkg/build-info";
-import type { WasmSharedMemory } from "@/types";
 import { BASE_URL, nullify } from "@/utils";
 import type { InputVideoTrack, VideoSample, VideoSampleSink } from "mediabunny";
 
@@ -133,6 +132,7 @@ async function main() {
       set_callbacks({
         onProgress: (percentage: number, status: string) => postMessage({ progress: { percentage, status } }),
         onLampGroup: (percentage) => postMessage({ lampProgress: { percentage } }),
+        setIsPreview: (isPreview) => postMessage({ isPreview: { isPreview } }),
       });
     })(),
     setCombPosData: null as Promise<void> | null,
@@ -205,12 +205,18 @@ async function main() {
         evt.data.generate;
       const { imageArgs, outputFormat } = blueprintArgs;
       const useJsDecodedVideo = imageArgs.mimeType.startsWith("video/");
+      const useSparseDecoding = imageArgs.targetFps <= 10;
+
+      type SparseVideoSamples = ReturnType<VideoSampleSink["samplesAtTimestamps"]>;
+      type VideoSamples = ReturnType<VideoSampleSink["samples"]>;
+      type VideoSampleNext = ReturnType<VideoSamples["next"]>;
 
       let videoDuration: number | null = null;
 
       let videoSink: VideoSampleSink | null = null;
       let videoSamples: ReturnType<VideoSampleSink["samples"]> | null = null;
       let videoTrack: InputVideoTrack | null = null;
+      let sparseVideoSamples: SparseVideoSamples | null = null;
 
       if (useJsDecodedVideo) {
         const { VideoSampleSink } = await import("mediabunny");
@@ -219,21 +225,34 @@ async function main() {
 
         videoDuration = await videoTrack.computeDuration();
         videoSink = new VideoSampleSink(videoTrack, { hardwareAcceleration: "prefer-hardware" });
-        videoSamples = videoSink.samples();
-      }
 
-      type VideoSamples = ReturnType<VideoSampleSink["samples"]>;
-      type VideoSampleNext = ReturnType<VideoSamples["next"]>;
+        if (useSparseDecoding) {
+          sparseVideoSamples = createSparseVideoSamples();
+        } else {
+          videoSamples = videoSink.samples();
+        }
+      }
 
       const MAX_LOOKAHEAD_FRAMES = 50;
       const MAX_VIDEO_MEMORY = 512 * 1024 * 1024; // 512 MiB
 
       const videoSampleQueue: VideoSampleNext[] = [];
+
       let currVideoSample: VideoSample | null = null;
       let nextOutputTime = 0;
       let videoEnded = false;
       let videoLookahead: number | null = null;
       let videoSampleTail: Promise<void> = Promise.resolve();
+
+      function createSparseVideoSamples(): SparseVideoSamples {
+        return videoSink!.samplesAtTimestamps(
+          (function* () {
+            for (let i = 0; i / imageArgs.targetFps < videoDuration!; i++) {
+              yield i / imageArgs.targetFps;
+            }
+          })(),
+        );
+      }
 
       function prefetchVideoSamples() {
         while (videoSamples && !videoEnded && videoSampleQueue.length < (videoLookahead ?? 1)) {
@@ -307,7 +326,7 @@ async function main() {
         await writerReady;
 
         const inputData =
-          imageData instanceof File && !useJsDecodedVideo
+          imageData instanceof File && useJsDecodedVideo
             ? { byteLength: imageData.size }
             : imageData instanceof SharedArrayBuffer
               ? new Uint8Array(imageData)
@@ -328,7 +347,6 @@ async function main() {
           getData(from, to) {
             if (useJsDecodedVideo) throw new Error("No data to pass through when using JS decoding");
             if (imageData instanceof File) return new Uint8Array(reader.readAsArrayBuffer(imageData.slice(from, to)));
-
             if (!(inputData instanceof Uint8Array)) throw new Error("Expected inputData to be instanceof Uint8Array");
             return inputData.slice(from, to);
           },
@@ -370,6 +388,8 @@ async function main() {
               ctx.clearRect(0, 0, outWidth, outHeight);
               ctx.translate(outWidth / 2, outHeight / 2);
 
+              postMessage({ dimensions: { dimensions: [outWidth, outHeight] } });
+
               if (imageArgs.flip !== "none") {
                 const flipMap: Record<string, [number, number]> = { both: [-1, -1], x: [-1, 1], y: [1, -1] };
                 ctx.scale(...flipMap[imageArgs.flip]);
@@ -384,7 +404,7 @@ async function main() {
               throw e;
             }
           },
-          async getNextFrame({ inBuffer, dimensions }: { inBuffer: WasmSharedMemory; dimensions: [number, number] }) {
+          async getNextFrame({ inBuffer, dimensions, useSparseDecoding: useSparse = useSparseDecoding }) {
             try {
               const frameInterval = 1 / imageArgs.targetFps;
 
@@ -395,19 +415,29 @@ async function main() {
                 return { isFinished: true };
               }
 
-              // Advance to the source frame covering this output timestamp.
-              while (!currVideoSample || nextOutputTime >= currVideoSample.timestamp + currVideoSample.duration) {
-                currVideoSample?.close();
-                currVideoSample = null;
+              let sample: VideoSample;
 
-                const result = await getNextVideoSample();
-                if (result.done) return { isFinished: true }; // No new source frames. Keep the last frame if it covers this time.
+              if (useSparse) {
+                sparseVideoSamples ??= createSparseVideoSamples();
 
-                currVideoSample = result.value!;
+                const result = await sparseVideoSamples!.next();
+                if (result.done || !result.value) return { isFinished: true };
+
+                sample = result.value;
+              } else {
+                while (!currVideoSample || nextOutputTime >= currVideoSample.timestamp + currVideoSample.duration) {
+                  currVideoSample?.close();
+                  currVideoSample = null;
+
+                  const result = await getNextVideoSample();
+                  if (result.done) return { isFinished: true };
+                  currVideoSample = result.value!;
+                }
+
+                sample = currVideoSample;
               }
 
-              const sample = currVideoSample;
-              const [width, height] = dimensions;
+              const [width, height] = dimensions!;
               const { sourceCanvas, sourceCtx } = state;
               if (!sourceCanvas || !sourceCtx) throw new Error("Canvas is not initialized");
               (sourceCanvas.width !== width || sourceCanvas.height !== height) && Object.assign(sourceCanvas, { width, height });

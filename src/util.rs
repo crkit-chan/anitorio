@@ -53,7 +53,8 @@ pub fn now_ms() -> f64 {
     js_sys::Date::now()
 }
 
-pub fn wasm_shared_memory(data: &[u8]) -> Result<js_sys::Object, JsError> {
+pub type WasmSharedMemory = js_sys::Object;
+pub fn wasm_shared_memory(data: &[u8]) -> Result<WasmSharedMemory, JsError> {
     let obj = js_sys::Object::new();
 
     obj.reflect_set("memory", wasm_bindgen::memory())?;

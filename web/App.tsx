@@ -50,6 +50,9 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
   const [blueprintDownloadStartTime, setBlueprintDownloadStartTime] = createSignal(performance.now());
   const [lampProgressPercentage, setLampProgressPercentage] = createSignal(0);
   const [supportsThreads, setSupportsThreads] = createSignal(false);
+  const [wasPreviewPhase, setWasPreviewPhase] = createSignal(false);
+  const [isPreviewPhase, setIsPreviewPhase] = createSignal(false);
+  const [dimensions, setDimensions] = createSignal([0, 0]);
 
   let refBackground!: BackgroundApi;
   let refDialogLargeFile!: FactorioDialogDeleteApi;
@@ -82,6 +85,11 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
       const { percentage, status } = data.progress;
       formRefs.progressBar.style.setProperty("--progress", `${percentage}%`);
       formRefs.progressStatus.textContent = `(${percentage.toFixed(0)}%)  ${status}`;
+
+      setWasPreviewPhase(isPreviewPhase());
+    } else if (data.dimensions) {
+      const { dimensions } = data.dimensions;
+      setDimensions(dimensions);
     } else if (data.wasmMemoryUsage) {
       const { bytes, commited } = data.wasmMemoryUsage;
       setWasmMemoryUsage({ bytes, commited });
@@ -122,6 +130,9 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
     } else if (data.supportsThreads) {
       const { supportsThreads } = data.supportsThreads;
       setSupportsThreads(supportsThreads);
+    } else if (data.isPreview) {
+      const { isPreview } = data.isPreview;
+      setIsPreviewPhase(isPreview);
     } else if (data.error) {
       showToast(data.error, { isError: true });
       setIsGenerating(false);
@@ -338,6 +349,7 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
         customHeight,
         customWidth,
         flippedAxes,
+        fullQualityScanning,
         imageFilters,
         imageRotation,
         maxGroupSize,
@@ -370,6 +382,7 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
             : undefined,
         filters: [],
         flip: `${formData.flippedAxes}` as ImageArgs["flip"],
+        fullQualityScanning: !!formData.fullQualityScanning,
         grayscaleBits: +(formData.colorFormat.match(/gray-(\d+)/)?.[1] ?? 0),
         maxSize: +formData.maxSize,
         mimeType: currFile()!.type,
@@ -478,6 +491,9 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
   createEffect(() => localStorage.setItem(SHOW_ADVANCED_KEY, showAdvanced().toString()));
   createEffect(() => signalPresetRaw() && worker.postMessage({ signalPresetRaw: signalPresetRaw()! }));
   createEffect(() => worker.postMessage({ showPreview: { showPreview: showPreview() } }));
+  createEffect(() => {
+    formRefs.progressBar.style.setProperty("--progress-color", `var(--preview-${wasPreviewPhase()}-color)`);
+  });
 
   createEffect(() => {
     if (isGenerating()) {
@@ -587,6 +603,7 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
 
   return (
     <>
+      {/* This canvas is utility buffer canvas for generation */}
       <canvas
         class="hidden"
         ref={(ref) => {
@@ -602,33 +619,38 @@ export default function App({ ref, streamingAvailable, worker }: AppProps) {
 
       <div classList={{ hidden: !isGenerating() || !showPreview() }}>
         <div class="fixed inset-0 bg-black w-full h-full" />
-        <canvas
-          ref={(ref) => {
-            onMount(() => {
-              let canvas = ref.transferControlToOffscreen();
-              worker.postMessage({ canvas: { canvas } }, [canvas]);
-            });
-          }}
-          class="fixed inset-0 w-full h-full object-contain [image-rendering:pixelated]"
-          style={{
-            // Make the lamp generation preview update according to rotaton and flip
-            "clip-path": (() => {
-              const flip = formData.flippedAxes as ImageFlip;
-              const rotate = formData.imageRotation as ImageRotate;
-              const progress = 100 - lampProgressPercentage();
-              let pos = (["deg90", "none", "deg270", "deg180"] as const).indexOf(rotate);
 
-              if (pos % 2 !== 0 && (flip === "x" || flip === "both")) pos += 2;
-              if (pos % 2 === 0 && (flip === "y" || flip === "both")) pos += 2;
-              pos %= 4;
+        {/* This canvas renders the preview */}
+        <div class="pixel-preview" style={`--columns: ${dimensions()[0]}; --rows: ${dimensions()[1]};`}>
+          <canvas
+            ref={(ref) => {
+              onMount(() => {
+                let canvas = ref.transferControlToOffscreen();
+                worker.postMessage({ canvas: { canvas } }, [canvas]);
+              });
+            }}
+            class="fixed inset-0 w-full h-full object-contain [image-rendering:pixelated]"
+            style={{
+              // Make the lamp generation preview update according to rotaton and flip
+              "clip-path": (() => {
+                const flip = formData.flippedAxes as ImageFlip;
+                const rotate = formData.imageRotation as ImageRotate;
+                const progress = 100 - lampProgressPercentage();
+                let pos = (["deg90", "none", "deg270", "deg180"] as const).indexOf(rotate);
 
-              if (pos === 0) return `inset(${progress}% 0 0 0)`;
-              if (pos === 1) return `inset(0 ${progress}% 0 0)`;
-              if (pos === 2) return `inset(0 0 ${progress}% 0)`;
-              if (pos === 3) return `inset(0 0 0 ${progress}%)`;
-            })(),
-          }}
-        />
+                if (pos % 2 !== 0 && (flip === "x" || flip === "both")) pos += 2;
+                if (pos % 2 === 0 && (flip === "y" || flip === "both")) pos += 2;
+                pos %= 4;
+
+                if (pos === 0) return `inset(${progress}% 0 0 0)`;
+                if (pos === 1) return `inset(0 ${progress}% 0 0)`;
+                if (pos === 2) return `inset(0 0 ${progress}% 0)`;
+                if (pos === 3) return `inset(0 0 0 ${progress}%)`;
+              })(),
+            }}
+          />
+          {/* <div class="pixel-grid"></div> */}
+        </div>
 
         <Show
           when={workerShouldShowPreview()}

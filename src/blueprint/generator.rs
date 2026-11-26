@@ -630,6 +630,7 @@ impl<'a> BlueprintGenerator<'a> {
         let mut output_data: Vec<BlueprintEntity> = Vec::new();
 
         let mk_control_behavior = |range: UVec2, indices: Box<[(usize, i32)]>| {
+            #[crate::perf("mk_control_behavior")]
             Ok::<_, JsError>(if matches!(mode, Mode::Static { const_cb: true, .. }) {
                 let sections = (indices.chunks(1000).enumerate().map(|(i, chunk)| {
                     let filters = (chunk.iter().enumerate().map(|(j, &(sig_i, count))| {

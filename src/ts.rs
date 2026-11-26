@@ -1,3 +1,4 @@
+use serde::Serialize;
 use serde::de::DeserializeOwned;
 use wasm_bindgen::ErasableGeneric;
 use wasm_bindgen::convert::{FromWasmAbi, IntoWasmAbi, UpcastFrom};
@@ -36,6 +37,12 @@ impl<T: DeserializeOwned> TsIntoRust<T> {
     #[expect(clippy::wrong_self_convention, reason = "Matches `tsify` API")]
     pub fn to_rust(self) -> Result<T, serde_wasm_bindgen::Error> {
         serde_wasm_bindgen::from_value(self.value)
+    }
+
+    pub fn new(value: &T) -> Result<Self, JsError>
+    where T: tsify::Tsify + Serialize {
+        let value = value.into_js()?.into();
+        Ok(Self { value, _marker: std::marker::PhantomData })
     }
 }
 impl<T: DeserializeOwned> const From<JsValue> for TsIntoRust<T> {
