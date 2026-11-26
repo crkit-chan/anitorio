@@ -326,7 +326,7 @@ async function main() {
         await writerReady;
 
         const inputData =
-          imageData instanceof File && useJsDecodedVideo
+          imageData instanceof File && !useJsDecodedVideo
             ? { byteLength: imageData.size }
             : imageData instanceof SharedArrayBuffer
               ? new Uint8Array(imageData)
