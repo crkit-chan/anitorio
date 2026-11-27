@@ -511,12 +511,15 @@ impl<'a> FrameData<'a> {
 
         let mut colors: ColorCountMap = HashMap::with_hasher(IdentityHasherBuilder::default());
         let mut curr_total_duration = 0_u64;
+        let mut frame_i = 0_usize;
 
         while let Some(frame) = decoder.read_next_frame()? {
             let duration_ms = u64::from(frame.delay) * 10; // `frame.delay` is in units of 10ms
             let transparent = frame.transparent;
 
-            if let Some(total_duration) = total_duration {
+            if frame_i.is_multiple_of(10)
+                && let Some(total_duration) = total_duration
+            {
                 set_progress(
                     0.0,
                     1.0,
@@ -525,14 +528,7 @@ impl<'a> FrameData<'a> {
                 );
             }
 
-            // let counts = {
-            //     let mut counts = vec![0_u32; 256];
-            //     for &i in frame.buffer.iter() {
-            //         counts[i as usize] += 1;
-            //     }
-            //     counts
-            // };
-
+            // Efficiently get the number of occurences of each colour index
             let counts = crate::util::u8_histogram_8chunks(&frame.buffer);
             let palette = decoder.palette()?;
 
@@ -547,6 +543,7 @@ impl<'a> FrameData<'a> {
             }
 
             curr_total_duration += duration_ms;
+            frame_i += 1;
         }
 
         Ok(colors)
