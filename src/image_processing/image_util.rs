@@ -1,6 +1,8 @@
 use std::time::Duration;
 
 use image::GenericImageView as _;
+use weezl::decode::Decoder as LzwDecoder;
+use weezl::{BitOrder, LzwStatus};
 
 use crate::image_processing::frame_data::{ColorCountMap, GetJsFrameCallback};
 use crate::prelude::*;
@@ -157,6 +159,30 @@ pub fn color_frame_to_outputs(
             .map(|&[r, g, b, ..]| super::image_util::rgb_to_int(r, g, b).cast_signed())
             .collect())
     }
+}
+
+pub fn lzw_histogram(data: &[u8]) -> Result<[u32; 256], weezl::LzwError> {
+    // gif crate prefixes the compressed data with the minimum code size.
+    let (&min_code_size, mut input) = data.split_first().unwrap();
+
+    let mut decoder = LzwDecoder::new(BitOrder::Lsb, min_code_size);
+    let mut counts = [0_u32; 256];
+    let mut output = [0_u8; 8192];
+
+    loop {
+        let result = decoder.decode_bytes(input, &mut output);
+        input = &input[result.consumed_in..];
+
+        for &index in &output[..result.consumed_out] {
+            counts[index as usize] += 1;
+        }
+
+        if matches!(result.status?, LzwStatus::Done | LzwStatus::NoProgress) {
+            break;
+        }
+    }
+
+    Ok(counts)
 }
 
 pub async fn encode_gif(

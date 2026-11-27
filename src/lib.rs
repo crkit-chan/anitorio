@@ -243,6 +243,7 @@ pub async fn run_blueprint(
                 &args.image_args,
                 get_next_frame.clone(),
                 on_frame.clone(),
+                true,
             )?
             .with_progress_message("Scanning colors");
 
@@ -288,6 +289,7 @@ pub async fn run_blueprint(
                     &image_args,
                     get_next_frame.clone(),
                     on_frame.clone(),
+                    true,
                 )?
                 .with_progress_message("Scanning colors");
 
@@ -304,6 +306,7 @@ pub async fn run_blueprint(
             &args.image_args,
             get_next_frame.clone(),
             on_frame.clone(),
+            false,
         )?
         .with_progress_message("Processing Frame");
 

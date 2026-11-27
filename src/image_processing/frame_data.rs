@@ -27,6 +27,7 @@ pub struct FrameData<'a> {
     args:         ImageArgs,
     curr_n_us:    u64,
     decoder:      FrameDecoder<'a>,
+    for_palette:  bool,
     fps_timer:    f64,
     in_dim:       UVec2,
     in_frame_i:   usize,
@@ -55,7 +56,7 @@ impl<'a> FrameData<'a> {
     /// An iterator of `Frame` objects or a JavaScript error.
     pub fn new<R: BufReadSeek + 'a>(
         mut reader: R, args: &ImageArgs, js_next_frame: Option<GetJsFrameCallback>,
-        on_frame: Option<Rc<FrameCallback>>,
+        on_frame: Option<Rc<FrameCallback>>, for_palette: bool,
     ) -> Result<Self, JsError> {
         #[inline]
         #[must_use]
@@ -68,6 +69,7 @@ impl<'a> FrameData<'a> {
             "image/gif" => {
                 let mut options = gif::DecodeOptions::new();
                 options.set_color_output(gif::ColorOutput::Indexed);
+                options.skip_frame_decoding(for_palette);
 
                 let decoder = options.read_info(Box::new(reader) as Box<dyn BufReadSeek>)?;
                 let screen = gif_dispose::Screen::new_decoder(&decoder);
@@ -159,6 +161,7 @@ impl<'a> FrameData<'a> {
             },
             args,
             curr_n_us: 0,
+            for_palette,
             fps_timer: now_ms(),
             decoder,
             in_dim,
@@ -528,8 +531,14 @@ impl<'a> FrameData<'a> {
                 );
             }
 
-            // Efficiently get the number of occurences of each colour index
-            let counts = crate::util::u8_histogram_8chunks(&frame.buffer);
+            // Efficiently compute the number of occurences of each colour index
+            let counts = if self.for_palette {
+                // Decode the rest of the chunks
+                super::image_util::lzw_histogram(&frame.buffer)
+                    .map_err(|e| js_err!("GIF LZW decoding failed: {e:?}"))?
+            } else {
+                crate::util::u8_histogram_8chunks(&frame.buffer)
+            };
             let palette = decoder.palette()?;
 
             for (i, count) in counts.into_iter().enumerate() {
