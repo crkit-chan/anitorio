@@ -406,7 +406,7 @@ impl<'a> ImageFrameData<'a> {
                             }
                         };
                         let delay = image::Delay::from_numer_denom_ms(delay, 1);
-                        Some(Ok(DynamicFrame::from_parts(img, 0, 0, delay)))
+                        Some(Ok(DynamicFrame::new(img, delay)))
                     }
                 }
 
@@ -423,11 +423,11 @@ impl<'a> ImageFrameData<'a> {
                 let mut data = Vec::new();
                 reader.read_to_end(&mut data)?;
 
+                let img = image::RgbaImage::from_raw(dim.x, dim.y, data)
+                    .ok_or_js_err("buffer length must be width * height * 4")?;
                 let frames = DynamicFrames::new(Box::new(std::iter::once(Ok(DynamicFrame::new(
-                    image::DynamicImage::ImageRgba8(
-                        image::RgbaImage::from_raw(dim.x, dim.y, data)
-                            .ok_or_js_err("buffer length must be width * height * 4")?,
-                    ),
+                    image::DynamicImage::ImageRgba8(img),
+                    image::Delay::from_numer_denom_ms(0, 1),
                 ))))); // bruh
                 FrameDecoderState::Frames(frames)
             },
@@ -460,32 +460,15 @@ enum FrameDecoderState<'a> {
 /// A single animation frame
 #[derive(Clone)]
 pub struct DynamicFrame {
+    buffer: image::DynamicImage,
     /// Delay between the frames in milliseconds
     delay:  image::Delay,
-    /// x offset
-    left:   u32,
-    /// y offset
-    top:    u32,
-    buffer: image::DynamicImage,
 }
 impl DynamicFrame {
     #[inline]
     #[must_use]
-    pub fn new(buffer: image::DynamicImage) -> Self {
-        Self {
-            delay: image::Delay::from_numer_denom_ms(0, 1),
-            left: 0,
-            top: 0,
-            buffer,
-        }
-    }
-
-    #[inline]
-    #[must_use]
-    pub const fn from_parts(
-        buffer: image::DynamicImage, left: u32, top: u32, delay: image::Delay,
-    ) -> Self {
-        Self { delay, left, top, buffer }
+    pub const fn new(buffer: image::DynamicImage, delay: image::Delay) -> Self {
+        Self { buffer, delay }
     }
 
     #[inline]
@@ -583,9 +566,9 @@ impl<'a> FrameDecoder<'a> {
                     return Ok(None);
                 };
 
-                let duration_ms = u32::from(frame.delay) * 10;
+                let duration_ms = u32::from(frame.delay) * 10; // frame.delay is in units of 10ms
                 let duration_microseconds = u64::from(duration_ms) * 1000;
-                data.screen.blit_frame(frame)?;
+                data.screen.blit_frame(frame)?; // Advance the screen by 1 frame
 
                 let (pixels, width, height) = data.screen.pixels_rgba().to_contiguous_buf();
                 let bytes: &[u8] = bytemuck::cast_slice(&pixels);
@@ -594,7 +577,7 @@ impl<'a> FrameDecoder<'a> {
 
                 let img = image::DynamicImage::ImageRgba8(img);
                 let duration = image::Delay::from_numer_denom_ms(duration_ms, 1);
-                let frame = DynamicFrame::from_parts(img, 0, 0, duration);
+                let frame = DynamicFrame::new(img, duration);
                 let output = FrameWithTime(frame, self.curr_n_us);
                 self.curr_n_us += duration_microseconds;
 
@@ -617,12 +600,12 @@ impl<'a> FrameDecoder<'a> {
 
                 let duration =
                     Duration::from_secs_f64(info.duration.ok_or_js_err("Missing duration")?);
-                let duration = image::Delay::from_saturating_duration(duration);
+                let delay = image::Delay::from_saturating_duration(duration);
                 let img = image::RgbaImage::from_raw(self.dim.x, self.dim.y, in_buf)
                     .ok_or_js_err("Invalid RGBA frame dimensions")?;
 
                 Some(FrameWithTime(
-                    DynamicFrame::from_parts(image::DynamicImage::ImageRgba8(img), 0, 0, duration),
+                    DynamicFrame::new(image::DynamicImage::ImageRgba8(img), delay),
                     (info.timestamp.ok_or_js_err("Missing timestamp")? * 1000.0 * 1000.0) as u64,
                 ))
             },
