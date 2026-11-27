@@ -10,11 +10,12 @@ use super::prelude::*;
 use super::timer::generate_timer;
 use crate::blueprint::data::with_prototype_data;
 use crate::callbacks::report_lamp_group;
-use crate::image_processing::FrameData;
+use crate::image_processing::frame_data::FrameData;
+use crate::image_processing::image_util::{color_frame_to_outputs, grayscale_frames_to_outputs};
 use crate::models::RawJsonString;
 use crate::prelude::*;
 use crate::util::format_duration;
-use crate::{boxed_slice, decider_cond, image_util};
+use crate::{boxed_slice, decider_cond};
 
 /// How many entities to encode in one go. Encoding more entities at once is
 /// faster, but uses more memory.
@@ -704,14 +705,13 @@ impl<'a> BlueprintGenerator<'a> {
                             if has_palette {
                                 frame_data.palette_frames_to_outputs(&frames)?
                             } else {
-                                image_util::grayscale_frames_to_outputs(&frames, gray_bits.into())?
+                                grayscale_frames_to_outputs(&frames, gray_bits.into())?
                             }
                         };
 
                         state.frame_buf.clear();
                     } else {
-                        frame_sigs =
-                            image_util::color_frame_to_outputs(&frame.as_ref().view(x, y, w, h))?;
+                        frame_sigs = color_frame_to_outputs(&frame.as_ref().view(x, y, w, h))?;
                     }
                 }
 

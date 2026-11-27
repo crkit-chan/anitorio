@@ -1,12 +1,11 @@
-use std::collections::HashMap;
-use std::io;
+use std::time::Duration;
 
 use image::GenericImageView as _;
 
-use crate::constants;
-use crate::hash::IdentityHasherBuilder;
-use crate::image_processing::FrameData;
+use crate::image_processing::frame_data::{ColorCountMap, GetJsFrameCallback};
 use crate::prelude::*;
+use crate::util::wasm_shared_memory;
+use crate::{GetNextFrameArgs, constants, ts};
 
 /// Copied from image crate
 #[must_use]
@@ -36,56 +35,19 @@ pub const fn resize_dimensions(
     }
 }
 
-/// Picks one palette of `size` colors for all frames. Index 0 is always black,
-/// since black pixels are left out of the blueprint entirely.
-///
-/// # Arguments
-///
-/// * `frames` - The processed frames.
-/// * `size` - Number of palette entries, including black.
-///
-/// # Returns
-///
-/// The palette colors as RGB triples.
-pub async fn build_palette(
-    mut generator: FrameData<'_>, size: u32, speed: i32,
+pub fn color_counts_to_palette(
+    color_counts: ColorCountMap, size: u32, speed: i32,
 ) -> Result<ColorPalette, JsError> {
-    use imagequant::RGBA;
-
     let mut attr = imagequant::Attributes::new();
     attr.set_max_colors(size)?;
     attr.set_speed(speed)?;
 
     let mut result = {
         let mut hist = imagequant::Histogram::new(&attr);
-
-        while let Some(frame) = generator.next().await? {
-            let (w, h) = (frame.width() as usize, frame.height() as usize);
-            let mut qimg = match RC::unwrap_or_clone(frame) {
-                image::DynamicImage::ImageRgba8(rgba) => {
-                    attr.new_image(bytemuck::cast_slice(&rgba.into_raw()), w, h, 0.0)?
-                },
-                image::DynamicImage::ImageLuma8(luma) => {
-                    let pixels = luma.into_raw();
-                    let f = move |row: &mut [std::mem::MaybeUninit<RGBA>], y: usize| {
-                        let start = y * w;
-                        for (x, pixel) in row.iter_mut().enumerate() {
-                            let l = pixels[start + x];
-                            pixel.write(RGBA::new(l, l, l, 255));
-                        }
-                    };
-
-                    // SAFETY: `Image::new_fn` requires the callback to initialize every
-                    // `MaybeUninit<RGBA>` element in each row before returning. The row
-                    // length is `w`, and `pixels` contains exactly `w * h` elements.
-                    // `y` is a valid row index, so `start + x` is in bounds for every
-                    // pixel written.
-                    unsafe { imagequant::Image::new_fn(&attr, f, w, h, 0.0)? }
-                },
-                _ => unreachable!("Expected RGBA8 or LumaA8"),
-            };
-            hist.add_image(&attr, &mut qimg)?;
-        }
+        let color_counts_iter = (color_counts.into_iter()).map(|(color, count)| {
+            imagequant::HistogramEntry { color: bytemuck::cast(color), count }
+        });
+        hist.add_colors(&color_counts_iter.collect::<Box<_>>(), 0.0)?;
         hist.quantize(&attr)?
     };
     let mut colors: Box<_> = result.palette_vec().into_iter().map(|c| [c.r, c.g, c.b]).collect();
@@ -191,10 +153,68 @@ pub fn color_frame_to_outputs(
 
     #[cfg(not(target_arch = "wasm32"))] // scalar fallback
     {
-        Ok((rgba.as_raw().as_chunks::<4>().0.iter())
-            .map(|&[r, g, b, ..]| crate::image_processing::rgb_to_int(r, g, b).cast_signed())
+        Ok((view.to_image().as_raw().as_chunks::<4>().0.iter())
+            .map(|&[r, g, b, ..]| super::image_util::rgb_to_int(r, g, b).cast_signed())
             .collect())
     }
+}
+
+pub async fn encode_gif(
+    get_next_frame: GetJsFrameCallback,
+    on_chunk: js_sys::Function<fn(js_sys::Uint8Array) -> ts::TsFut>, args: &EncodeGifArgs,
+) -> Result<(), JsError> {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use image::codecs::gif::{GifEncoder, Repeat};
+
+    use crate::ioutil::CallbackWriter;
+
+    let promises = Rc::new(const { RefCell::new(Vec::<ts::TsFut>::new()) });
+    let promise_q = Rc::clone(&promises);
+
+    // Custom writer that invokes a callback whenever chunk size is reached.
+    let writer = CallbackWriter::new(|chunk| {
+        let js_promise = on_chunk.call_n((&(&*chunk).into(),));
+        promise_q.borrow_mut().push(js_promise?);
+        Ok(())
+    });
+    let mut writer = std::io::BufWriter::with_capacity(1024 * 1024, writer);
+    let mut encoder = GifEncoder::new_with_speed(&mut writer, i32::from(args.speed));
+    (encoder.set_repeat(Repeat::Infinite))?;
+
+    let in_buf = vec![0_u8; args.dim.element_product() as usize * 4];
+    let flush = async || -> Result<(), JsError> {
+        let pending = std::mem::take(&mut *promises.borrow_mut());
+        for promise in pending {
+            promise.await?;
+        }
+        Ok(())
+    };
+
+    loop {
+        let info: JsVideoFrameData = serde_wasm_bindgen::from_value({
+            let js_args = ts::TsIntoRust::new(&GetNextFrameArgs {
+                in_buffer: wasm_shared_memory(&in_buf)?,
+                ..Default::default()
+            })?;
+            get_next_frame.call_n((&js_args,))?.await?
+        })?;
+        if unlikely(info.is_finished) {
+            break;
+        }
+
+        let duration = Duration::from_secs_f64(info.duration.ok_or_js_err("Missing duration")?);
+        let duration = image::Delay::from_saturating_duration(duration);
+        let img = image::RgbaImage::from_raw(args.dim.x, args.dim.y, in_buf.clone())
+            .ok_or_js_err("Invalid RGBA frame dimensions")?;
+        let f = image::Frame::from_parts(img, 0, 0, duration);
+        encoder.encode_frame(f)?;
+
+        flush().await?;
+    }
+
+    Ok(())
 }
 
 /// Packs grayscale frames into output signals by bit-packing pixel values.
@@ -316,6 +336,7 @@ pub fn palette_frames_to_outputs(
 /// # Returns
 ///
 /// The index of the closest palette entry.
+#[must_use]
 pub fn quantized_frame_to_outputs(
     frame: &image::SubImage<&image::DynamicImage>, palette: &ColorPalette,
 ) -> Box<[u8]> {
@@ -351,81 +372,6 @@ pub fn quantized_frame_to_outputs(
     }
 
     outputs.into_boxed_slice()
-}
-
-pub type GifColorCountMap = HashMap<[u8; 4], u32, IdentityHasherBuilder>;
-
-pub fn count_gif_colors<R: io::Read>(
-    reader: R, total_duration: Option<f64>,
-) -> Result<GifColorCountMap, JsError> {
-    let mut options = gif::DecodeOptions::new();
-    options.set_color_output(gif::ColorOutput::Indexed);
-
-    let mut curr_total_duration = 0_u64;
-    let mut decoder = options.read_info(reader)?;
-    let mut colors: GifColorCountMap = HashMap::with_hasher(IdentityHasherBuilder::default());
-
-    while let Some(frame) = decoder.read_next_frame()? {
-        let duration_ms = u64::from(frame.delay) * 10; // `frame.delay` is in units of 10ms
-        let mut counts = [0_u64; 256];
-
-        if let Some(total_duration) = total_duration {
-            set_progress(
-                0.0,
-                1.0,
-                curr_total_duration as f64 / (1000.0 * total_duration),
-                "Finding GIF color palette...",
-            );
-        }
-
-        for &i in frame.buffer.iter() {
-            if likely(frame.transparent != Some(i)) {
-                counts[i as usize] += 1;
-            }
-        }
-
-        let palette = decoder.palette()?;
-        for (i, count) in counts.into_iter().enumerate() {
-            if count == 0 {
-                continue;
-            }
-            let i = i * 3;
-            let rgba = [palette[i], palette[i + 1], palette[i + 2], 255];
-
-            *colors.entry(rgba).or_default() += count as u32;
-        }
-
-        curr_total_duration += duration_ms;
-    }
-
-    Ok(colors)
-}
-
-pub fn color_counts_to_palette(
-    color_counts: GifColorCountMap, size: u32, speed: i32,
-) -> Result<ColorPalette, JsError> {
-    let mut attr = imagequant::Attributes::new();
-    attr.set_max_colors(size)?;
-    attr.set_speed(speed)?;
-
-    let mut result = {
-        let mut hist = imagequant::Histogram::new(&attr);
-        let color_counts_iter = (color_counts.into_iter()).map(|(color, count)| {
-            imagequant::HistogramEntry { color: bytemuck::cast(color), count }
-        });
-        hist.add_colors(&color_counts_iter.collect::<Box<_>>(), 0.0)?;
-        hist.quantize(&attr)?
-    };
-    let mut colors: Box<_> = result.palette_vec().into_iter().map(|c| [c.r, c.g, c.b]).collect();
-
-    if let Some(darkest) = (0..colors.len()).min_by_key(|&i| {
-        let c = colors[i];
-        c[0].saturating_add(c[1]).saturating_add(c[2])
-    }) {
-        colors.swap(0, darkest);
-    }
-
-    ColorPalette::new(colors)
 }
 
 #[inline]

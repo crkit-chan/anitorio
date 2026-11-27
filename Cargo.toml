@@ -43,6 +43,7 @@ map_err_ignore = "warn"
 map_with_unused_argument_over_ranges = "warn"
 match_wildcard_for_single_variants = "allow"    # I do this quite a lot
 missing_assert_message = "warn"                 # Debugging utility
+missing_errors_doc = "allow"
 mixed_read_write_in_expression = "warn"
 modulo_arithmetic = "warn"
 multiple_inherent_impl = "warn"
@@ -83,7 +84,7 @@ flate2 = { version = "1.1.10", default-features = false, features = [
     "zlib-rs",
 ] }
 futures-lite = { version = "2", optional = true }
-gif = { version = "0.14.2" }
+gif = { version = "0.14.2", default-features = false, features = ["std"] }
 gif-dispose = "6"
 glam = { version = "0.33.8", features = ["bytemuck", "serde"] }
 image = { version = "0.25.10", default-features = false, features = [
@@ -116,7 +117,7 @@ web-sys = { version = "0.3", features = ["console"] }
 
 [profile.dev]
 opt-level = 2
-debug = true
+debug = false
 incremental = true
 
 
@@ -175,3 +176,7 @@ threads = [
     "image/rayon",
     "imagequant/threads",
 ]
+
+
+[patch.crates-io]
+gif-dispose = { path = "src/gif-dispose" }

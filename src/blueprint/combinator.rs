@@ -8,7 +8,7 @@ use super::prelude::*;
 use crate::palette::ColorPalettePixelSlice;
 use crate::prelude::*;
 use crate::util::bounding_box_midpoints;
-use crate::{arithmetic_conds, decider_cond, image_util, mkwires};
+use crate::{arithmetic_conds, decider_cond, mkwires};
 
 thread_local! {
     static COMB_POS_DATA: RefCell<Box<[CombinatorPositionData]>> = RefCell::new(Box::new([]));
@@ -204,7 +204,7 @@ pub fn generate_combinators(
 
             // Generate next entity without including wires
             let (next_ent_n, mut en) = data_cbs.next_entity(curr_ent_n, occupied, true);
-            let color = image_util::rgb_to_int(r, g, b);
+            let color = crate::image_processing::image_util::rgb_to_int(r, g, b);
             let grid_x = data_cbs.grid_pos.x;
 
             en = en.with_control_behavior(ControlBehavior::decider(DeciderCombinatorParameters {

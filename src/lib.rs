@@ -23,7 +23,6 @@ mod callbacks;
 mod constants;
 mod hash;
 mod image_processing;
-mod image_util;
 mod ioutil;
 mod macros;
 mod models;
@@ -59,12 +58,17 @@ pub async fn init_rayon(n_threads: Option<usize>) -> Result<bool, JsError> {
     }
 }
 
+// #[wasm_bindgen]
+// pub fn run_benchmarks(data: &[u8], iterations: u32) {
+//     benchmark_historagram();
+// }
+
 #[wasm_bindgen]
 pub fn init() {
     console_error_panic_hook::set_once();
 }
 
-#[derive(tsify::Tsify, serde::Serialize, serde::Deserialize)]
+#[derive(Default, tsify::Tsify, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetNextFrameArgs {
     dimensions:          Option<glam::UVec2>,
@@ -131,7 +135,8 @@ pub async fn run_blueprint(
     use blueprint::encoder::BlueprintEncoder;
     use blueprint::generator::BlueprintGenerator;
     use blueprint::models::SignalID;
-    use image_processing::{FrameCallback, FrameData, ImageFrameData};
+    use image_processing::frame_data::{FrameCallback, FrameData};
+    use image_processing::image_util;
     use ioutil::JsFileReader;
     use models::BlueprintArgs;
 
@@ -233,11 +238,18 @@ pub async fn run_blueprint(
 
             let reader = JsFileReader::new(cbs.get_data.clone(), u64::from(data_len));
             let reader = std::io::BufReader::with_capacity(chunk_size, reader);
+            let generator = FrameData::new(
+                reader,
+                &args.image_args,
+                get_next_frame.clone(),
+                on_frame.clone(),
+            )?
+            .with_progress_message("Scanning colors");
 
             // GIFs are stored with each pixel in a frame referring to an index in a 8-bit
             // list of colors. Using indexed decode will always be faster, since
             // decoding to RGBA would require decoding the indexes anyway.
-            if let Ok(p) = image_util::count_gif_colors(reader, args.image_args.duration)
+            if let Ok(p) = (generator.into_gif_color_count_map())
                 .and_then(|c| image_util::color_counts_to_palette(c, palette_size, shading_speed))
             {
                 palette = Some(p);
@@ -271,12 +283,15 @@ pub async fn run_blueprint(
 
                 let reader = JsFileReader::new(cbs.get_data.clone(), u64::from(data_len));
                 let reader = std::io::BufReader::with_capacity(chunk_size, reader);
-                let decoder = ImageFrameData::new(reader, &image_args, get_next_frame.clone())?;
-                let generator = FrameData::new(decoder, &image_args, on_frame.clone())?
-                    .with_progress_message("Scanning colors");
+                let generator = FrameData::new(
+                    reader,
+                    &image_args,
+                    get_next_frame.clone(),
+                    on_frame.clone(),
+                )?
+                .with_progress_message("Scanning colors");
 
-                palette =
-                    Some(image_util::build_palette(generator, palette_size, shading_speed).await?);
+                palette = Some(generator.into_palette(palette_size, shading_speed).await?);
             }
 
             cbs.reset_generator.call_n(())?.await?;
@@ -284,9 +299,13 @@ pub async fn run_blueprint(
 
         let reader = JsFileReader::new(cbs.get_data.clone(), u64::from(data_len));
         let reader = std::io::BufReader::with_capacity(chunk_size, reader);
-        let decoder = ImageFrameData::new(reader, &args.image_args, get_next_frame.clone())?;
-        let generator = FrameData::new(decoder, &args.image_args, on_frame.clone())?
-            .with_progress_message("Processing Frame");
+        let generator = FrameData::new(
+            reader,
+            &args.image_args,
+            get_next_frame.clone(),
+            on_frame.clone(),
+        )?
+        .with_progress_message("Processing Frame");
 
         frame_data = Some(generator.with_palette(palette));
     }
@@ -356,7 +375,7 @@ pub fn set_comb_pos_data(data_json: &[u8]) -> Result<(), JsError> {
 #[derive(tsify::Tsify, serde::Deserialize)]
 pub struct EncodeGifCallbacks {
     #[serde(with = "serde_wasm_bindgen::preserve")]
-    pub get_next_frame: image_processing::GetJsFrameCallback,
+    pub get_next_frame: image_processing::frame_data::GetJsFrameCallback,
 
     #[serde(with = "serde_wasm_bindgen::preserve")]
     pub on_chunk: ts::TsFn<fn(js_sys::Uint8Array) -> ts::TsFut>,
@@ -369,7 +388,7 @@ pub struct EncodeGifCallbacks {
 pub async fn encode_gif(
     args: JsValue, callbacks: tsify::Ts<EncodeGifCallbacks>,
 ) -> Result<(), JsError> {
-    use image_processing::{GetJsFrameCallback, encode_gif};
+    use image_processing::frame_data::GetJsFrameCallback;
     use util::JsReflectGetSet as _;
 
     let args: models::EncodeGifArgs = serde_wasm_bindgen::from_value(args)?;
@@ -377,7 +396,7 @@ pub async fn encode_gif(
     let on_chunk = callbacks
         .reflect_get::<js_sys::Function<fn(js_sys::Uint8Array) -> ts::TsFut>>("onChunk")?;
 
-    encode_gif(get_next_frame, on_chunk, &args).await?;
+    image_processing::image_util::encode_gif(get_next_frame, on_chunk, &args).await?;
 
     Ok(())
 }

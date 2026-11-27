@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io;
 use std::pin::Pin;
 use std::rc::Rc;
@@ -7,11 +8,13 @@ use glam::{DVec2, UVec2, uvec2};
 use image::{GenericImageView as _, imageops};
 use wasm_bindgen::JsValue;
 
+use super::image_util;
 use crate::constants::DEFAULT_FRAME_DELAY;
+use crate::hash::IdentityHasherBuilder;
 use crate::palette::ColorPalettePixelSlice;
 use crate::prelude::*;
 use crate::util::{format_duration, wasm_shared_memory};
-use crate::{GetNextFrameArgs, constants, image_util, ts};
+use crate::{GetNextFrameArgs, constants, ts};
 
 pub type FrameCallback = dyn for<'a> Fn(
     &'a image::DynamicImage,
@@ -21,7 +24,7 @@ pub type GetJsFrameCallback =
     js_sys::Function<fn(ts::TsIntoRust<GetNextFrameArgs>) -> ts::TsFut<JsValue>>;
 
 pub struct FrameData<'a> {
-    args:         &'a ImageArgs,
+    args:         ImageArgs,
     curr_n_us:    u64,
     decoder:      FrameDecoder<'a>,
     fps_timer:    f64,
@@ -36,75 +39,128 @@ pub struct FrameData<'a> {
     progress_msg: String,
     prev_img:     Option<(RC<image::DynamicImage>, u64)>,
 }
-impl FrameData<'_> {
-    /// Returns the dimensions of the output frames.
-    ///
-    /// Note: This is truncated from the raw dimensions instead of rounded.
-    #[must_use]
-    #[inline]
-    pub const fn out_dim(&self) -> UVec2 {
-        let dim = self.out_dim_raw();
-        if self.args.rotate.swaps_dimensions() {
-            uvec2(dim.y, dim.x)
-        } else {
-            dim
-        }
-    }
-
-    #[must_use]
-    #[inline]
-    const fn out_dim_raw(&self) -> UVec2 {
-        let (w, h) = crate::image_util::resize_dimensions(
-            self.in_dim.x,
-            self.in_dim.y,
-            self.out_dim_raw.x.round() as u32,
-            self.out_dim_raw.y.round() as u32,
-            false,
-        );
-        uvec2(w, h)
-    }
-
-    #[must_use]
-    #[inline]
-    pub const fn curr_total_frames(&self) -> usize {
-        self.in_frame_i
-    }
-
-    #[must_use]
-    #[inline]
-    pub const fn total_frames(&self) -> usize {
-        self.out_n_frames
-    }
-}
 impl<'a> FrameData<'a> {
-    pub fn new(
-        frame_data: ImageFrameData<'a>, image_args: &'a ImageArgs,
+    /// Decodes the provided image data into a vector of frames based on the
+    /// image type.
+    ///
+    /// Supported types: "gif" and "webp".
+    ///
+    /// # Arguments
+    ///
+    /// * `image_data` - A byte slice containing the image data.
+    /// * `image_type` - The type of the image ("gif" or "webp").
+    ///
+    /// # Returns
+    ///
+    /// An iterator of `Frame` objects or a JavaScript error.
+    pub fn new<R: BufReadSeek + 'a>(
+        mut reader: R, args: &ImageArgs, js_next_frame: Option<GetJsFrameCallback>,
         on_frame: Option<Rc<FrameCallback>>,
     ) -> Result<Self, JsError> {
-        #[must_use]
         #[inline]
+        #[must_use]
         const fn expected_output_frames(n_ms: u64, fps: u32) -> usize {
             1 + ((n_ms * fps as u64).div_euclid(1000)) as usize
         }
 
-        let in_dim = frame_data.info.dimensions.ok_or_js_err("Missing dimensions!")?;
-        let scale_factor = (f64::from(image_args.max_size) / f64::from(in_dim.x))
-            .min(f64::from(image_args.max_size) / f64::from(in_dim.y))
+        let mut args = args.clone();
+        let state = match args.mime_type.as_str() {
+            "image/gif" => {
+                let mut options = gif::DecodeOptions::new();
+                options.set_color_output(gif::ColorOutput::Indexed);
+
+                let decoder = options.read_info(Box::new(reader) as Box<dyn BufReadSeek>)?;
+                let screen = gif_dispose::Screen::new_decoder(&decoder);
+
+                FrameDecoderState::Gif(Box::new(GifData { decoder, screen }))
+            },
+            "image/webp" => {
+                struct FramesInner<R: BufReadSeek> {
+                    decoder: image_webp::WebPDecoder<R>,
+                    current: u32,
+                }
+                impl<R: BufReadSeek> Iterator for FramesInner<R> {
+                    type Item = Result<DynamicFrame, JsError>;
+
+                    fn next(&mut self) -> Option<Self::Item> {
+                        if self.current == self.decoder.num_frames() {
+                            return None;
+                        }
+
+                        self.current += 1;
+                        let (width, height) = self.decoder.dimensions();
+                        let (img, delay) = if self.decoder.has_alpha() {
+                            let mut img = image::RgbaImage::new(width, height);
+                            match self.decoder.read_frame(&mut img) {
+                                Ok(delay) => (image::DynamicImage::ImageRgba8(img), delay),
+                                Err(image_webp::DecodingError::NoMoreFrames) => return None,
+                                Err(e) => return Some(Err(js_err!("{e}"))),
+                            }
+                        } else {
+                            let mut img = image::RgbImage::new(width, height);
+                            match self.decoder.read_frame(&mut img) {
+                                Ok(delay) => (image::DynamicImage::ImageRgb8(img), delay),
+                                Err(image_webp::DecodingError::NoMoreFrames) => return None,
+                                Err(e) => return Some(Err(js_err!("{e}"))),
+                            }
+                        };
+                        let delay = image::Delay::from_numer_denom_ms(delay, 1);
+                        Some(Ok(DynamicFrame::new(img, delay)))
+                    }
+                }
+
+                let decoder = image_webp::WebPDecoder::new(reader)?;
+                let frames = DynamicFrames::new(Box::new(FramesInner { decoder, current: 0 }));
+                FrameDecoderState::Frames(frames)
+            },
+            t if t.starts_with("image/") || matches!(args.mode, Mode::Static { .. }) => {
+                let use_combs = matches!(args.mode, Mode::Static { combs: true, .. });
+                args.duration = Some(1000.0 * f64::from(use_combs));
+                args.n_frames = Some(1);
+
+                let dim = args.dimensions.ok_or_js_err("No image size")?;
+                let mut data = Vec::new();
+                reader.read_to_end(&mut data)?;
+
+                let img = image::RgbaImage::from_raw(dim.x, dim.y, data)
+                    .ok_or_js_err("buffer length must be width * height * 4")?;
+                let frames = DynamicFrames::new(Box::new(std::iter::once(Ok(DynamicFrame::new(
+                    image::DynamicImage::ImageRgba8(img),
+                    image::Delay::from_numer_denom_ms(0, 1),
+                ))))); // bruh
+                FrameDecoderState::Frames(frames)
+            },
+            t if t.starts_with("video/") => {
+                args.n_frames = None;
+                FrameDecoderState::JsFrames(
+                    js_next_frame.ok_or_js_err("JS next frame must be provided for videos")?,
+                )
+            },
+            t => err_js!("Unsupported image type: '{t}'"),
+        };
+
+        let mut decoder =
+            FrameDecoder::new(state, args.dimensions.ok_or_js_err("Missing dimensions!")?);
+        decoder = decoder.with_use_sparse_decoding((args.target_fps <= 10).then_some(true));
+
+        let in_dim = args.dimensions.ok_or_js_err("Missing dimensions!")?;
+        let scale_factor = (f64::from(args.max_size) / f64::from(in_dim.x))
+            .min(f64::from(args.max_size) / f64::from(in_dim.y))
             .min(1.0);
 
         let mut obj = Self {
-            out_n_frames: match image_args.mode {
+            out_n_frames: match args.mode {
                 Mode::Static { .. } => 1,
                 _ => expected_output_frames(
-                    (frame_data.info.duration.ok_or_js_err("FrameData missing 'duration' field")?
-                        * 1000.0) as u64,
-                    u32::from(image_args.target_fps.max(1)),
+                    (args.duration.ok_or_js_err("FrameData missing 'duration' field")? * 1000.0)
+                        as u64,
+                    u32::from(args.target_fps.max(1)),
                 ),
             },
-            args: image_args,
+            args,
             curr_n_us: 0,
             fps_timer: now_ms(),
-            decoder: frame_data.decoder,
+            decoder,
             in_dim,
             in_frame_i: 0,
             is_first: true,
@@ -120,6 +176,46 @@ impl<'a> FrameData<'a> {
         Ok(obj)
     }
 
+    /// Returns the dimensions of the output frames.
+    ///
+    /// Note: This is truncated from the raw dimensions instead of rounded.
+    #[inline]
+    #[must_use]
+    pub const fn out_dim(&self) -> UVec2 {
+        let dim = self.out_dim_raw();
+        if self.args.rotate.swaps_dimensions() {
+            uvec2(dim.y, dim.x)
+        } else {
+            dim
+        }
+    }
+
+    #[inline]
+    #[must_use]
+    const fn out_dim_raw(&self) -> UVec2 {
+        let (w, h) = image_util::resize_dimensions(
+            self.in_dim.x,
+            self.in_dim.y,
+            self.out_dim_raw.x.round() as u32,
+            self.out_dim_raw.y.round() as u32,
+            false,
+        );
+        uvec2(w, h)
+    }
+
+    #[inline]
+    #[must_use]
+    pub const fn curr_total_frames(&self) -> usize {
+        self.in_frame_i
+    }
+
+    #[inline]
+    #[must_use]
+    pub const fn total_frames(&self) -> usize {
+        self.out_n_frames
+    }
+
+    #[must_use]
     pub fn with_progress_message(mut self, msg: impl Into<String>) -> Self {
         self.progress_msg = msg.into();
         self
@@ -341,110 +437,119 @@ impl<'a> FrameData<'a> {
         };
         image_util::palette_frames_to_outputs(palette, frames)
     }
-}
 
-pub struct ImageFrameData<'a> {
-    decoder: FrameDecoder<'a>,
-    info:    ImageArgs,
-}
-impl<'a> ImageFrameData<'a> {
-    /// Decodes the provided image data into a vector of frames based on the
-    /// image type.
-    ///
-    /// Supported types: "gif" and "webp".
+    /// Picks one palette of `size` colors for all frames. Index 0 is always
+    /// black, since black pixels are left out of the blueprint entirely.
     ///
     /// # Arguments
     ///
-    /// * `image_data` - A byte slice containing the image data.
-    /// * `image_type` - The type of the image ("gif" or "webp").
+    /// * `frames` - The processed frames.
+    /// * `size` - Number of palette entries, including black.
     ///
     /// # Returns
     ///
-    /// An iterator of `Frame` objects or a JavaScript error.
-    pub fn new<R: BufReadSeek + 'a>(
-        mut reader: R, image_args: &'a ImageArgs, js_next_frame: Option<GetJsFrameCallback>,
-    ) -> Result<Self, JsError> {
-        let mut info: ImageArgs = image_args.clone();
-        let state = match image_args.mime_type.as_str() {
-            "image/gif" => {
-                let mut options = gif::DecodeOptions::new();
-                options.set_color_output(gif::ColorOutput::Indexed);
+    /// The palette colors as RGB triples.
+    pub async fn into_palette(mut self, size: u32, speed: i32) -> Result<ColorPalette, JsError> {
+        use imagequant::RGBA;
 
-                let decoder = options.read_info(Box::new(reader) as Box<dyn BufReadSeek>)?;
-                let screen = gif_dispose::Screen::new_decoder(&decoder);
+        let mut attr = imagequant::Attributes::new();
+        attr.set_max_colors(size)?;
+        attr.set_speed(speed)?;
 
-                FrameDecoderState::Gif(Box::new(GifData { decoder, screen }))
-            },
-            "image/webp" => {
-                struct FramesInner<R: BufReadSeek> {
-                    decoder: image_webp::WebPDecoder<R>,
-                    current: u32,
-                }
-                impl<R: BufReadSeek> Iterator for FramesInner<R> {
-                    type Item = Result<DynamicFrame, JsError>;
+        let mut result = {
+            let mut hist = imagequant::Histogram::new(&attr);
 
-                    fn next(&mut self) -> Option<Self::Item> {
-                        if self.current == self.decoder.num_frames() {
-                            return None;
-                        }
-
-                        self.current += 1;
-                        let (width, height) = self.decoder.dimensions();
-                        let (img, delay) = if self.decoder.has_alpha() {
-                            let mut img = image::RgbaImage::new(width, height);
-                            match self.decoder.read_frame(&mut img) {
-                                Ok(delay) => (image::DynamicImage::ImageRgba8(img), delay),
-                                Err(image_webp::DecodingError::NoMoreFrames) => return None,
-                                Err(e) => return Some(Err(js_err!("{e}"))),
-                            }
-                        } else {
-                            let mut img = image::RgbImage::new(width, height);
-                            match self.decoder.read_frame(&mut img) {
-                                Ok(delay) => (image::DynamicImage::ImageRgb8(img), delay),
-                                Err(image_webp::DecodingError::NoMoreFrames) => return None,
-                                Err(e) => return Some(Err(js_err!("{e}"))),
+            while let Some(frame) = self.next().await? {
+                let (w, h) = (frame.width() as usize, frame.height() as usize);
+                let mut qimg = match RC::unwrap_or_clone(frame) {
+                    image::DynamicImage::ImageRgba8(rgba) => {
+                        attr.new_image(bytemuck::cast_slice(&rgba.into_raw()), w, h, 0.0)?
+                    },
+                    image::DynamicImage::ImageLuma8(luma) => {
+                        let pixels = luma.into_raw();
+                        let f = move |row: &mut [std::mem::MaybeUninit<RGBA>], y: usize| {
+                            let start = y * w;
+                            for (x, pixel) in row.iter_mut().enumerate() {
+                                let l = pixels[start + x];
+                                pixel.write(RGBA::new(l, l, l, 255));
                             }
                         };
-                        let delay = image::Delay::from_numer_denom_ms(delay, 1);
-                        Some(Ok(DynamicFrame::new(img, delay)))
-                    }
-                }
 
-                let decoder = image_webp::WebPDecoder::new(reader)?;
-                let frames = DynamicFrames::new(Box::new(FramesInner { decoder, current: 0 }));
-                FrameDecoderState::Frames(frames)
-            },
-            t if t.starts_with("image/") || matches!(image_args.mode, Mode::Static { .. }) => {
-                let use_combs = matches!(image_args.mode, Mode::Static { combs: true, .. });
-                info.duration = Some(1000.0 * f64::from(use_combs));
-                info.n_frames = Some(1);
-
-                let dim = image_args.dimensions.ok_or_js_err("No image size")?;
-                let mut data = Vec::new();
-                reader.read_to_end(&mut data)?;
-
-                let img = image::RgbaImage::from_raw(dim.x, dim.y, data)
-                    .ok_or_js_err("buffer length must be width * height * 4")?;
-                let frames = DynamicFrames::new(Box::new(std::iter::once(Ok(DynamicFrame::new(
-                    image::DynamicImage::ImageRgba8(img),
-                    image::Delay::from_numer_denom_ms(0, 1),
-                ))))); // bruh
-                FrameDecoderState::Frames(frames)
-            },
-            t if t.starts_with("video/") => {
-                info.n_frames = None;
-                FrameDecoderState::JsFrames(
-                    js_next_frame.ok_or_js_err("JS next frame must be provided for videos")?,
-                )
-            },
-            t => err_js!("Unsupported image type: '{t}'"),
+                        // SAFETY: `Image::new_fn` requires the callback to initialize every
+                        // `MaybeUninit<RGBA>` element in each row before returning. The row
+                        // length is `w`, and `pixels` contains exactly `w * h` elements.
+                        // `y` is a valid row index, so `start + x` is in bounds for every
+                        // pixel written.
+                        unsafe { imagequant::Image::new_fn(&attr, f, w, h, 0.0)? }
+                    },
+                    _ => unreachable!("Expected RGBA8 or LumaA8"),
+                };
+                hist.add_image(&attr, &mut qimg)?;
+            }
+            hist.quantize(&attr)?
         };
+        let mut colors: Box<_> =
+            result.palette_vec().into_iter().map(|c| [c.r, c.g, c.b]).collect();
 
-        let mut decoder =
-            FrameDecoder::new(state, info.dimensions.ok_or_js_err("Missing dimensions!")?);
-        decoder = decoder.with_use_sparse_decoding((image_args.target_fps <= 10).then_some(true));
+        if let Some(darkest) = (0..colors.len()).min_by_key(|&i| {
+            let c = colors[i];
+            c[0].saturating_add(c[1]).saturating_add(c[2])
+        }) {
+            colors.swap(0, darkest);
+        }
 
-        Ok(ImageFrameData { decoder, info })
+        ColorPalette::new(colors)
+    }
+
+    #[crate::perf("")]
+    pub fn into_gif_color_count_map(mut self) -> Result<ColorCountMap, JsError> {
+        let FrameDecoderState::Gif(ref mut decoder) = self.decoder.state else {
+            err_js!("Expected self.decoder to be a GIF decoder!");
+        };
+        let decoder = &mut decoder.decoder;
+        let total_duration = self.args.duration;
+
+        let mut colors: ColorCountMap = HashMap::with_hasher(IdentityHasherBuilder::default());
+        let mut curr_total_duration = 0_u64;
+
+        while let Some(frame) = decoder.read_next_frame()? {
+            let duration_ms = u64::from(frame.delay) * 10; // `frame.delay` is in units of 10ms
+            let transparent = frame.transparent;
+
+            if let Some(total_duration) = total_duration {
+                set_progress(
+                    0.0,
+                    1.0,
+                    curr_total_duration as f64 / (1000.0 * total_duration),
+                    "Finding GIF color palette...",
+                );
+            }
+
+            // let counts = {
+            //     let mut counts = vec![0_u32; 256];
+            //     for &i in frame.buffer.iter() {
+            //         counts[i as usize] += 1;
+            //     }
+            //     counts
+            // };
+
+            let counts = crate::util::u8_histogram_8chunks(&frame.buffer);
+            let palette = decoder.palette()?;
+
+            for (i, count) in counts.into_iter().enumerate() {
+                if count == 0 || transparent == Some(i as u8) {
+                    continue;
+                }
+                let i = i * 3;
+                let rgba = [palette[i], palette[i + 1], palette[i + 2], 255];
+
+                *colors.entry(rgba).or_default() += count;
+            }
+
+            curr_total_duration += duration_ms;
+        }
+
+        Ok(colors)
     }
 }
 
@@ -496,10 +601,11 @@ impl<'a> DynamicFrames<'a> {
     ) -> Self {
         Self { iterator }
     }
-
+}
+impl std::iter::Iterator for DynamicFrames<'_> {
+    type Item = Result<DynamicFrame, JsError>;
     #[inline]
-    #[must_use]
-    pub fn next(&mut self) -> Option<Result<DynamicFrame, JsError>> {
+    fn next(&mut self) -> Option<Self::Item> {
         self.iterator.next()
     }
 }
@@ -508,6 +614,8 @@ struct GifData<'a> {
     decoder: gif::Decoder<Box<dyn BufReadSeek + 'a>>,
     screen:  gif_dispose::Screen,
 }
+
+pub type ColorCountMap = HashMap<[u8; 4], u32, IdentityHasherBuilder>;
 
 #[derive(Clone)]
 struct FrameWithTime(DynamicFrame, u64);
@@ -611,62 +719,4 @@ impl<'a> FrameDecoder<'a> {
             },
         })
     }
-}
-
-pub async fn encode_gif(
-    get_next_frame: GetJsFrameCallback,
-    on_chunk: js_sys::Function<fn(js_sys::Uint8Array) -> ts::TsFut>, args: &EncodeGifArgs,
-) -> Result<(), JsError> {
-    use std::cell::RefCell;
-    use std::rc::Rc;
-
-    use image::codecs::gif::{GifEncoder, Repeat};
-
-    use crate::ioutil::CallbackWriter;
-
-    let promises = Rc::new(const { RefCell::new(Vec::<ts::TsFut>::new()) });
-    let promise_q = Rc::clone(&promises);
-
-    // Custom writer that invokes a callback whenever chunk size is reached.
-    let writer = CallbackWriter::new(|chunk| {
-        let js_promise = on_chunk.call_n((&(&*chunk).into(),));
-        promise_q.borrow_mut().push(js_promise?);
-        Ok(())
-    });
-    let mut writer = std::io::BufWriter::with_capacity(1024 * 1024, writer);
-    let mut encoder = GifEncoder::new_with_speed(&mut writer, i32::from(args.speed));
-    (encoder.set_repeat(Repeat::Infinite))?;
-
-    let in_buf = vec![0_u8; args.dim.element_product() as usize * 4];
-    let flush = async || -> Result<(), JsError> {
-        let pending = std::mem::take(&mut *promises.borrow_mut());
-        for promise in pending {
-            promise.await?;
-        }
-        Ok(())
-    };
-
-    loop {
-        let info: JsVideoFrameData = serde_wasm_bindgen::from_value({
-            let js_args = js_sys::Object::new();
-            js_args.reflect_set("inBuffer", wasm_shared_memory(&in_buf)?)?;
-
-            let js_args: JsValue = js_args.into();
-            get_next_frame.call_n((&js_args.into(),))?.await?
-        })?;
-        if unlikely(info.is_finished) {
-            break;
-        }
-
-        let duration = Duration::from_secs_f64(info.duration.ok_or_js_err("Missing duration")?);
-        let duration = image::Delay::from_saturating_duration(duration);
-        let img = image::RgbaImage::from_raw(args.dim.x, args.dim.y, in_buf.clone())
-            .ok_or_js_err("Invalid RGBA frame dimensions")?;
-        let f = image::Frame::from_parts(img, 0, 0, duration);
-        encoder.encode_frame(f)?;
-
-        flush().await?;
-    }
-
-    Ok(())
 }

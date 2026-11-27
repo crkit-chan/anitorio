@@ -1,0 +1,29 @@
+[package]
+authors = ["Kornel Lesiński <kornel@geekhood.net>", "crkit-chan"]
+name = "gif-dispose"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+description = "Implements GIF disposal method for the gif crate. The gif crate only exposes raw frame data that is not sufficient to render GIFs properly. GIF requires special composing of frames which, as this crate shows, is non-trivial."
+keywords = ["gif", "frames", "animation"]
+documentation = "https://docs.rs/gif-dispose/"
+homepage = "https://lib.rs/gif-dispose"
+repository = "https://github.com/kornelski/image-gif-dispose.git"
+categories = ["multimedia::video", "multimedia::images"]
+version = "6.0.0"
+edition = "2024"
+rust-version = "1.90"
+
+[dependencies]
+gif = { version = "0.14.2", default-features = false, features = ["std"] }
+imgref = "1.12.0"
+rgb = { version = "0.8.52", default-features = false, features = ["bytemuck"] }
+
+[dev-dependencies]
+lodepng = "3.10.1"
+
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
+rustdoc-args = ["--generate-link-to-definition"]
+
+[badges]
+maintenance = { status = "actively-developed" }

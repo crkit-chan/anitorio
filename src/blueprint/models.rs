@@ -103,7 +103,6 @@ impl Blueprint {
 #[derive(
     Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Deserialize, Serialize, Tsify,
 )]
-#[expect(clippy::struct_field_names, reason = "Factorio Lua API")]
 pub struct BlueprintBook {
     pub icons:          Option<Box<[Icon]>>,
     pub active_index:   u32,
@@ -864,18 +863,20 @@ impl DeciderCombinatorOutput {
         }
     }
 
+    #[must_use]
     pub const fn default_constant() -> i32 {
         1
     }
+    #[must_use]
     pub const fn default_copy_count_from_input() -> bool {
         true
     }
 
-    #[expect(clippy::trivially_copy_pass_by_ref, reason = "Use with serde")]
+    #[must_use]
     pub const fn is_default_constant(constant: &i32) -> bool {
         *constant == const { Self::default_constant() }
     }
-    #[expect(clippy::trivially_copy_pass_by_ref, reason = "Use with serde")]
+    #[must_use]
     pub const fn is_default_copy_count_from_input(copy_count_from_input: &bool) -> bool {
         *copy_count_from_input == const { Self::default_copy_count_from_input() }
     }
@@ -1183,15 +1184,25 @@ impl WireConnectorId {
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Tsify)]
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Tsify)]
 pub struct Wires {
     entity_ids:  Vec<[u32; 2]>,
     should_swap: bool, /* We use a flag to determine if we should swap the wires when
                         * serializing / converting to iterator */
     wire_ids:    Vec<u8>,
 }
+impl const Default for Wires {
+    fn default() -> Self {
+        Self {
+            entity_ids:  Vec::new(),
+            should_swap: false,
+            wire_ids:    Vec::new(),
+        }
+    }
+}
 impl Wires {
-    pub fn new() -> Self {
+    #[must_use]
+    pub const fn new() -> Self {
         Self::default()
     }
 
@@ -1203,13 +1214,19 @@ impl Wires {
     }
 
     #[inline]
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.wire_ids.is_empty()
+    }
+
+    #[inline]
     pub fn push(&mut self, wire: [u32; 4]) {
         self.entity_ids.push([wire[0], wire[2]]);
         self.wire_ids.push(WireConnectorId::pack(wire[1] as u8, wire[3] as u8));
     }
 
-    #[must_use]
     #[inline]
+    #[must_use]
     pub fn len(&self) -> usize {
         debug_assert_eq!(
             self.entity_ids.len(),

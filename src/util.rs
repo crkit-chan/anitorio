@@ -26,21 +26,16 @@ pub fn format_duration<T: Into<u128>>(ms: T) -> String {
 /// Checks if the value is the default value for the type.
 #[inline]
 #[must_use]
-pub const fn is_default<T: [const] Default + [const] PartialEq + [const] std::marker::Destruct>(
-    value: &T,
-) -> bool {
+pub const fn is_default<T>(value: &T) -> bool
+where T: [const] Default + [const] PartialEq + [const] std::marker::Destruct {
     value == &T::default()
 }
 
 /// Checks if an Option is None or the default value for the type.
 #[inline]
 #[must_use]
-#[expect(clippy::ref_option, reason = "Use with serde")]
-pub const fn is_none_or_default<
-    T: [const] Default + [const] PartialEq + [const] std::marker::Destruct,
->(
-    value: &Option<T>,
-) -> bool {
+pub const fn is_none_or_default<T>(value: &Option<T>) -> bool
+where T: [const] Default + [const] PartialEq + [const] std::marker::Destruct {
     if let Some(value) = value.as_ref() {
         return value == &T::default();
     }
@@ -149,4 +144,64 @@ pub fn hash_f64<H: std::hash::Hasher>(value: f64, state: &mut H) {
     };
 
     bits.hash(state);
+}
+
+#[inline]
+#[must_use]
+pub fn u8_histogram_4chunks(data: &[u8]) -> [u32; 256] {
+    let mut h = [[0_u32; 256]; 4];
+
+    let chunks = data.chunks_exact(4);
+    let remainder = chunks.remainder();
+
+    for chunk in chunks {
+        h[0][chunk[0] as usize] += 1;
+        h[1][chunk[1] as usize] += 1;
+        h[2][chunk[2] as usize] += 1;
+        h[3][chunk[3] as usize] += 1;
+    }
+
+    let mut result = [0_u32; 256];
+
+    for i in 0..256 {
+        result[i] = h[0][i] + h[1][i] + h[2][i] + h[3][i];
+    }
+
+    for &byte in remainder {
+        result[byte as usize] += 1;
+    }
+
+    result
+}
+
+#[inline]
+#[must_use]
+pub fn u8_histogram_8chunks(data: &[u8]) -> [u32; 256] {
+    let mut h = [[0_u32; 256]; 8];
+
+    let chunks = data.chunks_exact(8);
+    let remainder = chunks.remainder();
+
+    for chunk in chunks {
+        h[0][chunk[0] as usize] += 1;
+        h[1][chunk[1] as usize] += 1;
+        h[2][chunk[2] as usize] += 1;
+        h[3][chunk[3] as usize] += 1;
+        h[4][chunk[4] as usize] += 1;
+        h[5][chunk[5] as usize] += 1;
+        h[6][chunk[6] as usize] += 1;
+        h[7][chunk[7] as usize] += 1;
+    }
+
+    let mut result = [0_u32; 256];
+
+    for i in 0..256 {
+        result[i] = h[0][i] + h[1][i] + h[2][i] + h[3][i] + h[4][i] + h[5][i] + h[6][i] + h[7][i];
+    }
+
+    for &byte in remainder {
+        result[byte as usize] += 1;
+    }
+
+    result
 }
