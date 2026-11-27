@@ -72,12 +72,7 @@ pub fn generate_lamps(
                 let frame =
                     frame.ok_or_js_err("StaticImage without combintors requires a frame")?;
                 let p = frame.get_pixel(c as u32, r as u32);
-                lamp = lamp.with_color(Color {
-                    r: f64::from(p[0]) / 255.0,
-                    g: f64::from(p[1]) / 255.0,
-                    b: f64::from(p[2]) / 255.0,
-                    a: f64::from(p[3]) / 255.0,
-                });
+                lamp = lamp.with_color(Color::from_rgba8(p.0));
             } else {
                 let sig = &signals[index];
                 let grayscale_bits = args.image_args.grayscale_bits;
@@ -97,7 +92,7 @@ pub fn generate_lamps(
                 // prev_ents_n tracks the entity numbers for the rows above
                 // if it's none then we never connected the top row
                 if !matches!(mode, Mode::LampGrid | Mode::Static { timer: false, .. })
-                    && (is_top && (r == 0 || top_left_ent_n.is_none()))
+                    && (is_top && (r == 0 || unlikely(top_left_ent_n.is_none())))
                     && let Some(prev) = prev_ent_n
                 {
                     wires.push([curr_ent_n, WIRE_R, prev, WIRE_R]); // horizontal timing wire

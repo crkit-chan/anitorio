@@ -2,6 +2,7 @@
 #![allow(clippy::struct_field_names, reason = "Factorio Lua API")]
 
 use glam::DVec2;
+use ordered_float::NotNan;
 use serde::{Deserialize, Serialize};
 use tsify::Tsify;
 use wasm_bindgen::prelude::*;
@@ -11,7 +12,7 @@ use crate::blueprint::data::{PrototypeData, with_prototype_data};
 use crate::blueprint::prelude::*;
 use crate::models::RawJsonString;
 use crate::prelude::*;
-use crate::util::{is_default, is_none_or_default};
+use crate::util::{hash_f64, is_default, is_none_or_default};
 
 pub struct ObjectGeneratorMetadata {
     pub wires:      Wires,
@@ -19,7 +20,7 @@ pub struct ObjectGeneratorMetadata {
 }
 
 #[rustfmt::skip]
-#[derive(Tsify, Default, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Deserialize, Serialize, Tsify)]
 pub enum ArithmeticCombinatorParameterOperation {
     #[default]
     #[serde(rename = "*"  )] Mul,
@@ -35,7 +36,9 @@ pub enum ArithmeticCombinatorParameterOperation {
     #[serde(rename = "XOR")] Xor,
 }
 
-#[derive(Tsify, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(
+    Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Deserialize, Serialize, Tsify,
+)]
 pub struct ArithmeticCombinatorParameters {
     /// First signal to use in an operation. If not specified, the second
     /// argument will be the value of ``first_constant``.
@@ -71,7 +74,9 @@ impl ArithmeticCombinatorParameters {
     }
 }
 
-#[derive(Tsify, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(
+    Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Deserialize, Serialize, Tsify,
+)]
 pub struct Blueprint {
     pub blueprint: BlueprintInner,
 }
@@ -95,7 +100,9 @@ impl Blueprint {
     }
 }
 
-#[derive(Tsify, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(
+    Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Deserialize, Serialize, Tsify,
+)]
 #[expect(clippy::struct_field_names, reason = "Factorio Lua API")]
 pub struct BlueprintBook {
     pub icons:          Option<Box<[Icon]>>,
@@ -106,7 +113,9 @@ pub struct BlueprintBook {
     pub version:        Option<u64>,
 }
 
-#[derive(Tsify, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(
+    Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Deserialize, Serialize, Tsify,
+)]
 pub struct BlueprintBookInner {
     pub blueprints: Box<[Blueprint]>,
 }
@@ -184,7 +193,7 @@ macro_rules! blueprint_entity_property {
 }
 
 /// The representation of an entity inside of a blueprint.
-#[derive(Tsify, Clone, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Tsify)]
 pub struct BlueprintEntity {
     /// The entity's unique identifier in the blueprint.
     pub entity_number: u32,
@@ -312,8 +321,33 @@ impl<'de> Deserialize<'de> for BlueprintEntity {
         })
     }
 }
+impl Eq for BlueprintEntity {}
+impl std::hash::Hash for BlueprintEntity {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.entity_number.hash(state);
+        self.signal_ref.hash(state);
+        hash_f64(self.position.x, state);
+        hash_f64(self.position.y, state);
+        self.properties.hash(state);
+    }
+}
+impl PartialOrd for BlueprintEntity {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for BlueprintEntity {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.entity_number
+            .cmp(&other.entity_number)
+            .then_with(|| self.signal_ref.cmp(&other.signal_ref))
+            .then_with(|| self.properties.cmp(&other.properties))
+            .then_with(|| self.position.x.total_cmp(&other.position.x))
+            .then_with(|| self.position.y.total_cmp(&other.position.y))
+    }
+}
 
-#[derive(Tsify, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Deserialize, Serialize, Tsify)]
 pub enum BlueprintEntityProperty {
     AlwaysOn(bool),
     Color(Color),
@@ -327,7 +361,9 @@ pub enum BlueprintEntityProperty {
     PlayerDescription(String),
 }
 
-#[derive(Tsify, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(
+    Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Deserialize, Serialize, Tsify,
+)]
 pub struct BlueprintInner {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -344,7 +380,7 @@ pub struct BlueprintInner {
     pub version:     u64,
 }
 
-#[derive(Tsify, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Deserialize, Tsify)]
 pub struct BlueprintLogisticFilter {
     pub index:      LogisticFilterIndex,
     #[serde(flatten)]
@@ -387,26 +423,97 @@ impl Serialize for BlueprintLogisticFilter {
     }
 }
 
-#[derive(Tsify, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Tsify)]
+#[repr(C)]
 pub struct Color {
     #[serde(default, skip_serializing_if = "is_default")]
-    pub r: f64,
+    pub r: NotNan<f32>,
     #[serde(default, skip_serializing_if = "is_default")]
-    pub g: f64,
+    pub g: NotNan<f32>,
     #[serde(default, skip_serializing_if = "is_default")]
-    pub b: f64,
+    pub b: NotNan<f32>,
     #[serde(
         default = "Color::default_a",
         skip_serializing_if = "Color::is_default_a"
     )]
-    pub a: f64,
+    pub a: NotNan<f32>,
 }
 impl Color {
-    pub const fn default_a() -> f64 {
-        1.0
+    #[inline]
+    #[must_use]
+    #[deprecated(
+        note = "Satisfies the Factorio Lua API. Table of red, green, blue, and alpha float values \
+                between `0` and `1`. Alternatively, values can be from 0-255, they are \
+                interpreted as such if at least one value is `> 1`. Prefer using from_rgba8() for \
+                `u8` values from 0-255 or from_rgba() for f32 values."
+    )]
+    /// Color constructor as per the Factorio Lua API.
+    ///
+    /// Colors are not clamped.
+    ///
+    /// NaN is converted to `0.0`.
+    pub const fn new(mut r: f32, mut g: f32, mut b: f32, a: Option<f32>) -> Self {
+        if r > 1.0 || g > 1.0 || b > 1.0 || matches!(a, Some(a) if a > 1.0) {
+            // Treat all values as 0-255
+            r /= 255.0;
+            g /= 255.0;
+            b /= 255.0;
+
+            Self::from_rgba([r, g, b, if let Some(a) = a { a / 255.0 } else { 0.0 }])
+        } else {
+            // Treat all values as 0.0 - 1.0
+            Self::from_rgba([r, g, b, if let Some(a) = a { a } else { 0.0 }])
+        }
     }
-    pub const fn is_default_a(a: &f64) -> bool {
+
+    #[inline]
+    #[must_use]
+    pub const fn default_a() -> NotNan<f32> {
+        // SAFETY: Garunteed not NaN
+        unsafe { NotNan::new_unchecked(1.0) }
+    }
+
+    #[inline]
+    #[must_use]
+    #[allow(clippy::trivially_copy_pass_by_ref, reason = "serde")]
+    pub fn is_default_a(a: &NotNan<f32>) -> bool {
         (*a - const { Self::default_a() }).abs() < 0.0001
+    }
+
+    #[inline]
+    #[must_use]
+    pub const fn from_rgba(mut rgba: [f32; 4]) -> Self {
+        rgba[0] = if rgba[0].is_nan() { 0.0 } else { rgba[0] };
+        rgba[1] = if rgba[1].is_nan() { 0.0 } else { rgba[1] };
+        rgba[2] = if rgba[2].is_nan() { 0.0 } else { rgba[2] };
+        rgba[3] = if rgba[3].is_nan() { 0.0 } else { rgba[3] };
+
+        // SAFETY: Garunteed not NaN
+        unsafe { Self::from_rgba_unchecked(rgba) }
+    }
+
+    #[inline]
+    #[must_use]
+    pub const unsafe fn from_rgba_unchecked([r, g, b, a]: [f32; 4]) -> Self {
+        Self {
+            // SAFETY: Unchecked
+            r: unsafe { NotNan::new_unchecked(r) },
+            // SAFETY: Unchecked
+            g: unsafe { NotNan::new_unchecked(g) },
+            // SAFETY: Unchecked
+            b: unsafe { NotNan::new_unchecked(b) },
+            // SAFETY: Unchecked
+            a: unsafe { NotNan::new_unchecked(a) },
+        }
+    }
+
+    #[inline]
+    #[must_use]
+    pub const fn from_rgba8([r, g, b, a]: [u8; 4]) -> Self {
+        // SAFETY: Fully safe, can never be NaN
+        unsafe {
+            Self::from_rgba_unchecked([f32::from(r), f32::from(g), f32::from(b), f32::from(a)])
+        }
     }
 
     #[must_use]
@@ -415,11 +522,41 @@ impl Color {
         if hex.len() != 6 {
             return None;
         }
-        let r = f64::from(u8::from_str_radix(&hex[0..2], 16).ok()?) / 255.0;
-        let g = f64::from(u8::from_str_radix(&hex[2..4], 16).ok()?) / 255.0;
-        let b = f64::from(u8::from_str_radix(&hex[4..6], 16).ok()?) / 255.0;
 
-        Some(Self { r, g, b, a: 1.0 })
+        let [r, g, b] = [
+            f32::from(u8::from_str_radix(&hex[0..2], 16).ok()?) / 255.0,
+            f32::from(u8::from_str_radix(&hex[2..4], 16).ok()?) / 255.0,
+            f32::from(u8::from_str_radix(&hex[4..6], 16).ok()?) / 255.0,
+        ];
+
+        // SAFETY: Garunteed safe, f32::from(u8) will never be NaN
+        Some(unsafe { Self::from_rgba_unchecked([r, g, b, 1.0]) })
+    }
+}
+impl<'de> Deserialize<'de> for Color {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum ColorRaw {
+            Array3([f32; 3]),
+            Array4([f32; 4]),
+            Object {
+                r: f32,
+                g: f32,
+                b: f32,
+                #[serde(default)]
+                a: Option<f32>,
+            },
+        }
+
+        let (r, g, b, a) = match ColorRaw::deserialize(deserializer)? {
+            ColorRaw::Array3([r, g, b]) => (r, g, b, None),
+            ColorRaw::Array4([r, g, b, a]) => (r, g, b, Some(a)),
+            ColorRaw::Object { r, g, b, a } => (r, g, b, a),
+        };
+
+        #[allow(deprecated, reason = "Matches Factorio API")]
+        Ok(Self::new(r, g, b, a))
     }
 }
 
@@ -428,7 +565,9 @@ impl Color {
 /// While the API accepts both versions for "less/greater than or equal to" and
 /// "not equal", it'll always return "≥", "≤" or "≠" respectively when reading
 /// them back.
-#[derive(Tsify, Default, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Deserialize, Serialize, Tsify,
+)]
 pub enum ComparatorString {
     /// "equal to"
     #[serde(rename = "=")]
@@ -465,7 +604,7 @@ impl TryFrom<&str> for ComparatorString {
     }
 }
 
-#[derive(Tsify, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Deserialize, Serialize, Tsify)]
 #[serde(untagged)]
 pub enum ControlBehavior {
     ArithmeticCombinator {
@@ -544,7 +683,7 @@ impl const From<CircuitNetworkSelection> for CircuitNetworkSelectionRepr {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct CircuitNetworkSelection(u8);
 impl const Default for CircuitNetworkSelection {
     fn default() -> Self {
@@ -607,7 +746,9 @@ impl CircuitNetworkSelection {
     }
 }
 
-#[derive(Tsify, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Deserialize, Serialize, Tsify,
+)]
 pub enum CompareTypeString {
     #[serde(rename = "and")]
     And,
@@ -629,7 +770,9 @@ impl const From<&str> for CompareTypeString {
     }
 }
 
-#[derive(Tsify, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(
+    Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Deserialize, Serialize, Tsify,
+)]
 pub struct DeciderCombinatorCondition {
     /// Defaults to blank
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -687,7 +830,9 @@ impl DeciderCombinatorCondition {
     }
 }
 
-#[derive(Tsify, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(
+    Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Deserialize, Serialize, Tsify,
+)]
 pub struct DeciderCombinatorOutput {
     /// Specifies a signal to output.
     pub signal:                RC<SignalID>,
@@ -747,7 +892,9 @@ impl DeciderCombinatorOutput {
     }
 }
 
-#[derive(Tsify, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(
+    Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Deserialize, Serialize, Tsify,
+)]
 pub struct DeciderCombinatorParameters {
     /// List of conditions.
     #[serde(default, skip_serializing_if = "is_default")]
@@ -763,7 +910,7 @@ impl DeciderCombinatorParameters {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Default)]
 pub struct DeciderCombinatorCustomParameters {
     pub conditions:  Box<[DeciderCombinatorCondition]>,
     pub indices:     Box<[(usize, i32)]>,
@@ -801,6 +948,35 @@ impl Serialize for DeciderCombinatorCustomParameters {
         state.end()
     }
 }
+impl std::hash::Hash for DeciderCombinatorCustomParameters {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.conditions.hash(state);
+        self.indices.hash(state);
+
+        for s in self.signal_list.iter() {
+            s.get().hash(state);
+        }
+    }
+}
+impl Ord for DeciderCombinatorCustomParameters {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        (self.conditions.cmp(&other.conditions))
+            .then_with(|| self.indices.cmp(&other.indices))
+            .then_with(|| {
+                (self.signal_list.iter().zip(other.signal_list.iter()).find_map(|(a, b)| {
+                    let ordering = a.get().cmp(b.get());
+                    (ordering != std::cmp::Ordering::Equal).then_some(ordering)
+                }))
+                .unwrap_or_else(|| self.signal_list.len().cmp(&other.signal_list.len()))
+            })
+    }
+}
+impl PartialOrd for DeciderCombinatorCustomParameters {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 struct IndexedDeciderCombinatorOutputs<'a> {
     indices:     &'a [(usize, i32)],
     signal_list: &'a [RawJsonString],
@@ -827,7 +1003,9 @@ struct IndexedDeciderCombinatorOutput<'a> {
     constant:              i32,
 }
 
-#[derive(Tsify, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(
+    Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Deserialize, Serialize, Tsify,
+)]
 pub struct Icon {
     pub signal: RC<SignalID>,
     pub index:  u32,
@@ -835,19 +1013,23 @@ pub struct Icon {
 
 pub type LogisticFilterIndex = u16;
 
-#[derive(Tsify, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(
+    Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Deserialize, Serialize, Tsify,
+)]
 pub struct LogisticSection {
     pub index:   u8,
     #[serde(default, skip_serializing_if = "is_default")]
     pub filters: Box<[BlueprintLogisticFilter]>,
 }
-#[derive(Tsify, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(
+    Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Deserialize, Serialize, Tsify,
+)]
 pub struct LogisticSections {
     #[serde(default, skip_serializing_if = "is_default")]
     pub sections: Box<[LogisticSection]>,
 }
 
-#[derive(Tsify, Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Tsify)]
 pub struct SignalID {
     /// The type of the signal. If the type is "item", this will be nil when
     /// reading.
@@ -1001,7 +1183,7 @@ impl WireConnectorId {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Tsify)]
 pub struct Wires {
     entity_ids:  Vec<[u32; 2]>,
     should_swap: bool, /* We use a flag to determine if we should swap the wires when

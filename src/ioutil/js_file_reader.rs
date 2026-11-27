@@ -18,10 +18,15 @@ pub struct JsFileReader {
     size:     u64,
 }
 impl JsFileReader {
+    #[inline]
+    #[must_use]
     pub const fn new(callback: JsFileReaderCallback, size: u64) -> Self {
         Self { callback, pos: 0, size }
     }
-    pub fn reset(&mut self) {
+
+    #[inline]
+    #[allow(unused, reason = "API")]
+    pub const fn reset(&mut self) {
         self.pos = 0;
     }
 }

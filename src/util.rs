@@ -135,3 +135,18 @@ impl<T, E: std::fmt::Debug> ResultJsExt<T, E> for Result<T, E> {
         self.map_err(|e| JsError::new(&format!("{prefix}: {e:?}")))
     }
 }
+
+#[inline]
+pub fn hash_f64<H: std::hash::Hasher>(value: f64, state: &mut H) {
+    use std::hash::Hash as _;
+
+    let bits = if value.is_nan() {
+        const { f64::NAN.to_bits() }
+    } else if value == 0.0 {
+        0
+    } else {
+        value.to_bits()
+    };
+
+    bits.hash(state);
+}

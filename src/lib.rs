@@ -229,15 +229,16 @@ pub async fn run_blueprint(
             .clamp(16 * 1024, 1024 * 1024);
 
         if palette_size > 0 {
-            use image_processing::{color_counts_to_palette, count_gif_colors};
-
             callbacks::set_is_preview(true);
 
             let reader = JsFileReader::new(cbs.get_data.clone(), u64::from(data_len));
             let reader = std::io::BufReader::with_capacity(chunk_size, reader);
 
-            if let Ok(p) = count_gif_colors(reader, args.image_args.duration)
-                .and_then(|colors| color_counts_to_palette(colors, palette_size, shading_speed))
+            // GIFs are stored with each pixel in a frame referring to an index in a 8-bit
+            // list of colors. Using indexed decode will always be faster, since
+            // decoding to RGBA would require decoding the indexes anyway.
+            if let Ok(p) = image_util::count_gif_colors(reader, args.image_args.duration)
+                .and_then(|c| image_util::color_counts_to_palette(c, palette_size, shading_speed))
             {
                 palette = Some(p);
             } else {
@@ -274,9 +275,8 @@ pub async fn run_blueprint(
                 let generator = FrameData::new(decoder, &image_args, on_frame.clone())?
                     .with_progress_message("Scanning colors");
 
-                palette = Some(
-                    image_processing::build_palette(generator, palette_size, shading_speed).await?,
-                );
+                palette =
+                    Some(image_util::build_palette(generator, palette_size, shading_speed).await?);
             }
 
             cbs.reset_generator.call_n(())?.await?;

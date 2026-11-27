@@ -10,11 +10,11 @@ use super::prelude::*;
 use super::timer::generate_timer;
 use crate::blueprint::data::with_prototype_data;
 use crate::callbacks::report_lamp_group;
-use crate::image_processing::{FrameData, color_frame_to_outputs, grayscale_frames_to_outputs};
+use crate::image_processing::FrameData;
 use crate::models::RawJsonString;
 use crate::prelude::*;
 use crate::util::format_duration;
-use crate::{boxed_slice, decider_cond};
+use crate::{boxed_slice, decider_cond, image_util};
 
 /// How many entities to encode in one go. Encoding more entities at once is
 /// faster, but uses more memory.
@@ -610,6 +610,7 @@ impl<'a> BlueprintGenerator<'a> {
         Ok(())
     }
 
+    #[crate::perf("")]
     async fn populate_data(&mut self, writer: &mut impl io::Write) -> Result<(), JsError> {
         let info = self.frame_info.as_mut().ok_or_js_err("Expected frame_info if generate_cbs")?;
 
@@ -637,7 +638,7 @@ impl<'a> BlueprintGenerator<'a> {
                         BlueprintLogisticFilter::new(j as u16 + 1, &signals[sig_i], "==", count)
                     }))
                     .collect::<Result<_, JsError>>()?;
-                    Ok::<_, JsError>(LogisticSection { index: i as u8 + 1, filters })
+                    Ok(LogisticSection { index: i as u8 + 1, filters })
                 }))
                 .collect::<Result<_, JsError>>()?;
                 let sections = LogisticSections { sections };
@@ -663,12 +664,10 @@ impl<'a> BlueprintGenerator<'a> {
 
             let frame = &info.curr_frame;
             let is_last_frame = info.next_frame.is_none();
+            let image_args = &self.args.image_args;
 
             for group_i in 0..n_groups {
-                if matches!(self.args.image_args.mode, Mode::Static {
-                    const_cb: true,
-                    ..
-                }) {
+                if matches!(image_args.mode, Mode::Static { const_cb: true, .. }) {
                     let thresh = 0.60;
                     set_progress(
                         thresh,
@@ -700,15 +699,19 @@ impl<'a> BlueprintGenerator<'a> {
                             .map(|f| f.inner().view(x, y, w, h))
                             .collect::<Box<_>>();
 
-                        frame_sigs = if has_palette {
-                            frame_data.palette_frames_to_outputs(&frames)?
-                        } else {
-                            grayscale_frames_to_outputs(&frames, gray_bits.into())?
+                        frame_sigs = #[crate::perf("Frames to outputs")]
+                        {
+                            if has_palette {
+                                frame_data.palette_frames_to_outputs(&frames)?
+                            } else {
+                                image_util::grayscale_frames_to_outputs(&frames, gray_bits.into())?
+                            }
                         };
 
                         state.frame_buf.clear();
                     } else {
-                        frame_sigs = color_frame_to_outputs(&frame.as_ref().view(x, y, w, h))?;
+                        frame_sigs =
+                            image_util::color_frame_to_outputs(&frame.as_ref().view(x, y, w, h))?;
                     }
                 }
 
