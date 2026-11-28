@@ -79,7 +79,7 @@ pub fn generate_lamps(
                     let p = frame.get_pixel(c as u32, r as u32);
                     let [r, g, b, ..] = p.0;
 
-                    Color::rgb8_to_vec([r, g, b]).into_boxed_slice()
+                    Color::rgb8_to_json_vec([r, g, b]).into_boxed_slice()
                 } else {
                     signals_json[index].get().as_bytes().into()
                 },

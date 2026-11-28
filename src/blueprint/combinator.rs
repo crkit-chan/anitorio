@@ -449,6 +449,8 @@ pub fn generate_combinators(
 
     if bits > 0 {
         {
+            let is_static_const_cb =
+                matches!(args.image_args.mode, Mode::Static { const_cb: true, .. });
             let mut en = BlueprintEntity::new(curr_ent_n, ARI_CB, get_pos(">>"));
             en = en.with_custom_tag(">> comb").with_direction(get_dir(">>"));
             if args.detailed_descriptions {
@@ -459,7 +461,9 @@ pub fn generate_combinators(
             other_ents.push(en.with_control_behavior(ControlBehavior::arithmetic(
                 ArithmeticCombinatorParameters {
                     first_signal:           Some((&VIRTUAL_EACH).into()),
-                    first_signal_networks:  "g".into(),
+                    // If we're generating a static image and using constant combinators,
+                    // use the same output wire colour for input
+                    first_signal_networks:  if is_static_const_cb { "r" } else { "g" }.into(),
                     second_signal:          Some(args.timing_signals["f"].clone()),
                     second_signal_networks: "r".into(),
                     second_constant:        0,

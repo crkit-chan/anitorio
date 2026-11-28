@@ -408,7 +408,7 @@ pub struct BlueprintLampEntity {
 }
 impl BlueprintLampEntity {
     #[inline]
-    pub fn serialize_to_buf(&self, output: &mut Vec<u8>) {
+    pub fn serialize_to_json_vec(&self, output: &mut Vec<u8>) {
         let mut ryu_buf = ryu::Buffer::new();
 
         output.extend_from_slice(br#"{"name":"small-lamp","always_on":true,"entity_number":"#);
@@ -606,7 +606,7 @@ impl Color {
 
     #[inline]
     #[must_use]
-    pub fn serialize_to_vec(&self) -> Vec<u8> {
+    pub fn serialize_to_json_vec(&self) -> Vec<u8> {
         let mut ryu_buf = ryu::Buffer::new();
         let mut output = Vec::<u8>::new();
 
@@ -627,7 +627,7 @@ impl Color {
 
     #[inline]
     #[must_use]
-    pub fn rgb8_to_vec([r, g, b]: [u8; 3]) -> Vec<u8> {
+    pub fn rgb8_to_json_vec([r, g, b]: [u8; 3]) -> Vec<u8> {
         let mut itoa_buf = itoa::Buffer::new();
         let mut output = Vec::<u8>::new();
 
@@ -1287,6 +1287,35 @@ impl SignalID {
                 serde::de::Error::custom(format!("Could not deserialize SignalID: {e:?}"))
             })?;
         Ok((*sig).clone())
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn serialize_to_json_vec(&self) -> Vec<u8> {
+        let name = self.name.as_bytes();
+        let quality = self.quality.as_bytes();
+        let type_ = self.type_.as_bytes();
+
+        let mut buf = Vec::<u8>::new();
+
+        if type_ == b"item" {
+            buf.extend_from_slice(br#"{"name":""#);
+        } else {
+            buf.extend_from_slice(br#"{"type":""#);
+            buf.extend_from_slice(type_);
+            buf.extend_from_slice(br#"","name":""#);
+        }
+
+        buf.extend_from_slice(name);
+
+        if quality != b"normal" {
+            buf.extend_from_slice(br#"","quality":""#);
+            buf.extend_from_slice(quality);
+        }
+
+        buf.extend_from_slice(br#""}"#);
+
+        buf
     }
 }
 impl Serialize for SignalID {

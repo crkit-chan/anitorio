@@ -243,6 +243,7 @@ impl<'a> BlueprintGenerator<'a> {
         }
     }
 
+    #[crate::perf("")]
     fn get_signal_data(args: &BlueprintArgs) -> Result<SignalDataResult, JsError> {
         let mut signals = super::data::with_prototype_data(|data| {
             let mut blacklisted_sigs = data.blacklist_signals.clone();
@@ -278,14 +279,13 @@ impl<'a> BlueprintGenerator<'a> {
         }
         signals.sort_by_key(|s| s.name.contains("parameter")); // Push "parameter" signals to end
 
-        let signals_str = (signals.iter().map(|sig| -> Result<_, JsError> {
-            let s = serde_json::to_string(sig).map_err(|e| {
-                js_err!("Could not convert input signal '{sig:?}' to string: {e:?}")
-            })?;
-            serde_json::value::RawValue::from_string(s)
-                .map_js_err("Could not convert the string into a serde_json::value::RawValue")
+        let signals_str = (signals.iter().map(|sig| {
+            // SAFETY: Output returned from serialize_to_json_vec is valid JSON
+            let json_string = unsafe { String::from_utf8_unchecked(sig.serialize_to_json_vec()) };
+            // SAFETY: Valid JSON
+            unsafe { serde_json::value::RawValue::from_string_unchecked(json_string) }
         }))
-        .collect::<Result<RC<_>, _>>()?;
+        .collect();
 
         Ok((signals, signals_str))
     }
@@ -593,7 +593,7 @@ impl<'a> BlueprintGenerator<'a> {
 
             let mut vec_buf = Vec::<u8>::new();
 
-            #[crate::perf("PLEASE")]
+            #[crate::perf("lamps to json")]
             {
                 for (i, mut en) in grp_lamps.into_iter().enumerate() {
                     if likely(i > 0) {
@@ -604,7 +604,7 @@ impl<'a> BlueprintGenerator<'a> {
 
                     occupied.request(pos); // Request powerage
                     en.position = self.position_transform.apply(pos);
-                    en.serialize_to_buf(&mut vec_buf);
+                    en.serialize_to_json_vec(&mut vec_buf);
 
                     writer.write_all(&vec_buf)?;
 
