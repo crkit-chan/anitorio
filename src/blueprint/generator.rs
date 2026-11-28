@@ -298,7 +298,7 @@ impl<'a> BlueprintGenerator<'a> {
 
     /// Generates the next chunk of the blueprint and writes it to the given
     /// writer.
-    pub async fn next_chunk(&mut self, writer: &mut impl io::Write) -> Result<(), JsError> {
+    pub async fn next_chunk<W: io::Write>(&mut self, writer: &mut W) -> Result<(), JsError> {
         let old_state = self.state;
         match old_state {
             BlueprintState::Start => {
@@ -469,7 +469,7 @@ impl<'a> BlueprintGenerator<'a> {
     }
 
     #[crate::perf("")]
-    fn place_entities(&mut self, writer: &mut impl io::Write) -> Result<(), JsError> {
+    fn place_entities<W: io::Write>(&mut self, writer: &mut W) -> Result<(), JsError> {
         let args = self.args;
         let info = &mut self.frame_info;
         let occupied = &mut self.occupied;
@@ -587,17 +587,17 @@ impl<'a> BlueprintGenerator<'a> {
             }
             prev_top_right_lamp_ent_n = top_right_lamp_ent_n;
 
-            if likely(group_i > 0) {
-                write_to!(writer, b",")?;
-            }
-
             let mut vec_buf = Vec::<u8>::new();
+
+            if group_i > 0 {
+                vec_buf.extend_from_slice(b",");
+            }
 
             #[crate::perf("lamps to json")]
             {
                 for (i, mut en) in grp_lamps.into_iter().enumerate() {
                     if likely(i > 0) {
-                        writer.write_all(b",")?;
+                        vec_buf.extend_from_slice(b",");
                     }
 
                     let pos = en.position;
@@ -606,9 +606,7 @@ impl<'a> BlueprintGenerator<'a> {
                     en.position = self.position_transform.apply(pos);
                     en.serialize_to_json_vec(&mut vec_buf);
 
-                    writer.write_all(&vec_buf)?;
-
-                    vec_buf.clear();
+                    writer.write_all(&std::mem::take(&mut vec_buf))?;
                 }
             }
 
@@ -627,7 +625,7 @@ impl<'a> BlueprintGenerator<'a> {
     }
 
     #[crate::perf("")]
-    async fn populate_data(&mut self, writer: &mut impl io::Write) -> Result<(), JsError> {
+    async fn populate_data<W: io::Write>(&mut self, writer: &mut W) -> Result<(), JsError> {
         let info = self.frame_info.as_mut().ok_or_js_err("Expected frame_info if generate_cbs")?;
 
         let group_data_combs = &mut info.group_data_combs;
@@ -858,7 +856,7 @@ impl<'a> BlueprintGenerator<'a> {
         Ok(())
     }
 
-    fn make_wires(&mut self, writer: &mut impl io::Write) -> Result<(), JsError> {
+    fn make_wires<W: io::Write>(&mut self, writer: &mut W) -> Result<(), JsError> {
         let all_wires = &mut self.entity_data.wires;
 
         if let Some(frame_info) = self.frame_info.take() {
