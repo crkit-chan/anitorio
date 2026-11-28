@@ -41,7 +41,7 @@ pub struct BlueprintArgs {
     pub use_threads:             bool,
 }
 
-#[derive(Tsify, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Tsify, Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImageArgs {
     pub color_palette_size:    u32,
@@ -128,9 +128,10 @@ impl ImageFlip {
     }
 }
 
-#[derive(Tsify, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Tsify, Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Mode {
+    #[default]
     Full,
     Lamps,
     LampGrid,
@@ -153,7 +154,7 @@ pub enum SignalSorting {
     Json,
 }
 
-#[derive(Tsify, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Tsify, Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ResamplingFilter {
     Catrom,
@@ -161,6 +162,7 @@ pub enum ResamplingFilter {
     Lanczos3,
     Nearest,
     Thumbnail,
+    #[default]
     Triangle,
 }
 

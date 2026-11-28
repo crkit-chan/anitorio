@@ -17,7 +17,7 @@ use crate::prelude::*;
 use crate::util::{format_duration, wasm_shared_memory};
 use crate::{GetNextFrameArgs, constants, ts};
 
-const MAX_PREVIEW_FPS: f64 = 60.0;
+const MAX_PREVIEW_FPS: f64 = 65.536; // idk
 
 pub type FrameCallback = dyn for<'a> Fn(
     &'a image::DynamicImage,
@@ -26,6 +26,7 @@ pub type FrameCallback = dyn for<'a> Fn(
 pub type GetJsFrameCallback =
     js_sys::Function<fn(ts::TsIntoRust<GetNextFrameArgs>) -> ts::TsFut<JsValue>>;
 
+#[derive(Default)]
 pub struct FrameData<'a> {
     args:                ImageArgs,
     curr_n_us:           u64,
@@ -41,6 +42,7 @@ pub struct FrameData<'a> {
     out_frame_i:         usize,
     out_n_frames:        usize,
     palette:             Option<ColorPalette>,
+    last_preview_time:   f64,
     progress_msg:        String,
     prev_img:            Option<(RC<image::DynamicImage>, u64)>,
 }
@@ -164,20 +166,15 @@ impl<'a> FrameData<'a> {
                 ),
             },
             args,
-            curr_n_us: 0,
             for_palette,
             fps_timer: now_ms(),
             decoder,
             histogram_generator: for_palette.then(|| Box::new(LzwHistogramGenerator::new())),
             in_dim,
-            in_frame_i: 0,
             is_first: true,
             on_frame,
             out_dim_raw: scale_factor * DVec2::from(in_dim),
-            out_frame_i: 0,
-            palette: None,
-            prev_img: None,
-            progress_msg: String::new(),
+            ..Default::default()
         };
         obj.decoder.dim = obj.out_dim_raw();
 
@@ -254,8 +251,11 @@ impl<'a> FrameData<'a> {
 
             // Flush any remaining frames
             if let Some(frame) = img {
-                if let Some(callback) = self.on_frame.clone() {
+                if let Some(callback) = self.on_frame.clone()
+                    && now_ms() - self.last_preview_time >= 1000.0 / MAX_PREVIEW_FPS
+                {
                     callback(frame.as_ref()).await?;
+                    self.last_preview_time = now_ms();
                 }
                 return Ok(Some(frame));
             } else if self.out_t_us() >= self.curr_n_us {
@@ -574,6 +574,11 @@ enum FrameDecoderState<'a> {
     Gif(Box<GifData<'a>>),
     JsFrames(GetJsFrameCallback),
 }
+impl Default for FrameDecoderState<'_> {
+    fn default() -> Self {
+        Self::Frames(DynamicFrames { iterator: Box::new([].into_iter()) })
+    }
+}
 
 /// A single animation frame
 #[derive(Clone)]
@@ -617,6 +622,7 @@ impl<'a> DynamicFrames<'a> {
 }
 impl std::iter::Iterator for DynamicFrames<'_> {
     type Item = Result<DynamicFrame, JsError>;
+
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         self.iterator.next()
@@ -633,6 +639,7 @@ pub type ColorCountMap = HashMap<[u8; 4], u32, IdentityHasherBuilder>;
 #[derive(Clone)]
 struct FrameWithTime(DynamicFrame, u64);
 
+#[derive(Default)]
 struct FrameDecoder<'a> {
     curr_n_us:           u64,
     dim:                 UVec2,

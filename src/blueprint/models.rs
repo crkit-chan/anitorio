@@ -13,7 +13,7 @@ use crate::blueprint::data::{PrototypeData, with_prototype_data};
 use crate::blueprint::prelude::*;
 use crate::models::RawJsonString;
 use crate::prelude::*;
-use crate::util::{hash_f64, is_default, is_none_or_default, raw_value_from_borrowed};
+use crate::util::{hash_f64, is_default, is_none_or_default};
 
 pub struct ObjectGeneratorMetadata {
     pub wires:      Wires,
@@ -741,11 +741,6 @@ pub enum ControlBehavior {
         color_mode:   i8,
     },
     #[serde(skip_deserializing)]
-    LampCustom {
-        #[serde(flatten)]
-        inner: LampCustomParameters,
-    },
-    #[serde(skip_deserializing)]
     DeciderCombinatorCustom {
         decider_conditions: DeciderCombinatorCustomParameters,
     },
@@ -773,46 +768,6 @@ impl ControlBehavior {
             },
             _ => {},
         }
-    }
-}
-
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct LampCustomParameters {
-    pub use_rgb:     bool,
-    pub signal_json: Box<str>,
-}
-impl LampCustomParameters {
-    const COLOR_MODE_RGB_TRUE: &RawValue = raw_value_from_borrowed("1");
-    const COLOR_MODE_RGB_FALSE: &RawValue = raw_value_from_borrowed("2");
-}
-impl Serialize for LampCustomParameters {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeStruct as _;
-
-        let mut state = serializer.serialize_struct("Lamp", 6)?;
-        state.serialize_field("use_colors", RawValue::TRUE)?;
-
-        // SAFETY: Adapted from an internal method of serde_json::value::RawValue
-        let signal: &RawValue =
-            unsafe { &*(std::ptr::from_ref(self.signal_json.as_ref()) as *const RawValue) };
-
-        if self.use_rgb {
-            state.skip_field("rgb_signal")?;
-
-            state.serialize_field("color_mode", Self::COLOR_MODE_RGB_TRUE)?;
-            state.serialize_field("red_signal", signal)?;
-            state.serialize_field("green_signal", signal)?;
-            state.serialize_field("blue_signal", signal)?;
-        } else {
-            state.skip_field("red_signal")?;
-            state.skip_field("green_signal")?;
-            state.skip_field("blue_signal")?;
-
-            state.serialize_field("color_mode", Self::COLOR_MODE_RGB_FALSE)?;
-            state.serialize_field("rgb_signal", signal)?;
-        }
-
-        state.end()
     }
 }
 

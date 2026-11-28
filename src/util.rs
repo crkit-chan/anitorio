@@ -205,11 +205,3 @@ pub fn u8_histogram_8chunks(data: &[u8]) -> [u32; 256] {
 
     result
 }
-
-pub const RAW_VALUE_COMMA: &serde_json::value::RawValue = raw_value_from_borrowed(",");
-
-pub const fn raw_value_from_borrowed(value: &str) -> &serde_json::value::RawValue {
-    // SAFETY: Uses same pattern serde_json::value::RawValue uses to construct
-    // constants
-    unsafe { std::mem::transmute::<&str, &serde_json::value::RawValue>(value) }
-}
