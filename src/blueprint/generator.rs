@@ -9,6 +9,7 @@ use super::power_pole::PowerPoleOccupied;
 use super::prelude::*;
 use super::timer::generate_timer;
 use crate::blueprint::data::with_prototype_data;
+use crate::blueprint::lamp::GenerateLampsOutput;
 use crate::callbacks::report_lamp_group;
 use crate::image_processing::frame_data::FrameData;
 use crate::image_processing::image_util::{color_frame_to_outputs, grayscale_frames_to_outputs};
@@ -467,12 +468,11 @@ impl<'a> BlueprintGenerator<'a> {
         Ok(output.join(""))
     }
 
+    #[crate::perf("")]
     fn place_entities(&mut self, writer: &mut impl io::Write) -> Result<(), JsError> {
         let args = self.args;
         let info = &mut self.frame_info;
         let occupied = &mut self.occupied;
-        let signals = &mut self.signals;
-        let signals_json = RC::clone(&self.signals_json);
         let ent_data = &mut self.entity_data;
 
         if self.generate_cbs && !matches!(args.image_args.mode, Mode::Static { timer: false, .. }) {
@@ -513,15 +513,16 @@ impl<'a> BlueprintGenerator<'a> {
             let curr_frame =
                 &info.as_ref().ok_or_js_err("Expected frame_info if generate_cbs")?.curr_frame;
 
-            let (
-                mut grp_lamps,
-                ObjectGeneratorMetadata {
-                    wires: mut grp_lamp_wires,
-                    next_ent_n: new_next_ent_n,
-                },
-                io_ents_n,
-            ) = generate_lamps(
-                RC::clone(&signals_json),
+            let GenerateLampsOutput {
+                lamps: grp_lamps,
+                metadata:
+                    ObjectGeneratorMetadata {
+                        wires: mut grp_lamp_wires,
+                        next_ent_n: new_next_ent_n,
+                    },
+                out_ent_ids: io_ents_n,
+            } = generate_lamps(
+                RC::clone(&self.signals_json),
                 uvec2(grp_width, self.dim.y),
                 matches!(self.args.image_args.mode, Mode::Static { combs: false, .. })
                     .then(|| RC::clone(curr_frame)), // Pass image data to lamp generation
@@ -586,18 +587,31 @@ impl<'a> BlueprintGenerator<'a> {
             }
             prev_top_right_lamp_ent_n = top_right_lamp_ent_n;
 
-            for lamp in &grp_lamps {
-                occupied.request(lamp.position); // Request powerage for lamps
-            }
             if likely(group_i > 0) {
                 write_to!(writer, b",")?;
             }
 
-            for en in &mut grp_lamps {
-                Self::transform_entity(self.args, &self.position_transform, en);
+            let mut vec_buf = Vec::<u8>::new();
+
+            #[crate::perf("PLEASE")]
+            {
+                for (i, mut en) in grp_lamps.into_iter().enumerate() {
+                    if likely(i > 0) {
+                        writer.write_all(b",")?;
+                    }
+
+                    let pos = en.position;
+
+                    occupied.request(pos); // Request powerage
+                    en.position = self.position_transform.apply(pos);
+                    en.serialize_to_buf(&mut vec_buf);
+
+                    writer.write_all(&vec_buf)?;
+
+                    vec_buf.clear();
+                }
             }
 
-            write_json_trimmed_to!(writer, &grp_lamps)?;
             ent_data.wires.extend(grp_lamp_wires.into_iter());
         }
 
@@ -606,7 +620,7 @@ impl<'a> BlueprintGenerator<'a> {
                 .ok_or_js_err("Expected frame_info if generate_cbs")?
                 .group_data_combs = group_data_combs.into_boxed_slice();
         }
-        ent_data.ents.sort_by_key(|e| e.entity_number);
+        ent_data.ents.sort_unstable_by_key(|e| e.entity_number);
         self.state = BlueprintState::Data;
 
         Ok(())
@@ -633,7 +647,6 @@ impl<'a> BlueprintGenerator<'a> {
         let mut output_data: Vec<BlueprintEntity> = Vec::new();
 
         let mk_control_behavior = |range: UVec2, indices: Box<[(usize, i32)]>| {
-            #[crate::perf("mk_control_behavior")]
             Ok::<_, JsError>(if matches!(mode, Mode::Static { const_cb: true, .. }) {
                 let sections = (indices.chunks(1000).enumerate().map(|(i, chunk)| {
                     let filters = (chunk.iter().enumerate().map(|(j, &(sig_i, count))| {
@@ -701,7 +714,8 @@ impl<'a> BlueprintGenerator<'a> {
                             .map(|f| f.inner().view(x, y, w, h))
                             .collect::<Box<_>>();
 
-                        frame_sigs = #[crate::perf("Frames to outputs")]
+                        frame_sigs =
+                        // frame_sigs = #[crate::perf("Frames to outputs")]
                         {
                             if has_palette {
                                 frame_data.palette_frames_to_outputs(&frames)?

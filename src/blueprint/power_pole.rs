@@ -20,9 +20,8 @@ impl PowerPoleOccupied {
         let name = name.map_or_else(|| constants::DEFAULT_POWER_POLE_NAME, |v| v.as_ref());
 
         let data = super::data::with_prototype_data(|data| {
-            let Some(p) = data.electric_poles.iter().find(|p| *p.name == *name) else {
-                err_js!("No power pole with name '{name}'!");
-            };
+            let p = data.electric_poles.iter().find(|p| *p.name == *name);
+            let p = p.ok_or_else(|| js_err!("No power pole with name '{name}'!"))?;
             Ok::<_, JsError>(p.clone())
         })?;
         let bounding_box = dvec2(f64::from(data.tile_width), f64::from(data.tile_height));

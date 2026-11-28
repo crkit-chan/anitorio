@@ -1,4 +1,4 @@
-use glam::{DVec2, dvec2};
+use glam::{DVec2, IVec2, dvec2};
 use wasm_bindgen::prelude::*;
 
 pub fn bounding_box_midpoints(min: DVec2, max: DVec2) -> impl Iterator<Item = DVec2> {
@@ -204,4 +204,12 @@ pub fn u8_histogram_8chunks(data: &[u8]) -> [u32; 256] {
     }
 
     result
+}
+
+pub const RAW_VALUE_COMMA: &serde_json::value::RawValue = raw_value_from_borrowed(",");
+
+pub const fn raw_value_from_borrowed(value: &str) -> &serde_json::value::RawValue {
+    // SAFETY: Uses same pattern serde_json::value::RawValue uses to construct
+    // constants
+    unsafe { std::mem::transmute::<&str, &serde_json::value::RawValue>(value) }
 }

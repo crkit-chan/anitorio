@@ -229,7 +229,7 @@ impl<'a> FrameData<'a> {
         self
     }
 
-    #[crate::perf("FrameData::next()")]
+    // #[crate::perf("FrameData::next()")]
     pub async fn next(&mut self) -> Result<Option<RC<image::DynamicImage>>, JsError> {
         let mut img: Option<RC<image::DynamicImage>> = None;
         let use_js_decode = matches!(self.decoder.state, FrameDecoderState::JsFrames { .. });
@@ -329,9 +329,9 @@ impl<'a> FrameData<'a> {
 
     /// Converts the input frame to the target output using the specified
     /// settings.
-    #[crate::perf("")]
+    // #[crate::perf("")]
     pub fn convert_frame(&self, buf: image::DynamicImage) -> Result<image::DynamicImage, JsError> {
-        let mut img = image::DynamicImage::ImageRgba8(buf.to_rgba8());
+        let mut img = image::DynamicImage::ImageRgba8(buf.into_rgba8());
         let out_dim = self.out_dim_raw.round().as_uvec2();
 
         // 1. Apply custom filters.

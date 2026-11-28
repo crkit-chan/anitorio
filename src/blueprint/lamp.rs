@@ -1,16 +1,14 @@
-use std::ops::Not as _;
-
 use glam::{DVec2, UVec2, dvec2};
 
 use super::power_pole::PowerPoleOccupied;
 use super::prelude::*;
 use crate::prelude::*;
 
-type GenerateLampsOutput = (
-    Vec<BlueprintEntity>,
-    ObjectGeneratorMetadata,
-    (Option<u32>, Option<u32>),
-);
+pub struct GenerateLampsOutput {
+    pub lamps:       Vec<BlueprintLampEntity>,
+    pub metadata:    ObjectGeneratorMetadata,
+    pub out_ent_ids: (Option<u32>, Option<u32>),
+}
 
 /// Generates a grid of lamp entities for the blueprint.
 ///
@@ -28,16 +26,17 @@ type GenerateLampsOutput = (
 ///
 /// A tuple with lamp entities, lamp wires, the next entity number, and the
 /// top-right lamp entity.
-#[expect(clippy::needless_pass_by_value, reason = "RC")]
+#[crate::perf("")]
 pub fn generate_lamps(
     signals_json: RC<[RawJsonString]>, grid_dim: UVec2,
     curr_frame: Option<RC<image::DynamicImage>>, occupied: &mut PowerPoleOccupied, base_ent_n: u32,
     start_pos: DVec2, args: &BlueprintArgs,
 ) -> Result<GenerateLampsOutput, JsError> {
-    let mut ents = Vec::new();
+    let mut ents: Vec<BlueprintLampEntity> = Vec::new();
     let mut wires = Wires::new();
     let mut top_left_ent_n: Option<u32> = None;
     let mut top_right_ent_n: Option<u32> = None;
+    let grayscale_bits = args.image_args.grayscale_bits;
 
     // Auto-rotate wires based on image rotation
     let prefer_horizontal_wires =
@@ -60,29 +59,34 @@ pub fn generate_lamps(
             }
 
             let curr_ent_n = get_ent_num(r as u32, c as u32);
-            let mut lamp =
-                BlueprintEntity::new(curr_ent_n, constants::LAMP, pos).with_always_on(true);
             let index = r * grid_dim.x as usize + c;
+            let lamp = BlueprintLampEntity {
+                entity_number: curr_ent_n,
+                mode:          if matches!(args.image_args.mode, Mode::Static { combs: false, .. })
+                {
+                    BlueprintLampEntityMode::Static
+                } else if grayscale_bits > 0 {
+                    BlueprintLampEntityMode::Mode1
+                } else {
+                    BlueprintLampEntityMode::Mode2
+                },
+                position:      pos,
+                json_bytes:    if matches!(args.image_args.mode, Mode::Static { combs: false, .. })
+                {
+                    let frame = curr_frame.as_ref();
+                    let frame =
+                        frame.ok_or_js_err("StaticImage without combintors requires a frame")?;
+                    let p = frame.get_pixel(c as u32, r as u32);
+                    let [r, g, b, ..] = p.0;
+
+                    Color::rgb8_to_vec([r, g, b]).into_boxed_slice()
+                } else {
+                    signals_json[index].get().as_bytes().into()
+                },
+            };
 
             if unlikely(top_right_ent_n.is_none()) {
                 top_right_ent_n = Some(curr_ent_n); // Handle case of only one column
-            }
-
-            if matches!(args.image_args.mode, Mode::Static { combs: false, .. }) {
-                let frame = curr_frame.as_ref();
-                let frame =
-                    frame.ok_or_js_err("StaticImage without combintors requires a frame")?;
-                let p = frame.get_pixel(c as u32, r as u32);
-                lamp = lamp.with_color(Color::from_rgba8(p.0));
-            } else {
-                let sig = &signals_json[index];
-                let grayscale_bits = args.image_args.grayscale_bits;
-                lamp = lamp.with_control_behavior(ControlBehavior::LampCustom {
-                    inner: LampCustomParameters {
-                        signal_json: sig.clone().into(),
-                        use_rgb:     grayscale_bits > 0,
-                    },
-                });
             }
 
             if !matches!(mode, Mode::Static { combs: false, .. }) {
@@ -119,10 +123,13 @@ pub fn generate_lamps(
             top_left_ent_n = prev_ent_n;
         }
     }
-    let output = ObjectGeneratorMetadata {
-        wires,
-        next_ent_n: get_ent_num(grid_dim.y - 1, grid_dim.x - 1) + 1,
-    };
 
-    Ok((ents, output, (top_left_ent_n, top_right_ent_n)))
+    Ok(GenerateLampsOutput {
+        lamps:       ents,
+        metadata:    ObjectGeneratorMetadata {
+            wires,
+            next_ent_n: get_ent_num(grid_dim.y - 1, grid_dim.x - 1) + 1,
+        },
+        out_ent_ids: (top_left_ent_n, top_right_ent_n),
+    })
 }

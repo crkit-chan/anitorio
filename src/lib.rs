@@ -58,11 +58,6 @@ pub async fn init_rayon(n_threads: Option<usize>) -> Result<bool, JsError> {
     }
 }
 
-// #[wasm_bindgen]
-// pub fn run_benchmarks(data: &[u8], iterations: u32) {
-//     benchmark_historagram();
-// }
-
 #[wasm_bindgen]
 pub fn init() {
     console_error_panic_hook::set_once();

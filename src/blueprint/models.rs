@@ -13,7 +13,7 @@ use crate::blueprint::data::{PrototypeData, with_prototype_data};
 use crate::blueprint::prelude::*;
 use crate::models::RawJsonString;
 use crate::prelude::*;
-use crate::util::{hash_f64, is_default, is_none_or_default};
+use crate::util::{hash_f64, is_default, is_none_or_default, raw_value_from_borrowed};
 
 pub struct ObjectGeneratorMetadata {
     pub wires:      Wires,
@@ -251,30 +251,52 @@ impl BlueprintEntity {
 }
 impl Serialize for BlueprintEntity {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeMap as _;
+        use serde::ser::SerializeStruct as _;
 
-        let mut map = serializer.serialize_map(None)?;
-        self.signal_ref.serialize_fields_into_map(&mut map, Some("entity"), false)?;
+        let mut state =
+            serializer.serialize_struct("BlueprintEntity", 4 + self.properties.len())?;
 
-        map.serialize_entry("entity_number", &self.entity_number)?;
-        map.serialize_entry("position", &self.position)?;
+        {
+            let quality = self.signal_ref.quality.as_ref();
+            if quality == DEFAULT_QUALITY {
+                state.skip_field("quality")
+            } else {
+                state.serialize_field("quality", quality)
+            }
+        }?;
+
+        state.serialize_field("name", &self.signal_ref.name)?;
+        state.serialize_field("entity_number", &self.entity_number)?;
+        state.serialize_field("position", &self.position)?;
 
         for property in &self.properties {
             match *property {
-                BlueprintEntityProperty::AlwaysOn(ref v) => map.serialize_entry("always_on", v),
-                BlueprintEntityProperty::Color(ref v) => map.serialize_entry("color", v),
+                BlueprintEntityProperty::Direction(ref v) => {
+                    if *v == 0 {
+                        state.skip_field("direction")
+                    } else {
+                        state.serialize_field("direction", v)
+                    }
+                },
                 BlueprintEntityProperty::ControlBehavior(ref v) => {
-                    map.serialize_entry("control_behavior", v)
+                    state.serialize_field("control_behavior", v)
+                },
+                BlueprintEntityProperty::Color(ref v) => state.serialize_field("color", v),
+                BlueprintEntityProperty::AlwaysOn(ref v) => {
+                    if likely(*v) {
+                        state.serialize_field("always_on", RawValue::TRUE)
+                    } else {
+                        state.skip_field("always_on")
+                    }
+                },
+                BlueprintEntityProperty::PlayerDescription(ref v) => {
+                    state.serialize_field("player_description", v)
                 },
                 BlueprintEntityProperty::CustomTag(..) => Ok(()),
-                BlueprintEntityProperty::Direction(ref v) => map.serialize_entry("direction", v),
-                BlueprintEntityProperty::PlayerDescription(ref v) => {
-                    map.serialize_entry("player_description", v)
-                },
             }?;
         }
 
-        map.end()
+        state.end()
     }
 }
 impl<'de> Deserialize<'de> for BlueprintEntity {
@@ -373,6 +395,60 @@ pub struct BlueprintInner {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label_color: Option<Color>,
     pub version:     u64,
+}
+
+/// Low level construct with basic JSON serialisation options that bypasses serde and allows direct JSON serialisation.
+///
+/// Only designed for serialisation.
+pub struct BlueprintLampEntity {
+    pub entity_number: u32,
+    pub position:      DVec2,
+    pub json_bytes:    Box<[u8]>,
+    pub mode:          BlueprintLampEntityMode,
+}
+impl BlueprintLampEntity {
+    #[inline]
+    pub fn serialize_to_buf(&self, output: &mut Vec<u8>) {
+        let mut ryu_buf = ryu::Buffer::new();
+
+        output.extend_from_slice(br#"{"name":"small-lamp","always_on":true,"entity_number":"#);
+        output.extend_from_slice(itoa::Buffer::new().format(self.entity_number).as_bytes());
+        output.extend_from_slice(br#","position":["#);
+        output.extend_from_slice(ryu_buf.format_finite(self.position.x).as_bytes());
+        output.extend_from_slice(b",");
+        output.extend_from_slice(ryu_buf.format_finite(self.position.y).as_bytes());
+
+        match self.mode {
+            BlueprintLampEntityMode::Static => {
+                output.extend_from_slice(br#"],"color":"#);
+                output.extend_from_slice(&self.json_bytes);
+                output.extend_from_slice(b"}");
+            },
+            BlueprintLampEntityMode::Mode1 => {
+                output.extend_from_slice(
+                    br#"],"control_behavior":{"use_colors":true,"color_mode":1,"red_signal":"#,
+                );
+                output.extend_from_slice(&self.json_bytes);
+                output.extend_from_slice(br#","green_signal":"#);
+                output.extend_from_slice(&self.json_bytes);
+                output.extend_from_slice(br#","blue_signal":"#);
+                output.extend_from_slice(&self.json_bytes);
+                output.extend_from_slice(b"}}");
+            },
+            BlueprintLampEntityMode::Mode2 => {
+                output.extend_from_slice(
+                    br#"],"control_behavior":{"use_colors":true,"color_mode":2,"rgb_signal":"#,
+                );
+                output.extend_from_slice(&self.json_bytes);
+                output.extend_from_slice(b"}}");
+            },
+        }
+    }
+}
+pub enum BlueprintLampEntityMode {
+    Static,
+    Mode1,
+    Mode2,
 }
 
 #[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Deserialize, Tsify)]
@@ -527,6 +603,44 @@ impl Color {
         // SAFETY: Garunteed safe, f32::from(u8) will never be NaN
         Some(unsafe { Self::from_rgba_unchecked([r, g, b, 1.0]) })
     }
+
+    #[inline]
+    #[must_use]
+    pub fn serialize_to_vec(&self) -> Vec<u8> {
+        let mut ryu_buf = ryu::Buffer::new();
+        let mut output = Vec::<u8>::new();
+
+        output.extend_from_slice(b"[");
+        output.extend_from_slice(ryu_buf.format_finite(self.r.into_inner()).as_bytes());
+        output.extend_from_slice(b",");
+        output.extend_from_slice(ryu_buf.format_finite(self.g.into_inner()).as_bytes());
+        output.extend_from_slice(b",");
+        output.extend_from_slice(ryu_buf.format_finite(self.b.into_inner()).as_bytes());
+
+        if self.a != 1.0 {
+            output.extend_from_slice(b",");
+            output.extend_from_slice(ryu_buf.format_finite(self.a.into_inner()).as_bytes());
+        }
+        output.extend_from_slice(b"]");
+        output
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn rgb8_to_vec([r, g, b]: [u8; 3]) -> Vec<u8> {
+        let mut itoa_buf = itoa::Buffer::new();
+        let mut output = Vec::<u8>::new();
+
+        output.extend_from_slice(b"[");
+        output.extend_from_slice(itoa_buf.format(r).as_bytes());
+        output.extend_from_slice(b",");
+        output.extend_from_slice(itoa_buf.format(g).as_bytes());
+        output.extend_from_slice(b",");
+        output.extend_from_slice(itoa_buf.format(b).as_bytes());
+        output.extend_from_slice(b"]");
+
+        output
+    }
 }
 impl<'de> Deserialize<'de> for Color {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -668,35 +782,34 @@ pub struct LampCustomParameters {
     pub signal_json: Box<str>,
 }
 impl LampCustomParameters {
-    const COLOR_MODE_RGB_TRUE: &'static RawValue =
-        // SAFETY: Uses same pattern serde_json::value::RawValue uses to construct constants
-        unsafe { std::mem::transmute::<&str, &RawValue>("1") };
-
-    const COLOR_MODE_RGB_FALSE: &'static RawValue =
-        // SAFETY: Uses same pattern serde_json::value::RawValue uses to construct constants
-        unsafe { std::mem::transmute::<&str, &RawValue>("2") };
+    const COLOR_MODE_RGB_TRUE: &RawValue = raw_value_from_borrowed("1");
+    const COLOR_MODE_RGB_FALSE: &RawValue = raw_value_from_borrowed("2");
 }
 impl Serialize for LampCustomParameters {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeMap as _;
+        use serde::ser::SerializeStruct as _;
 
-        let mut state = serializer.serialize_map(None)?;
-        state.serialize_entry("use_colors", RawValue::TRUE)?;
+        let mut state = serializer.serialize_struct("Lamp", 6)?;
+        state.serialize_field("use_colors", RawValue::TRUE)?;
 
         // SAFETY: Adapted from an internal method of serde_json::value::RawValue
         let signal: &RawValue =
             unsafe { &*(std::ptr::from_ref(self.signal_json.as_ref()) as *const RawValue) };
 
         if self.use_rgb {
-            state.serialize_entry("color_mode", Self::COLOR_MODE_RGB_TRUE)?;
+            state.skip_field("rgb_signal")?;
 
-            state.serialize_entry("red_signal", signal)?;
-            state.serialize_entry("green_signal", signal)?;
-            state.serialize_entry("blue_signal", signal)?;
+            state.serialize_field("color_mode", Self::COLOR_MODE_RGB_TRUE)?;
+            state.serialize_field("red_signal", signal)?;
+            state.serialize_field("green_signal", signal)?;
+            state.serialize_field("blue_signal", signal)?;
         } else {
-            state.serialize_entry("color_mode", Self::COLOR_MODE_RGB_FALSE)?;
+            state.skip_field("red_signal")?;
+            state.skip_field("green_signal")?;
+            state.skip_field("blue_signal")?;
 
-            state.serialize_entry("rgb_signal", signal)?;
+            state.serialize_field("color_mode", Self::COLOR_MODE_RGB_FALSE)?;
+            state.serialize_field("rgb_signal", signal)?;
         }
 
         state.end()
@@ -1145,6 +1258,19 @@ impl SignalID {
             map.serialize_entry("quality", &self.quality)?;
         }
         map.serialize_entry("name", &self.name)
+    }
+
+    #[inline]
+    fn serialize_fields_into_struct<S: serde::ser::SerializeStruct>(
+        &self, state: &mut S, default_type: Option<&str>, always_include_quality: bool,
+    ) -> Result<(), S::Error> {
+        if default_type.is_none_or(|t| t != self.type_.as_ref()) {
+            state.serialize_field("type", &self.type_)?;
+        }
+        if always_include_quality || self.quality.as_ref() != DEFAULT_QUALITY {
+            state.serialize_field("quality", &self.quality)?;
+        }
+        state.serialize_field("name", &self.name)
     }
 
     #[inline]

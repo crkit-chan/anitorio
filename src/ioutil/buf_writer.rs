@@ -28,6 +28,7 @@ impl<F: FnMut(Vec<u8>) -> Result<(), JsValue>> BufWriter<F> {
     }
 }
 impl<F: FnMut(Vec<u8>) -> Result<(), JsValue>> Write for BufWriter<F> {
+    #[inline]
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         match self.writer {
             BufWriterState::Callback(ref mut w) => w.write(buf),
@@ -35,6 +36,7 @@ impl<F: FnMut(Vec<u8>) -> Result<(), JsValue>> Write for BufWriter<F> {
         }
     }
 
+    #[inline]
     fn flush(&mut self) -> io::Result<()> {
         match self.writer {
             BufWriterState::Callback(ref mut w) => w.flush(),

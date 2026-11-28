@@ -104,6 +104,7 @@ pub struct GenerateCombinatorsOutput {
 /// (``other_entities``, first connection entity, target output entity).
 ///
 /// Does not populate combinators with data.
+#[crate::perf("")]
 pub fn generate_combinators(
     base_ent_n: u32, start_pos: DVec2, max_cols_per_grp: u32, args: &BlueprintArgs,
     occupied: &PowerPoleOccupied, palette_colors: Option<&ColorPalettePixelSlice>,
