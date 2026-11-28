@@ -161,28 +161,40 @@ pub fn color_frame_to_outputs(
     }
 }
 
-pub fn lzw_histogram(data: &[u8]) -> Result<[u32; 256], weezl::LzwError> {
-    // gif crate prefixes the compressed data with the minimum code size.
-    let (&min_code_size, mut input) = data.split_first().unwrap();
-
-    let mut decoder = LzwDecoder::new(BitOrder::Lsb, min_code_size);
-    let mut counts = [0_u32; 256];
-    let mut output = [0_u8; 8192];
-
-    loop {
-        let result = decoder.decode_bytes(input, &mut output);
-        input = &input[result.consumed_in..];
-
-        for &index in &output[..result.consumed_out] {
-            counts[index as usize] += 1;
-        }
-
-        if matches!(result.status?, LzwStatus::Done | LzwStatus::NoProgress) {
-            break;
-        }
+pub struct LzwHistogramGenerator {
+    counts: [u32; 256],
+    output: [u8; 8192],
+}
+impl LzwHistogramGenerator {
+    #[inline]
+    #[must_use]
+    pub const fn new() -> Self {
+        Self { counts: [0_u32; 256], output: [0_u8; 8192] }
     }
 
-    Ok(counts)
+    pub fn decode_bytes(&mut self, data: &[u8]) -> Result<[u32; 256], weezl::LzwError> {
+        // gif crate prefixes the compressed data with the minimum code size.
+        let (&min_code_size, mut input) = data.split_first().ok_or(weezl::LzwError::InvalidCode)?;
+        let mut decoder = LzwDecoder::new(BitOrder::Lsb, min_code_size);
+
+        self.counts.fill(0);
+        self.output.fill(0);
+
+        loop {
+            let result = decoder.decode_bytes(input, &mut self.output);
+            input = &input[result.consumed_in..];
+
+            for &index in &self.output[..result.consumed_out] {
+                self.counts[index as usize] += 1;
+            }
+
+            if matches!(result.status?, LzwStatus::Done | LzwStatus::NoProgress) {
+                break;
+            }
+        }
+
+        Ok(self.counts)
+    }
 }
 
 pub async fn encode_gif(

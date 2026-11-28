@@ -11,6 +11,7 @@ use wasm_bindgen::JsValue;
 use super::image_util;
 use crate::constants::DEFAULT_FRAME_DELAY;
 use crate::hash::IdentityHasherBuilder;
+use crate::image_processing::image_util::LzwHistogramGenerator;
 use crate::palette::ColorPalettePixelSlice;
 use crate::prelude::*;
 use crate::util::{format_duration, wasm_shared_memory};
@@ -24,21 +25,22 @@ pub type GetJsFrameCallback =
     js_sys::Function<fn(ts::TsIntoRust<GetNextFrameArgs>) -> ts::TsFut<JsValue>>;
 
 pub struct FrameData<'a> {
-    args:         ImageArgs,
-    curr_n_us:    u64,
-    decoder:      FrameDecoder<'a>,
-    for_palette:  bool,
-    fps_timer:    f64,
-    in_dim:       UVec2,
-    in_frame_i:   usize,
-    is_first:     bool,
-    on_frame:     Option<Rc<FrameCallback>>,
-    out_dim_raw:  DVec2,
-    out_frame_i:  usize,
-    out_n_frames: usize,
-    palette:      Option<ColorPalette>,
-    progress_msg: String,
-    prev_img:     Option<(RC<image::DynamicImage>, u64)>,
+    args:                ImageArgs,
+    curr_n_us:           u64,
+    decoder:             FrameDecoder<'a>,
+    for_palette:         bool,
+    fps_timer:           f64,
+    histogram_generator: Option<Box<LzwHistogramGenerator>>,
+    in_dim:              UVec2,
+    in_frame_i:          usize,
+    is_first:            bool,
+    on_frame:            Option<Rc<FrameCallback>>,
+    out_dim_raw:         DVec2,
+    out_frame_i:         usize,
+    out_n_frames:        usize,
+    palette:             Option<ColorPalette>,
+    progress_msg:        String,
+    prev_img:            Option<(RC<image::DynamicImage>, u64)>,
 }
 impl<'a> FrameData<'a> {
     /// Decodes the provided image data into a vector of frames based on the
@@ -164,6 +166,7 @@ impl<'a> FrameData<'a> {
             for_palette,
             fps_timer: now_ms(),
             decoder,
+            histogram_generator: for_palette.then(|| Box::new(LzwHistogramGenerator::new())),
             in_dim,
             in_frame_i: 0,
             is_first: true,
@@ -532,9 +535,11 @@ impl<'a> FrameData<'a> {
             }
 
             // Efficiently compute the number of occurences of each colour index
-            let counts = if self.for_palette {
+            let counts = if self.for_palette
+                && let Some(ref mut histogram) = self.histogram_generator
+            {
                 // Decode the rest of the chunks
-                super::image_util::lzw_histogram(&frame.buffer)
+                (histogram.decode_bytes(&frame.buffer))
                     .map_err(|e| js_err!("GIF LZW decoding failed: {e:?}"))?
             } else {
                 crate::util::u8_histogram_8chunks(&frame.buffer)
