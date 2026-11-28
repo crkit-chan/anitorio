@@ -1,6 +1,6 @@
 {
   "rust-analyzer.assist.preferSelf": true,
-  "rust-analyzer.cargo.features": "all",
+  "rust-analyzer.cargo.features": ["default", "kiddo", "perf_timing", "profiling", "release", "threads"],
   "rust-analyzer.cargo.target": "wasm32-unknown-unknown",
   "rust-analyzer.check.command": "clippy",
   "rust-analyzer.rustfmt.extraArgs": [],

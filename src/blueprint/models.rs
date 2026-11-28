@@ -4,6 +4,7 @@
 use glam::DVec2;
 use ordered_float::NotNan;
 use serde::{Deserialize, Serialize};
+use serde_json::value::RawValue;
 use tsify::Tsify;
 use wasm_bindgen::prelude::*;
 
@@ -330,21 +331,16 @@ impl std::hash::Hash for BlueprintEntity {
         self.properties.hash(state);
     }
 }
-impl PartialOrd for BlueprintEntity {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
 impl Ord for BlueprintEntity {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.entity_number
-            .cmp(&other.entity_number)
+        (self.entity_number.cmp(&other.entity_number))
             .then_with(|| self.signal_ref.cmp(&other.signal_ref))
             .then_with(|| self.properties.cmp(&other.properties))
             .then_with(|| self.position.x.total_cmp(&other.position.x))
             .then_with(|| self.position.y.total_cmp(&other.position.y))
     }
 }
+impl_auto_partial_ord!(BlueprintEntity);
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Deserialize, Serialize, Tsify)]
 pub enum BlueprintEntityProperty {
@@ -631,6 +627,11 @@ pub enum ControlBehavior {
         color_mode:   i8,
     },
     #[serde(skip_deserializing)]
+    LampCustom {
+        #[serde(flatten)]
+        inner: LampCustomParameters,
+    },
+    #[serde(skip_deserializing)]
     DeciderCombinatorCustom {
         decider_conditions: DeciderCombinatorCustomParameters,
     },
@@ -658,6 +659,47 @@ impl ControlBehavior {
             },
             _ => {},
         }
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct LampCustomParameters {
+    pub use_rgb:     bool,
+    pub signal_json: Box<str>,
+}
+impl LampCustomParameters {
+    const COLOR_MODE_RGB_TRUE: &'static RawValue =
+        // SAFETY: Uses same pattern serde_json::value::RawValue uses to construct constants
+        unsafe { std::mem::transmute::<&str, &RawValue>("1") };
+
+    const COLOR_MODE_RGB_FALSE: &'static RawValue =
+        // SAFETY: Uses same pattern serde_json::value::RawValue uses to construct constants
+        unsafe { std::mem::transmute::<&str, &RawValue>("2") };
+}
+impl Serialize for LampCustomParameters {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap as _;
+
+        let mut state = serializer.serialize_map(None)?;
+        state.serialize_entry("use_colors", RawValue::TRUE)?;
+
+        // SAFETY: Adapted from an internal method of serde_json::value::RawValue
+        let signal: &RawValue =
+            unsafe { &*(std::ptr::from_ref(self.signal_json.as_ref()) as *const RawValue) };
+
+        if self.use_rgb {
+            state.serialize_entry("color_mode", Self::COLOR_MODE_RGB_TRUE)?;
+
+            state.serialize_entry("red_signal", signal)?;
+            state.serialize_entry("green_signal", signal)?;
+            state.serialize_entry("blue_signal", signal)?;
+        } else {
+            state.serialize_entry("color_mode", Self::COLOR_MODE_RGB_FALSE)?;
+
+            state.serialize_entry("rgb_signal", signal)?;
+        }
+
+        state.end()
     }
 }
 
@@ -972,11 +1014,7 @@ impl Ord for DeciderCombinatorCustomParameters {
             })
     }
 }
-impl PartialOrd for DeciderCombinatorCustomParameters {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
+impl_auto_partial_ord!(DeciderCombinatorCustomParameters);
 
 struct IndexedDeciderCombinatorOutputs<'a> {
     indices:     &'a [(usize, i32)],

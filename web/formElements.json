@@ -270,7 +270,7 @@
     "tooltip": "Enables / disables all most descriptions on combinators (except for the main constant combinator)."
   },
   "fullQualityScanning": {
-    "name": "Fully Quality Scanning",
+    "name": "Full Quality Scanning",
     "type": "checkbox",
     "tooltip": "If enabled, forces the color palette to be generated at full framerate and resolution. If disabled, allows reduced FPS and resolution for scanning.",
     "splash": "Only applicable when using Shades."

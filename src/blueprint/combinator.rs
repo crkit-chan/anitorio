@@ -258,6 +258,7 @@ pub fn generate_combinators(
         }
     }
 
+    #[cfg(feature = "__")]
     if false {
         const SEARCH_RADIUS: i32 = 10;
 

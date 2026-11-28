@@ -30,8 +30,9 @@ type GenerateLampsOutput = (
 /// top-right lamp entity.
 #[expect(clippy::needless_pass_by_value, reason = "RC")]
 pub fn generate_lamps(
-    signals: &[RC<SignalID>], grid_dim: UVec2, curr_frame: Option<RC<image::DynamicImage>>,
-    occupied: &mut PowerPoleOccupied, base_ent_n: u32, start_pos: DVec2, args: &BlueprintArgs,
+    signals_json: RC<[RawJsonString]>, grid_dim: UVec2,
+    curr_frame: Option<RC<image::DynamicImage>>, occupied: &mut PowerPoleOccupied, base_ent_n: u32,
+    start_pos: DVec2, args: &BlueprintArgs,
 ) -> Result<GenerateLampsOutput, JsError> {
     let mut ents = Vec::new();
     let mut wires = Wires::new();
@@ -74,15 +75,13 @@ pub fn generate_lamps(
                 let p = frame.get_pixel(c as u32, r as u32);
                 lamp = lamp.with_color(Color::from_rgba8(p.0));
             } else {
-                let sig = &signals[index];
+                let sig = &signals_json[index];
                 let grayscale_bits = args.image_args.grayscale_bits;
-                lamp = lamp.with_control_behavior(ControlBehavior::Lamp {
-                    use_colors:   true,
-                    color_mode:   if grayscale_bits > 0 { 1 } else { 2 },
-                    red_signal:   (grayscale_bits > 0).then(|| RC::clone(sig)),
-                    green_signal: (grayscale_bits > 0).then(|| RC::clone(sig)),
-                    blue_signal:  (grayscale_bits > 0).then(|| RC::clone(sig)),
-                    rgb_signal:   (grayscale_bits > 0).not().then(|| RC::clone(sig)),
+                lamp = lamp.with_control_behavior(ControlBehavior::LampCustom {
+                    inner: LampCustomParameters {
+                        signal_json: sig.clone().into(),
+                        use_rgb:     grayscale_bits > 0,
+                    },
                 });
             }
 

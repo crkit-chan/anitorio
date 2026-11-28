@@ -233,8 +233,8 @@ impl<'a> BlueprintGenerator<'a> {
                 _ => (),
             }
             match args.image_args.flip {
-                ImageFlip::X if (v + 4).rem_euclid(8) == 0 => v += 8,
-                ImageFlip::Y if v.rem_euclid(8) == 0 => v += 8,
+                ImageFlip::X if (v + 4).is_multiple_of(8) => v += 8,
+                ImageFlip::Y if v.is_multiple_of(8) => v += 8,
                 ImageFlip::Both => v += 8,
                 _ => (),
             }
@@ -472,6 +472,7 @@ impl<'a> BlueprintGenerator<'a> {
         let info = &mut self.frame_info;
         let occupied = &mut self.occupied;
         let signals = &mut self.signals;
+        let signals_json = RC::clone(&self.signals_json);
         let ent_data = &mut self.entity_data;
 
         if self.generate_cbs && !matches!(args.image_args.mode, Mode::Static { timer: false, .. }) {
@@ -520,7 +521,7 @@ impl<'a> BlueprintGenerator<'a> {
                 },
                 io_ents_n,
             ) = generate_lamps(
-                signals,
+                RC::clone(&signals_json),
                 uvec2(grp_width, self.dim.y),
                 matches!(self.args.image_args.mode, Mode::Static { combs: false, .. })
                     .then(|| RC::clone(curr_frame)), // Pass image data to lamp generation

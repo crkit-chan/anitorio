@@ -177,6 +177,7 @@ threads = [
     "image/rayon",
     "imagequant/threads",
 ]
+__ = [] # Utility, this should never be enabled.
 
 
 [patch.crates-io]

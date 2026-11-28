@@ -1,3 +1,7 @@
+// Note: I am very pedantic, I want ALL types to be fully pathed. Hence we shall
+// always specify the full path, prefixed with `::` so that there is zero
+// possibility of the macro accidentally misinterpreting a type.
+
 /// Logs a message to the web console.
 #[allow(unused_macros, reason = "Might not necessarily be used")]
 #[macro_export]
@@ -20,6 +24,16 @@ macro_rules! err_js {
     ($($arg:tt)*) => { return ::std::result::Result::Err(::wasm_bindgen::JsError::new(&::std::format!($($arg)*))) };
 }
 
+#[macro_export]
+macro_rules! impl_auto_partial_ord {
+    ($ty:ty) => {
+        impl ::std::cmp::PartialOrd for $ty {
+            fn partial_cmp(&self, other: &Self) -> ::std::option::Option<::std::cmp::Ordering> {
+                ::std::option::Option::Some(self.cmp(other))
+            }
+        }
+    };
+}
 /// Creates a new ``wasm_bindgen::JsError``.
 ///
 /// Supports variable interpolation using `{}` syntax.
@@ -47,4 +61,4 @@ macro_rules! write_to {
 
 #[allow(unused_imports, reason = "Might not necessarily be used")]
 pub use log;
-pub use {boxed_slice, err_js, js_err, write_json_trimmed_to, write_to};
+pub use {boxed_slice, err_js, impl_auto_partial_ord, js_err, write_json_trimmed_to, write_to};

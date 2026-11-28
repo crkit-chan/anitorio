@@ -17,6 +17,8 @@ use crate::prelude::*;
 use crate::util::{format_duration, wasm_shared_memory};
 use crate::{GetNextFrameArgs, constants, ts};
 
+const MAX_PREVIEW_FPS: f64 = 60.0;
+
 pub type FrameCallback = dyn for<'a> Fn(
     &'a image::DynamicImage,
 ) -> Pin<Box<dyn Future<Output = Result<(), JsError>> + 'a>>;
